@@ -43,3 +43,8 @@ Then wire the outputs into the app-infra layer:
   itself with local state first.
 - The state bucket has `prevent_destroy = true`. Removing it requires editing
   the lifecycle block deliberately.
+- Until this layer is applied **and** `ci_plan_role_arn` / `ci_deploy_role_arn`
+  are registered as the `AWS_PLAN_ROLE_ARN` / `AWS_DEPLOY_ROLE_ARN` repo
+  variables, `cd-infra.yml`'s plan/apply jobs fail at the AWS-credentials step
+  — that is expected, not a regression. `ci.yml`'s `infra` job needs no AWS auth
+  and stays green regardless.

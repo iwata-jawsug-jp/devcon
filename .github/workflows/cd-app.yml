@@ -1,11 +1,12 @@
 name: CD App
 
 # Runs after infra exists. Builds & ships the application:
-#   api -> build image & push to ECR (build) -> run DB migrations as a one-off
-#          Fargate task (migrate) -> force a new ECS deployment (deploy-api)
-#   web -> npm run build, sync dist/ to S3, invalidate CloudFront
-# Migrations run in their own job (gated before the service roll). Auth is
-# GitHub OIDC -> the DEPLOY role (NO long-lived AWS keys).
+#   build      -> build api image & push to ECR (tag = commit SHA)
+#   migrate    -> register a new api task-def revision with that image, then run
+#                 Alembic as a one-off Fargate task on it (gated before the roll)
+#   deploy-api -> roll the ECS service to the new revision
+#   web        -> npm run build, sync dist/ to S3, invalidate CloudFront
+# Auth is GitHub OIDC -> the DEPLOY role (NO long-lived AWS keys).
 on:
   push:
     branches: [main]
@@ -51,9 +52,10 @@ jobs:
           docker build -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" services/api
           docker push "$REGISTRY/$REPOSITORY:$IMAGE_TAG"
 
-  # 2) Dedicated DB migration job: run `alembic upgrade head` as a one-off
-  #    Fargate task inside the VPC (RDS is private), and wait for exit code 0.
-  #    Runs after the image exists and BEFORE the service is rolled.
+  # 2) Register a new task-def revision with the built image, then run DB
+  #    migrations as a one-off Fargate task on it. Gated BEFORE the service roll.
+  #    (ECR tags are IMMUTABLE, so a new revision per build is how the new image
+  #    actually rolls out — `force-new-deployment` alone would not pick it up.)
   migrate:
     needs: build
     runs-on: ubuntu-latest
@@ -61,27 +63,49 @@ jobs:
     permissions:
       id-token: write # OIDC
       contents: read
+    outputs:
+      revision: ${{ steps.reg.outputs.revision }}
     steps:
       - name: Configure AWS credentials (deploy role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Run Alembic migrations (ecs run-task)
+      - name: Login to ECR (for registry URL)
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Register new task definition revision with the built image
+        id: reg
+        env:
+          FAMILY: ${{ vars.ECS_TASK_FAMILY }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          image="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition' > taskdef.json
+          jq --arg IMG "$image" '
+            .containerDefinitions[0].image = $IMG
+            | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+          ' taskdef.json > newdef.json
+          rev=$(aws ecs register-task-definition --cli-input-json file://newdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "revision=$rev" >> "$GITHUB_OUTPUT"
+          echo "registered: $rev"
+      - name: Run Alembic migrations (one-off Fargate task)
         env:
           CLUSTER: ${{ vars.ECS_CLUSTER }}
-          TASK_DEF: ${{ vars.MIGRATION_TASK_DEFINITION }}
+          REV: ${{ steps.reg.outputs.revision }}
           SUBNETS: ${{ vars.PRIVATE_SUBNET_IDS }}
           SG: ${{ vars.APP_SECURITY_GROUP_ID }}
         run: |
           set -euo pipefail
-          task_arn=$(aws ecs run-task \
-            --cluster "$CLUSTER" \
-            --task-definition "$TASK_DEF" \
-            --launch-type FARGATE \
-            --count 1 \
+          task_arn=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$REV" \
+            --launch-type FARGATE --count 1 \
             --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
-            --overrides '{"containerOverrides":[{"name":"migrate","command":["uv","run","alembic","upgrade","head"]}]}' \
+            --overrides '{"containerOverrides":[{"name":"api","command":["uv","run","--no-sync","alembic","upgrade","head"]}]}' \
             --query 'tasks[0].taskArn' --output text)
           echo "migration task: $task_arn"
           aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
@@ -90,7 +114,7 @@ jobs:
           echo "migration exit code: $code"
           test "$code" = "0"
 
-  # 3) Roll the ECS service onto the new image (only after migrations succeed).
+  # 3) Roll the ECS service onto the new revision (only after migrations succeed).
   deploy-api:
     needs: migrate
     runs-on: ubuntu-latest
@@ -104,12 +128,17 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Force new ECS deployment
+      - name: Roll the ECS service to the new revision
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          SERVICE: ${{ vars.ECS_SERVICE }}
+          REV: ${{ needs.migrate.outputs.revision }}
         run: |
-          aws ecs update-service \
-            --cluster "${{ vars.ECS_CLUSTER }}" \
-            --service "${{ vars.ECS_SERVICE }}" \
-            --force-new-deployment
+          set -euo pipefail
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$REV" >/dev/null
+          aws ecs wait services-stable --cluster "$CLUSTER" --service "$SERVICE"
+          echo "service rolled to $REV"
 
   web:
     runs-on: ubuntu-latest

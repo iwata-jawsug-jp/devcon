@@ -92,10 +92,11 @@ Workflows live in `.github/workflows/`. CI mirrors the Makefile / pre-commit gat
   - infra: `terraform fmt -check` → `init -backend=false` → validate → tflint → checkov + trivy
 - `cd-infra.yml`: `terraform plan` on PR (posted as a comment); `apply` only on merge to
   main, gated by a protected GitHub Environment (`production`).
-- `cd-app.yml` (runs after infra exists): `build` (push api image to ECR) → `migrate`
-  (dedicated job: `alembic upgrade head` as a one-off Fargate task inside the VPC, gated
-  before the roll) → `deploy-api` (roll the ECS service); web builds, syncs `dist/` to S3,
-  invalidates CloudFront.
+- `cd-app.yml` (runs after infra exists): `build` (push api image to ECR, tag=SHA) →
+  `migrate` (dedicated job: register a new task-def revision with that image, then run
+  `alembic upgrade head` as a one-off Fargate task on it, gated before the roll) →
+  `deploy-api` (roll the ECS service to the new revision — ECR tags are IMMUTABLE, so a
+  new revision per build is required); web builds, syncs `dist/` to S3, invalidates CloudFront.
 
 ### CI/CD rules
 
@@ -106,6 +107,31 @@ Workflows live in `.github/workflows/`. CI mirrors the Makefile / pre-commit gat
   hand. (`.claude/settings.json` already gates `terraform apply`/`destroy`/`aws`/`git push`
   for confirmation.)
 - Secrets come from GitHub Environments / SSM / Secrets Manager, never committed.
+
+## Working from issues
+
+When implementing a GitHub issue, follow this loop:
+
+- **Branch from up-to-date `main`**, one branch per issue. Name it `fix/<slug>` for bugs,
+  `feat/<slug>` for features. Don't reuse an unrelated branch (e.g. a sandbox branch).
+- **Record findings as you discover them, in the issue, before fixing them.** Debugging is a
+  loop, not a fixed 3-step flow: comment on (1) start — branch + plan; then for *each* cause
+  you find — especially new root causes CI surfaces mid-fix — post the finding *before*
+  applying its fix, followed by the change + commit SHA; and (3) the verified result at the
+  end. Never batch findings up to record them later. Keep comments short and factual
+  (diffs, run URLs).
+- **One issue → one focused PR.** Link it with `Closes #N` in the PR body (and the commit
+  message). Keep the diff scoped to that issue; spin off unrelated findings into new issues.
+- **An issue isn't done until CI actually passes.** Watch `gh pr checks <pr> --watch` and
+  confirm the relevant jobs go *green* — "the job was triggered" or "it ran" is not success.
+  Read failing logs (`gh run view --job <id> --log-failed`) before claiming a fix works.
+- **Verify locally with the same command CI runs**, not a looser local variant. CI runs
+  `tflint --recursive` (it scans `infra/bootstrap/` too) while `make tf-lint` does not — a
+  green Makefile target is not proof CI is green. When in doubt, mirror the workflow step.
+- **Correct the record when a finding turns out wrong.** If investigation shows an issue's
+  stated root cause is inaccurate, comment the accurate cause rather than leaving it stale.
+- **Never merge to `main` without explicit confirmation.** Leave the PR open and say it's
+  ready; merging is the user's call (see also the gates in `.claude/settings.json`).
 
 ## Infrastructure (infra/)
 

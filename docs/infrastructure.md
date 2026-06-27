@@ -43,14 +43,30 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
   - `*-ci-deploy` … main / `production` 用のデプロイ
   - いずれも assume-role を OIDC の `sub`/`aud` 条件（org/repo）で制限
 
+> **Terraform バージョン要件**: bootstrap 層は `>= 1.9`、アプリ層は `>= 1.11`
+> （S3 ネイティブロック `use_lockfile` のため）。ローカルで bootstrap / マイグレーションを
+> 触る場合は **1.11 以上**を入れておけば両層で通る（CI/CD の workflow は `1.13.0` に統一）。
+
 ```bash
 cd infra/bootstrap
 terraform init                 # ローカル state（backend ブロックなし）
 terraform apply                # 一度だけ
-terraform output               # state バケット名 / ロック表 / ロール ARN を控える
+terraform output               # state バケット名 / ロール ARN を控える
 ```
 
-出力した値を後段（アプリ層の backend hcl、CI のロール ARN 変数）に設定する。
+出力した値を後段に配線する:
+
+- `state_bucket_name` → `infra/env/<env>.backend.hcl`（`use_lockfile = true`）
+- `ci_plan_role_arn` / `ci_deploy_role_arn` → **リポジトリ変数**（`cd-infra.yml` /
+  `cd-app.yml` が参照）。`gh` で登録する例:
+
+```bash
+gh variable set AWS_PLAN_ROLE_ARN   --body "$(terraform -chdir=infra/bootstrap output -raw ci_plan_role_arn)"
+gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform -chdir=infra/bootstrap output -raw ci_deploy_role_arn)"
+```
+
+> **これらを登録するまで `cd-infra.yml` の plan/apply は失敗する**（下記「bootstrap 適用前の
+> CI 挙動」を参照）。
 
 ### 2. アプリ層（`infra/*.tf`・リモート state）
 
@@ -124,7 +140,6 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 | `ci.yml` | PR / main push | 変更パスのみ per-service で検証 |
 | `cd-infra.yml` | PR / main push | Terraform plan（PR）/ apply（main） |
 | `cd-app.yml` | main push / 手動 | アプリのビルド & デプロイ |
-| `publish.yml` | Release 公開 | 公開リポジトリへのミラー（[release.md](release.md)） |
 
 ### `ci.yml`
 
@@ -140,17 +155,31 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 - **main マージ**: `terraform apply`。保護された GitHub Environment `production` で承認ゲート
   （deploy ロール）。
 
+> **bootstrap 適用前の CI 挙動（重要）**
+>
+> `cd-infra.yml` の `plan`（PR）/ `apply`（main）は **OIDC でロールを引き受けてから**動く。
+> `infra/bootstrap/` を一度 apply し、出力したロール ARN を `AWS_PLAN_ROLE_ARN` /
+> `AWS_DEPLOY_ROLE_ARN` に登録するまでは、**AWS 認証ステップ（`configure-aws-credentials`）
+> で必ず失敗する**。これは想定挙動でありリグレッションではない。
+>
+> 一方 `ci.yml` の `infra` ジョブ（fmt / validate / tflint / checkov / trivy）は **AWS 認証
+> 不要**なので、bootstrap 未適用でも green になる。PR で「`infra` は緑なのに `plan` が赤」と
+> なっていたら、まず bootstrap とロール ARN 変数の登録状況を確認すること。
+
 ### `cd-app.yml`（インフラ作成後に有効化）
 
-- **api**: `build`（ECR へ push）→ **`migrate`（専用ジョブ）** → `deploy-api`（ECS 更新）。
-  - `migrate` は RDS が private のため、**api イメージを使った一回限りの Fargate タスク**
-    （`aws ecs run-task`）を VPC 内で起動し `alembic upgrade head` を実行、終了コード 0 を
-    待ってから次へ進む。マイグレーション失敗時はサービスを更新しない。
+- **api**: `build`（ECR へ push, tag=SHA）→ **`migrate`（専用ジョブ）** → `deploy-api`（ECS 更新）。
+  - `migrate` は、ビルドした image で **api タスク定義の新リビジョンを register** し、その
+    リビジョンで **一回限りの Fargate タスク**（`aws ecs run-task`）を private subnet 内に起動して
+    `uv run --no-sync alembic upgrade head` を実行、終了コード 0 を待ってから次へ進む（失敗時は
+    サービスを更新しない）。`--no-sync` は private subnet に egress が無いため。
+  - `deploy-api` は migrate が register した**新リビジョンへ `update-service`** して roll する。
+    ECR は IMMUTABLE タグのため、`force-new-deployment` だけでは新イメージが反映されない。
 - **web**: `npm run build` → `dist/` を S3 へ同期 → CloudFront を無効化。
 
 参照する変数（リポジトリ Variables）: `AWS_DEPLOY_ROLE_ARN` / `ECR_REPOSITORY` /
 `WEB_BUCKET` / `CLOUDFRONT_DISTRIBUTION_ID` / `ECS_CLUSTER` / `ECS_SERVICE` /
-`MIGRATION_TASK_DEFINITION` / `PRIVATE_SUBNET_IDS` / `APP_SECURITY_GROUP_ID`。
+`ECS_TASK_FAMILY` / `PRIVATE_SUBNET_IDS` / `APP_SECURITY_GROUP_ID`。
 
 ### CI/CD のルール
 
@@ -174,5 +203,4 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 ## 関連ドキュメント
 
 - [app-development.md](app-development.md) — api / web のアプリ開発
-- [release.md](release.md) — 公開リポジトリへのリリースフロー
 - [`../CLAUDE.md`](../CLAUDE.md) — アーキテクチャと規約の正

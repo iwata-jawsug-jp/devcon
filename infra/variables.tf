@@ -10,8 +10,8 @@ variable "environment" {
   default     = "dev"
 
   validation {
-    condition     = contains(["dev", "stg", "prod"], var.environment)
-    error_message = "environment must be one of: dev, stg, prod."
+    condition     = contains(["dev", "stg", "prod", "sandbox"], var.environment)
+    error_message = "environment must be one of: dev, stg, prod, sandbox."
   }
 }
 
@@ -21,12 +21,16 @@ variable "aws_region" {
   default     = "ap-northeast-1"
 }
 
+# Reserved for the ECS task definition (api.tf); set by the deploy pipeline. Not yet wired.
+# tflint-ignore: terraform_unused_declarations
 variable "container_image" {
   description = "Container image (repo:tag) for the api service. Set by the deploy pipeline."
   type        = string
   default     = ""
 }
 
+# Reserved for optional ACM/Route53 on the web SPA (web.tf TODO). Not yet wired.
+# tflint-ignore: terraform_unused_declarations
 variable "domain_name" {
   description = "Optional custom domain for the web SPA (e.g. app.example.com). Empty disables ACM/Route53."
   type        = string

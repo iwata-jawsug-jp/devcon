@@ -12,13 +12,18 @@ WORKDIR /app
 # uv for fast, reproducible installs (pinned binary from the official image)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Install dependencies first (cached unless the lockfile changes)
-COPY pyproject.toml uv.lock ./
+# Install dependencies first (cached unless the lockfile changes).
+# README.md is copied too because pyproject.toml references it (project build).
+COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# App source, then install the project itself
+# App source + Alembic config/migrations, then install the project itself.
 COPY src ./src
+COPY alembic.ini ./
+COPY alembic ./alembic
 RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --no-sync: the venv is already built; never reach the network at runtime
+# (Fargate tasks run in private subnets with no internet egress).
+CMD ["uv", "run", "--no-sync", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -9,10 +9,12 @@ locals {
   deploy_subjects = [
     "repo:${local.repo}:ref:refs/heads/main",
     "repo:${local.repo}:environment:production",
+    # Sandbox dev environment: any sandbox/* branch may assume the deploy role so
+    # cd-infra-sandbox can verify `terraform apply`. Isolated by the sandbox guard
+    # (sandbox/* never merges into main). See docs/sandbox.md.
+    "repo:${local.repo}:ref:refs/heads/sandbox/*",
   ]
 }
-
-data "aws_caller_identity" "current" {}
 
 #############################################
 # Terraform remote state: S3 bucket
@@ -215,4 +217,44 @@ resource "aws_iam_role_policy" "ci_deploy_state" {
 resource "aws_iam_role_policy_attachment" "ci_deploy_power" {
   role       = aws_iam_role.ci_deploy.name
   policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
+}
+
+# PowerUserAccess excludes IAM writes, but the app infra creates/manages its own
+# IAM roles (ECS task execution/task roles) and must pass them to ECS. Grant
+# IAM role management scoped to this project's role names + PassRole + the ECS/ELB
+# service-linked roles.
+data "aws_iam_policy_document" "ci_deploy_iam" {
+  statement {
+    sid    = "ManageProjectRoles"
+    effect = "Allow"
+    actions = [
+      "iam:CreateRole",
+      "iam:DeleteRole",
+      "iam:GetRole",
+      "iam:TagRole",
+      "iam:UntagRole",
+      "iam:AttachRolePolicy",
+      "iam:DetachRolePolicy",
+      "iam:ListAttachedRolePolicies",
+      "iam:PutRolePolicy",
+      "iam:DeleteRolePolicy",
+      "iam:GetRolePolicy",
+      "iam:ListRolePolicies",
+      "iam:ListRoleTags",
+      "iam:PassRole",
+    ]
+    resources = ["arn:aws:iam::*:role/${var.project}-*"]
+  }
+  statement {
+    sid       = "ServiceLinkedRoles"
+    effect    = "Allow"
+    actions   = ["iam:CreateServiceLinkedRole"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_deploy_iam" {
+  name   = "manage-project-iam"
+  role   = aws_iam_role.ci_deploy.id
+  policy = data.aws_iam_policy_document.ci_deploy_iam.json
 }

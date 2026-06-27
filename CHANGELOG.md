@@ -7,6 +7,44 @@
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-06-27
+
+### Added
+
+- **アプリ実行基盤**（`infra/`）: **ECS Fargate + ALB**（CloudFront 経由で `/api/*`）、
+  **VPC エンドポイント**（ECR/logs/secretsmanager + S3 gateway、NAT なしで private タスクが
+  pull/secret 取得）、**CloudFront + OAC**（default→S3 SPA, `/api/*`→ALB, SPA エラー応答）、
+  ECS 実行/タスク IAM ロール、api タスク定義（DB を env + Secrets Manager 注入）。3 層アプリを
+  実 AWS にデプロイ可能化。
+- **sandbox 開発環境**: `sandbox/*` 隔離ブランチで CI/CD を実 AWS 検証。専用ワークフロー
+  `ci-sandbox.yml` / `cd-infra-sandbox.yml` / `cd-app-sandbox.yml`（`push:[sandbox/**]`）、
+  `sandbox-guard.yml` + GitHub ルールセットで **`sandbox/*` → 非 sandbox のマージを禁止**、
+- bootstrap の deploy ロールに **プロジェクト限定の IAM 管理権限**（ECS ロール作成 / PassRole /
+  ServiceLinkedRole）を付与。deploy 信頼に `refs/heads/sandbox/*` を追加。
+- 運用ドキュメント: `CLAUDE.md` に「Working from issues」と sandbox ポリシー、
+  `docs/infrastructure.md` に bootstrap 適用前の CI 挙動・ロール ARN 登録手順を追記。
+
+### Changed
+
+- **`cd-app.yml`**: デプロイを「ビルドした image で **新タスク定義リビジョンを登録** →
+  そのリビジョンで migration（`uv run --no-sync alembic upgrade head`）→ サービスを新リビジョンへ
+  roll」に変更（ECR は IMMUTABLE タグのため `force-new-deployment` だけでは新イメージが反映され
+  なかった問題を解消）。変数 `MIGRATION_TASK_DEFINITION` → `ECS_TASK_FAMILY`。
+- **api 設定**（`config.py`）: `API_DB_*` コンポーネントから `database_url` を組み立て
+  （ECS の env + Secrets Manager 注入に対応）。
+- Claude Code `.claude/settings.json`: **read-only な aws を allow**（`terraform apply`/`destroy`・
+  `aws:*` 変更系は `ask` 維持）。
+- CI/CD のワークフローを Terraform `1.13.0` に統一（`required_version >= 1.11` 要件）。
+
+### Fixed
+
+- **CI**: `pull_request` 起動の CI が `changes` ジョブの権限不足（`pull-requests: read` 欠如）で
+  常に失敗していた問題を修正。
+- **CI（infra）**: `trivy-action` の無効タグを `@v0.36.0` に、Terraform バージョン不整合を解消、
+  tflint の未使用宣言（変数 / bootstrap の data source）を整理。
+- **`services/api/Dockerfile` / `.dockerignore`**: `README.md` 除外解除、Alembic 設定/マイグレーション
+  の同梱、`uv run --no-sync`（private subnet に egress が無くてもビルド/マイグレーションが通る）。
+
 ## [0.0.4] - 2026-06-27
 
 ### Added
@@ -83,7 +121,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.1...v0.0.2

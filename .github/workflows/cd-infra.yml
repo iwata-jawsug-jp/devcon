@@ -48,7 +48,7 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.0"
+          terraform_version: "1.13.0"
       - name: Terraform init
         run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
       - name: Terraform plan
@@ -99,7 +99,7 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.0"
+          terraform_version: "1.13.0"
       - name: Terraform init
         run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
       - name: Terraform apply

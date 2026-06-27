@@ -69,3 +69,33 @@ output "db_master_secret_arn" {
   value       = aws_db_instance.postgres.master_user_secret[0].secret_arn
   sensitive   = true
 }
+
+output "ecs_cluster_name" {
+  description = "ECS cluster name (cd-app ECS_CLUSTER)."
+  value       = aws_ecs_cluster.main.name
+}
+
+output "ecs_service_name" {
+  description = "ECS service name (cd-app ECS_SERVICE)."
+  value       = aws_ecs_service.api.name
+}
+
+output "ecs_task_family" {
+  description = "api task definition family (cd-app re-registers revisions of this)."
+  value       = aws_ecs_task_definition.api.family
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID (cd-app CLOUDFRONT_DISTRIBUTION_ID)."
+  value       = aws_cloudfront_distribution.web.id
+}
+
+output "cloudfront_domain_name" {
+  description = "CloudFront domain name (public URL of the app)."
+  value       = aws_cloudfront_distribution.web.domain_name
+}
+
+output "alb_dns_name" {
+  description = "Public DNS name of the api ALB."
+  value       = aws_lb.api.dns_name
+}
