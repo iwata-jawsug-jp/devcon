@@ -1,0 +1,55 @@
+{
+  "name": "devcon",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "remoteEnv": {
+    "PATH": "${containerWorkspaceFolder}/tools/script:${containerEnv:PATH}",
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "moby": true,
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+  "runArgs": ["--privileged"],
+  "mounts": [
+    "type=volume,source=devcon-dind,target=/var/lib/docker",
+    "type=volume,source=devcon-aws,target=/home/vscode/.aws",
+    "type=volume,source=devcon-gh,target=/home/vscode/.config/gh",
+    "type=volume,source=devcon-claude,target=/home/vscode/.claude",
+    "type=volume,source=devcon-history,target=/home/vscode/.history"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "hashicorp.terraform",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "amazonwebservices.aws-toolkit-vscode",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "redhat.vscode-yaml",
+        "bridgecrew.checkov",
+        "aquasecurityofficial.trivy-vulnerability-scanner",
+        "anthropic.claude-code"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "python.defaultInterpreterPath": "/usr/bin/python3.14",
+        "[terraform]": {
+          "editor.defaultFormatter": "hashicorp.terraform",
+          "editor.formatOnSave": true
+        },
+        "[python]": {
+          "editor.formatOnSave": true
+        }
+      }
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/init-persist.sh && terraform -version && tflint --version && trivy --version && checkov --version && aws --version && node --version && python3 --version && uv --version && rg --version | head -1 && gh --version | head -1 && docker --version"
+}
