@@ -6,11 +6,7 @@ resource "aws_cloudwatch_log_group" "app" {
   retention_in_days = 30
 }
 
-# TODO: VPC + networking foundation.
-#   - aws_vpc / subnets (public + private across 2 AZs)
-#   - aws_internet_gateway, NAT (or VPC endpoints to avoid NAT cost)
-#   - route tables + security groups
-# Prefer the official `terraform-aws-modules/vpc/aws` module here.
+# VPC + networking foundation lives in network.tf.
 #
 # TODO: shared IAM roles for ECS (task execution role + task role) once api.tf
 # grows an ECS service.

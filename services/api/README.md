@@ -23,12 +23,32 @@ All routes are served under the `/api` prefix.
 - `GET /api/items/{item_id}` → an item, or 404 if not found
 - `POST /api/items` → 201 with the created item
 
+## Database
+
+The service uses **PostgreSQL** via SQLAlchemy 2.0 (async, `asyncpg`) with Alembic
+migrations.
+
+```bash
+make db-up                          # start local Postgres (docker compose, :5432)
+make migrate                        # alembic upgrade head
+make makemigration m="add x table"  # autogenerate a new revision
+make db-down                        # stop the database
+```
+
+The connection string is read from `API_DATABASE_URL`
+(default `postgresql+asyncpg://app:app@localhost:5432/app`).
+
 ## Quality
 
 ```bash
 uv run pytest                       # tests
 uv run ruff check . && uv run mypy  # lint + type check
 ```
+
+Tests are database-agnostic: they default to an in-memory **SQLite**
+(`sqlite+aiosqlite`) database and create the schema directly from the ORM
+metadata (no Alembic), so they run anywhere. Set `TEST_DATABASE_URL` to a
+Postgres URL (as CI does) to exercise the real engine.
 
 ## Configuration
 

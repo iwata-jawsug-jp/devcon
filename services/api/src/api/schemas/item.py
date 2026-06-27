@@ -1,6 +1,6 @@
 """Item schemas."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ItemBase(BaseModel):
@@ -16,5 +16,7 @@ class ItemCreate(ItemBase):
 
 class Item(ItemBase):
     """An item as stored and returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: int

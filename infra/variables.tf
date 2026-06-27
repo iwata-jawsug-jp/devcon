@@ -32,3 +32,73 @@ variable "domain_name" {
   type        = string
   default     = ""
 }
+
+# --- Networking ---
+
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC."
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+# --- Database (RDS PostgreSQL) ---
+
+variable "db_engine_version" {
+  description = "PostgreSQL engine version (major version is sufficient)."
+  type        = string
+  default     = "16"
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_allocated_storage" {
+  description = "Initial allocated storage for the database, in GiB."
+  type        = number
+  default     = 20
+}
+
+variable "db_max_allocated_storage" {
+  description = "Upper bound for storage autoscaling, in GiB."
+  type        = number
+  default     = 100
+}
+
+variable "db_name" {
+  description = "Name of the initial application database."
+  type        = string
+  default     = "app"
+}
+
+variable "db_username" {
+  description = "Master username for the database."
+  type        = string
+  default     = "app"
+}
+
+variable "db_backup_retention" {
+  description = "Number of days to retain automated backups."
+  type        = number
+  default     = 7
+}
+
+variable "db_multi_az" {
+  description = "Whether to deploy the database across multiple AZs."
+  type        = bool
+  default     = false
+}
+
+variable "db_deletion_protection" {
+  description = "Whether to enable deletion protection on the database."
+  type        = bool
+  default     = true
+}
+
+variable "db_skip_final_snapshot" {
+  description = "Whether to skip the final snapshot when the database is destroyed."
+  type        = bool
+  default     = false
+}

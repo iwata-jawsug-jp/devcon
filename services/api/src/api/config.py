@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     app_name: str = "api"
     environment: str = "dev"
+    database_url: str = "postgresql+asyncpg://app:app@localhost:5432/app"
 
 
 @lru_cache

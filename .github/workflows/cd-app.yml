@@ -1,9 +1,11 @@
 name: CD App
 
 # Runs after infra exists. Builds & ships the application:
-#   api -> build image, push to ECR, force a new ECS deployment
+#   api -> build image & push to ECR (build) -> run DB migrations as a one-off
+#          Fargate task (migrate) -> force a new ECS deployment (deploy-api)
 #   web -> npm run build, sync dist/ to S3, invalidate CloudFront
-# Auth is GitHub OIDC -> the DEPLOY role (NO long-lived AWS keys).
+# Migrations run in their own job (gated before the service roll). Auth is
+# GitHub OIDC -> the DEPLOY role (NO long-lived AWS keys).
 on:
   push:
     branches: [main]
@@ -23,7 +25,8 @@ env:
   AWS_REGION: ap-northeast-1
 
 jobs:
-  api:
+  # 1) Build & push the api image to ECR.
+  build:
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -47,6 +50,60 @@ jobs:
         run: |
           docker build -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" services/api
           docker push "$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+
+  # 2) Dedicated DB migration job: run `alembic upgrade head` as a one-off
+  #    Fargate task inside the VPC (RDS is private), and wait for exit code 0.
+  #    Runs after the image exists and BEFORE the service is rolled.
+  migrate:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    steps:
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Run Alembic migrations (ecs run-task)
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          TASK_DEF: ${{ vars.MIGRATION_TASK_DEFINITION }}
+          SUBNETS: ${{ vars.PRIVATE_SUBNET_IDS }}
+          SG: ${{ vars.APP_SECURITY_GROUP_ID }}
+        run: |
+          set -euo pipefail
+          task_arn=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEF" \
+            --launch-type FARGATE \
+            --count 1 \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"migrate","command":["uv","run","alembic","upgrade","head"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migration task: $task_arn"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
+          code=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migration exit code: $code"
+          test "$code" = "0"
+
+  # 3) Roll the ECS service onto the new image (only after migrations succeed).
+  deploy-api:
+    needs: migrate
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    steps:
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
       - name: Force new ECS deployment
         run: |
           aws ecs update-service \

@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-06-27
+
+### Added
+
+- **データベース層**を追加。`api` は PostgreSQL に永続化する。
+  - アプリ: SQLAlchemy 2.0 async（asyncpg）＋リポジトリパターン、Alembic マイグレーション。
+    in-memory store を `ItemRepository` + `Depends(get_session)` に置換。`API_DATABASE_URL` 設定。
+  - ローカル: `docker-compose.yml`（`postgres:16`）と `make db-up`/`migrate`/`makemigration`。
+  - テスト: `TEST_DATABASE_URL` 未設定時は in-memory SQLite にフォールバック、CI は Postgres
+    service container で `alembic upgrade head` + pytest を実行。
+- **インフラ**: 最小 VPC（2 AZ・public/private subnet・IGW、app/db セキュリティグループ）と
+  **RDS for PostgreSQL**（private subnet・保管時暗号化・非公開・`manage_master_user_password`
+  による Secrets Manager マネージド認証・IAM 認証・Performance Insights）。
+- **CD**: `cd-app.yml` に **マイグレーション専用ジョブ**を追加（`aws ecs run-task` で
+  `alembic upgrade head` を VPC 内の一回限り Fargate タスクとして実行し、成功後にサービス更新）。
+- ドキュメント（`CLAUDE.md` / `docs/app-development.md` / `docs/infrastructure.md`）に DB 節を追記。
+
 ## [0.0.3] - 2026-06-27
 
 ### Changed
@@ -66,7 +83,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/iwata-jawsug-jp/devcon/releases/tag/v0.0.1

@@ -80,6 +80,45 @@ uv run ruff check . && uv run mypy       # lint + 型チェック（strict）
 4. `tests/` に `TestClient` のテストを追加。
 5. フロントで使うなら `make gen-types` で型を再生成（後述）。
 
+### データベース（SQLAlchemy async + Alembic）
+
+`api` は PostgreSQL に永続化する。ローカルは docker-compose の Postgres、本番は RDS。
+
+```
+services/api/
+├── docker-compose 用 DB は リポジトリルートの docker-compose.yml（postgres:16）
+├── src/api/db/
+│   ├── base.py            # DeclarativeBase（Base）
+│   ├── engine.py          # async engine + AsyncSessionLocal
+│   ├── session.py         # get_session()（Depends で AsyncSession を注入）
+│   └── models/item.py     # ORM モデル（Mapped[...] 型付き、ItemModel）
+├── src/api/repositories/  # データアクセス（ItemRepository）
+└── alembic/               # マイグレーション（env.py は非同期, versions/）
+```
+
+開発フロー:
+
+```bash
+make db-up                       # ローカル Postgres 起動（docker-compose）
+make migrate                     # alembic upgrade head（スキーマ適用）
+make makemigration m="add foo"   # モデル変更から差分マイグレーションを自動生成
+cd services/api && uv run pytest # テスト（後述のとおり既定は SQLite）
+```
+
+規約:
+- **ルーターは生 SQL を書かない**。`Depends(get_session)` で `AsyncSession` を受け取り、
+  `repositories/` 経由でアクセスする。
+- ORM モデルは `Mapped[...]` で型付け（mypy strict 準拠）。Pydantic スキーマ（API I/O）と
+  ORM モデルは分離し、レスポンス用 Pydantic は `from_attributes=True`。
+- **スキーマ変更は必ず Alembic マイグレーション**。DB を手で変更しない。
+- DB 接続は `API_DATABASE_URL`（環境変数）。秘密はコミットせず、本番は Secrets Manager。
+
+テスト DB:
+- `TEST_DATABASE_URL` 未設定時は **in-memory SQLite（aiosqlite）** にフォールバック
+  → docker 不要でどこでも実行可能。スキーマは `Base.metadata.create_all` で作成（Alembic は使わない）。
+- **CI は Postgres**（service container）に対して `alembic upgrade head` + pytest を実行し、
+  本番相当のパリティを確認する。
+
 ---
 
 ## フロントエンド: `services/web`（Vite + Vue 3 + TypeScript）

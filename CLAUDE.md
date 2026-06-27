@@ -18,6 +18,9 @@ A monorepo developed inside a Dev Container. It hosts a **web application** plus
   `/api/*` to uvicorn (:8000) — no CORS needed locally. In prod, CloudFront routes
   `/api/*` to the api origin.
 - The browser never calls AWS directly; all data goes through `api`.
+- `api` persists to **PostgreSQL** — RDS in AWS, docker-compose locally — via **SQLAlchemy
+  async (asyncpg)**. Schema changes go through **Alembic** migrations; DB credentials come
+  from Secrets Manager in prod (never from the browser).
 - API contract = FastAPI's OpenAPI schema (`/openapi.json`). Generate the TS client/types
   from it (`openapi-typescript`, `make gen-types`); never hand-write request/response
   types in two places.
@@ -30,6 +33,10 @@ A monorepo developed inside a Dev Container. It hosts a **web application** plus
   - `src/api/main.py` exposes the FastAPI `app`. Routers in `src/api/routers/`,
     Pydantic models in `src/api/schemas/`, settings in `src/api/config.py`
     (`pydantic-settings`). Inject dependencies with `Depends`.
+  - DB layer in `src/api/db/` (SQLAlchemy `Base`, async engine/session, ORM models),
+    data access in `src/api/repositories/`, migrations in `alembic/`. Routers get an
+    `AsyncSession` via `Depends(get_session)` and go through a repository — no raw SQL
+    in handlers.
 - `services/web/` — Vite app (`package.json`, `vite.config.ts`, `tsconfig.json`, `src/`).
   - SFCs use `<script setup lang="ts">`. Components in `src/components/`, route views in
     `src/views/`, router in `src/router/`, generated API client in `src/api/`,
@@ -37,7 +44,8 @@ A monorepo developed inside a Dev Container. It hosts a **web application** plus
 
 ## Run locally
 
-- Both at once: `make dev` (api on :8000, web on :5173).
+- Both at once: `make dev` (starts the Postgres container, then api on :8000, web on :5173).
+- DB only: `make db-up` (Postgres via docker-compose) · apply migrations: `make migrate`.
 - api only: `cd services/api && uv run uvicorn api.main:app --reload`
 - web only: `cd services/web && npm run dev`
 - App: http://localhost:5173 · API docs: http://localhost:8000/docs
@@ -49,11 +57,16 @@ A monorepo developed inside a Dev Container. It hosts a **web application** plus
 - Terraform: `make tf-init`, `make tf-plan`, `make tf-lint`
 - Python: `cd services/api && uv run pytest` (use `uv run`, never bare `python`/`pip`)
 - Web: `cd services/web && npm test` (Vitest unit) · `npm run test:e2e` (Playwright)
+- DB: `make db-up` / `make migrate` (alembic upgrade) / `make makemigration m="..."` (autogenerate)
 
 ## Conventions
 
 - Python: ruff (line length 100, `py312`), mypy strict — keep type hints. Validate request
   and response bodies with Pydantic models, not raw dicts. Async route handlers.
+- Database: SQLAlchemy 2.0 async (`Mapped[...]` typed models), access via repositories, not
+  raw SQL in routers. Every schema change is an Alembic migration (`make makemigration`);
+  never edit the DB by hand. Tests default to in-memory SQLite (aiosqlite) and run against
+  Postgres in CI.
 - Vue/TypeScript: strict mode, ESM, Composition API with `<script setup>`. Type-check with
   **`vue-tsc`** (not `tsc`). Call the API only through the generated client in `src/api/`,
   not ad-hoc `fetch`.
@@ -79,8 +92,10 @@ Workflows live in `.github/workflows/`. CI mirrors the Makefile / pre-commit gat
   - infra: `terraform fmt -check` → `init -backend=false` → validate → tflint → checkov + trivy
 - `cd-infra.yml`: `terraform plan` on PR (posted as a comment); `apply` only on merge to
   main, gated by a protected GitHub Environment (`production`).
-- `cd-app.yml` (runs after infra exists): build & push the api image to ECR + roll the
-  ECS service; build web (`npm run build`), sync `dist/` to S3, invalidate CloudFront.
+- `cd-app.yml` (runs after infra exists): `build` (push api image to ECR) → `migrate`
+  (dedicated job: `alembic upgrade head` as a one-off Fargate task inside the VPC, gated
+  before the roll) → `deploy-api` (roll the ECS service); web builds, syncs `dist/` to S3,
+  invalidates CloudFront.
 
 ### CI/CD rules
 
@@ -102,7 +117,9 @@ Two layers:
 - **app infra** — managed by `cd-infra.yml`, using remote state:
   - web → S3 (private) + CloudFront (OAC) [+ ACM / Route53 for a custom domain]
   - api → ECR + ECS Fargate behind an ALB  (**alt:** Lambda + API Gateway / Function URL)
-  - shared → VPC, CloudWatch logs, task/exec IAM roles
+  - db → RDS for PostgreSQL in private subnets; credentials are RDS-managed in Secrets
+    Manager (`manage_master_user_password`). Reachable only from the app security group.
+  - shared → VPC (public/private subnets), CloudWatch logs, task/exec IAM roles
 
 Remote state per env: `terraform init -backend-config=env/<env>.backend.hcl`; values in
 `infra/env/<env>.tfvars`. Region `ap-northeast-1`. All resources tagged via `default_tags`.

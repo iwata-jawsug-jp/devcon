@@ -7,6 +7,7 @@ API_DIR       := services/api
 WEB_DIR       := services/web
 
 .PHONY: help setup hooks dev gen-types fmt lint test security \
+        db-up db-down migrate makemigration \
         tf-init tf-fmt tf-validate tf-plan tf-lint \
         api-setup api-dev api-test api-lint \
         web-setup web-dev web-build web-lint web-test web-test-e2e
@@ -23,7 +24,7 @@ hooks: ## Install pre-commit git hooks
 	pre-commit install
 
 ## ---- Run locally ----
-dev: ## Run api (:8000) and web (:5173) together
+dev: db-up ## Run api (:8000) and web (:5173) together (starts the db first)
 	@echo "api → http://localhost:8000/docs   web → http://localhost:5173   (Ctrl-C to stop)"
 	@trap 'kill 0' INT TERM EXIT; \
 		( cd $(API_DIR) && uv run uvicorn api.main:app --reload --port 8000 ) & \
@@ -34,6 +35,19 @@ gen-types: ## Generate web TS types from the API OpenAPI schema
 	cd $(API_DIR) && uv run python -c "import json,sys; from api.main import app; json.dump(app.openapi(), sys.stdout)" > $(CURDIR)/$(WEB_DIR)/openapi.json
 	cd $(WEB_DIR) && npx --yes openapi-typescript openapi.json -o src/api/schema.ts
 	rm -f $(WEB_DIR)/openapi.json
+
+## ---- Database ----
+db-up: ## Start the local Postgres container (detached)
+	docker compose up -d db
+
+db-down: ## Stop and remove local containers
+	docker compose down
+
+migrate: ## Apply Alembic migrations (alembic upgrade head)
+	cd $(API_DIR) && uv run alembic upgrade head
+
+makemigration: ## Autogenerate a migration: make makemigration m="message"
+	cd $(API_DIR) && uv run alembic revision --autogenerate -m "$(m)"
 
 ## ---- Aggregate ----
 fmt: tf-fmt ## Format everything
