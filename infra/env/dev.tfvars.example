@@ -1,3 +1,10 @@
+# Copy to env/dev.tfvars (git-ignored) and adjust.
 project     = "devcon"
 environment = "dev"
 aws_region  = "ap-northeast-1"
+
+# Set by the deploy pipeline; leave empty for plan/scaffold.
+container_image = ""
+
+# Optional custom domain for the SPA. Empty disables ACM/Route53.
+domain_name = ""

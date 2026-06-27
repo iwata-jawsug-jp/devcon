@@ -35,6 +35,9 @@ override.tf.json
 terraform.rc
 tfplan
 *.tfplan
+# backend partial-config (per-env); commit the *.example templates only
+*.backend.hcl
+!*.backend.hcl.example
 
 # ---- Python ----
 __pycache__/
@@ -58,3 +61,8 @@ yarn-error.log
 .pnpm-debug.log*
 services/web/dist/
 coverage/
+# ---- Web (Vite / Vitest / Playwright) ----
+services/web/openapi.json
+services/web/playwright-report/
+services/web/test-results/
+services/web/.vite/

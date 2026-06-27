@@ -20,3 +20,15 @@ variable "aws_region" {
   type        = string
   default     = "ap-northeast-1"
 }
+
+variable "container_image" {
+  description = "Container image (repo:tag) for the api service. Set by the deploy pipeline."
+  type        = string
+  default     = ""
+}
+
+variable "domain_name" {
+  description = "Optional custom domain for the web SPA (e.g. app.example.com). Empty disables ACM/Route53."
+  type        = string
+  default     = ""
+}

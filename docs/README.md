@@ -5,5 +5,7 @@
 | ドキュメント | 内容 |
 | --- | --- |
 | [development-environment.md](development-environment.md) | 開発環境（Dev Container）の使い方 — 起動・初回セットアップ・日々のワークフロー・永続化・トラブルシュート |
+| [app-development.md](app-development.md) | アプリ開発 — バックエンド（FastAPI）/ フロントエンド（Vite + Vue 3）の構造・手順・規約・型生成 |
+| [infrastructure.md](infrastructure.md) | インフラ・CI/CD — Terraform 2 層構成（bootstrap / アプリ層）と GitHub Actions・OIDC |
 
 リポジトリ全体の概要と各種初期設定は直下の [`../README.md`](../README.md) を参照。

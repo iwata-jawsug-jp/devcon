@@ -1,0 +1,7 @@
+# Copy to env/prod.backend.hcl (git-ignored) and fill in the bootstrap outputs.
+# Used as: terraform init -backend-config=env/prod.backend.hcl
+bucket         = "REPLACE-ME-tfstate"
+key            = "devcon/prod/terraform.tfstate"
+region         = "ap-northeast-1"
+dynamodb_table = "devcon-tflock"
+encrypt        = true

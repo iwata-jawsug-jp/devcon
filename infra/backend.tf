@@ -1,17 +1,13 @@
-# Remote state backend.
+# Remote state backend (S3 + DynamoDB lock).
 #
-# Uncomment and fill in once the S3 bucket + DynamoDB lock table exist, then run
-# `terraform init -migrate-state`. Values cannot use variables, so set the bucket
-# per environment with `-backend-config` or a `*.backend.hcl` file:
+# This uses a PARTIAL backend config: the block below is intentionally empty.
+# Backend settings cannot reference variables, so concrete per-environment values
+# (bucket / key / region / lock table) live in `env/<env>.backend.hcl` and are
+# supplied at init time:
 #
 #   terraform init -backend-config=env/dev.backend.hcl
 #
-# terraform {
-#   backend "s3" {
-#     bucket         = "REPLACE-ME-tfstate"
-#     key            = "devcon/terraform.tfstate"
-#     region         = "ap-northeast-1"
-#     dynamodb_table = "REPLACE-ME-tflock"
-#     encrypt        = true
-#   }
-# }
+# The S3 bucket + DynamoDB table themselves are created by `infra/bootstrap/`.
+terraform {
+  backend "s3" {}
+}

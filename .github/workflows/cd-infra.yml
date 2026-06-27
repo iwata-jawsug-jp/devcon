@@ -1,0 +1,108 @@
+name: CD Infra
+
+# Terraform plan on PRs (posted as a PR comment), apply on merge to main.
+# Auth is GitHub OIDC -> an IAM role assumed per job (NO long-lived AWS keys):
+#   - PRs assume the read-only PLAN role.
+#   - main assumes the DEPLOY role, gated by the protected `production` env.
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/cd-infra.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/cd-infra.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-infra-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-1
+  # Plan against dev on PRs; the deploy job overrides to prod.
+  TF_ENV: dev
+
+jobs:
+  plan:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC
+      contents: read
+      pull-requests: write # post plan comment
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure AWS credentials (plan role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+      - name: Terraform init
+        run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
+      - name: Terraform plan
+        id: plan
+        run: |
+          terraform plan -no-color -input=false \
+            -var-file=env/${{ env.TF_ENV }}.tfvars \
+            -out=tfplan | tee plan.txt
+      - name: Post plan as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infra/plan.txt', 'utf8');
+            const body = [
+              '#### Terraform Plan (`' + process.env.TF_ENV + '`) 📖',
+              '```hcl',
+              plan.length > 60000 ? plan.slice(0, 60000) + '\n... (truncated)' : plan,
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+  apply:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    # Protected GitHub Environment: required reviewers gate the apply.
+    environment: production
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      TF_ENV: prod
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+      - name: Terraform init
+        run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
+      - name: Terraform apply
+        run: |
+          terraform apply -no-color -input=false -auto-approve \
+            -var-file=env/${{ env.TF_ENV }}.tfvars

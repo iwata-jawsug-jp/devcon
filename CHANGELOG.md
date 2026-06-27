@@ -7,6 +7,27 @@
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-06-27
+
+### Changed
+
+- アプリ構成を刷新: バックエンドを **FastAPI**（uvicorn、`/api` 配下のルーター・
+  Pydantic スキーマ・`pydantic-settings`）に、フロントエンドを **Vite + Vue 3 + TS**
+  （Composition API・vue-router・Pinia・vue-tsc・Vitest・Playwright）に変更。
+- API 契約を OpenAPI に一本化し、フロントの型を `make gen-types` で生成
+  （`services/web/src/api/schema.ts`）。
+- `infra/` を 2 層化: `infra/bootstrap/`（初回・ローカル state: state バケット /
+  DynamoDB ロック / GitHub OIDC / CI IAM ロール）とアプリ層（リモート state、部分 backend）。
+
+### Added
+
+- GitHub Actions の CI/CD: `ci.yml`（パスフィルタ per-service）/ `cd-infra.yml`
+  （PR で plan、main で apply・`production` 環境ゲート）/ `cd-app.yml`
+  （ECR/ECS・S3/CloudFront）。AWS 認証は GitHub OIDC のロール引受で長期キーなし。
+- `services/api/Dockerfile`（CD 用イメージ）と env 別 `tfvars` / `backend.hcl` の `*.example`。
+- 開発ガイド `docs/app-development.md` と `docs/infrastructure.md`。
+- Makefile に `dev` / `gen-types` / `api-dev` / `web-*` ターゲットを追加。
+
 ## [0.0.1] - 2026-06-27
 
 ### Added
@@ -27,5 +48,6 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/iwata-jawsug-jp/devcon/releases/tag/v0.0.1

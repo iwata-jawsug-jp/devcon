@@ -1,3 +1,3 @@
-"""devcon Python application service."""
+"""Backend REST API service."""
 
-__version__ = "0.1.0"
+__version__ = "0.0.1"

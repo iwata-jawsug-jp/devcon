@@ -51,5 +51,5 @@ repos:
     rev: v4.0.0-alpha.8
     hooks:
       - id: prettier
-        files: \.(ts|tsx|js|jsx|json|yaml|yml|md)$
-        exclude: ^(services/web/dist/|.*\.terraform/)
+        files: \.(ts|tsx|js|jsx|mjs|cjs|vue|json|yaml|yml|md|html|css)$
+        exclude: ^(services/web/dist/|services/web/src/api/schema\.ts|services/web/playwright-report/|.*\.terraform/)
