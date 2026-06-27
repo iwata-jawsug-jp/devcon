@@ -8,8 +8,9 @@ the app-infra layer, which depends on the resources created here.
 
 ## What it creates
 
-- S3 bucket for Terraform **remote state** (versioned, SSE, public access blocked).
-- DynamoDB table for Terraform **state locking** (hash key `LockID`).
+- S3 bucket for Terraform **remote state** (versioned, SSE, public access blocked,
+  TLS-only bucket policy that denies non-HTTPS access).
+  State **locking** uses S3-native locking (`use_lockfile`) — no DynamoDB table.
 - GitHub Actions **OIDC provider** (`token.actions.githubusercontent.com`).
 - Two CI **IAM roles** assumed via OIDC:
   - `*-ci-plan` — read-only, assumed by PR pipelines to run `terraform plan`.
@@ -30,7 +31,7 @@ terraform apply \
 
 Then wire the outputs into the app-infra layer:
 
-- `state_bucket_name` / `lock_table_name` → `infra/env/<env>.backend.hcl`
+- `state_bucket_name` → `infra/env/<env>.backend.hcl` (with `use_lockfile = true`)
 - `ci_plan_role_arn` / `ci_deploy_role_arn` → GitHub repo variables used by
   `cd-infra.yml` and `cd-app.yml` (e.g. `AWS_PLAN_ROLE_ARN`,
   `AWS_DEPLOY_ROLE_ARN`).

@@ -97,8 +97,8 @@ Workflows live in `.github/workflows/`. CI mirrors the Makefile / pre-commit gat
 Two layers:
 
 - **bootstrap/** — applied once, with local state, *before* any pipeline runs. Creates the
-  S3 state bucket + DynamoDB lock table (referenced by `infra/backend.tf`), the GitHub
-  OIDC provider, and the CI IAM roles (plan + deploy). Not managed by `cd-infra.yml`.
+  S3 state bucket with native locking (`use_lockfile`, referenced by `infra/backend.tf`),
+  the GitHub OIDC provider, and the CI IAM roles (plan + deploy). Not managed by `cd-infra.yml`.
 - **app infra** — managed by `cd-infra.yml`, using remote state:
   - web → S3 (private) + CloudFront (OAC) [+ ACM / Route53 for a custom domain]
   - api → ECR + ECS Fargate behind an ALB  (**alt:** Lambda + API Gateway / Function URL)
@@ -110,6 +110,6 @@ Remote state per env: `terraform init -backend-config=env/<env>.backend.hcl`; va
 ## Bootstrap order (for a fresh clone)
 
 1. `make setup` — toolchains + git hooks.
-2. Apply `infra/bootstrap/` once (local state): state bucket, lock table, OIDC, IAM roles.
+2. Apply `infra/bootstrap/` once (local state): state bucket (native locking), OIDC, IAM roles.
 3. Migrate app infra to remote state: `terraform init -migrate-state`.
 4. First `cd-infra.yml` run provisions app infra; then enable `cd-app.yml`.

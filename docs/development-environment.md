@@ -90,7 +90,7 @@ make tf-lint
 ```
 
 - リージョン既定値は `ap-northeast-1`。
-- リモート state（S3 + DynamoDB ロック）は `infra/backend.tf` のコメント参照。
+- リモート state（S3 + ネイティブロック `use_lockfile`）は `infra/backend.tf` のコメント参照。
 - 環境別変数は `infra/env/*.tfvars`。コミットするのは `*.example` のみ。
 
 ### Python（`services/api/`）

@@ -8,7 +8,7 @@ terraform {
     }
   }
 
-  # NOTE: bootstrap uses LOCAL state on purpose. It creates the S3 bucket +
-  # DynamoDB table that the app-infra layer later uses as its remote backend,
-  # so it cannot depend on that backend existing yet. Do NOT add a backend block.
+  # NOTE: bootstrap uses LOCAL state on purpose. It creates the S3 bucket that the
+  # app-infra layer later uses as its remote backend (with S3-native locking), so
+  # it cannot depend on that backend existing yet. Do NOT add a backend block.
 }

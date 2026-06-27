@@ -1,11 +1,6 @@
 output "state_bucket_name" {
-  description = "S3 bucket holding Terraform remote state."
+  description = "S3 bucket holding Terraform remote state (also used for native state locking)."
   value       = aws_s3_bucket.state.id
-}
-
-output "lock_table_name" {
-  description = "DynamoDB table used for Terraform state locking."
-  value       = aws_dynamodb_table.lock.name
 }
 
 output "oidc_provider_arn" {

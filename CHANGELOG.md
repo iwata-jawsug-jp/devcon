@@ -7,6 +7,24 @@
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-06-27
+
+### Changed
+
+- Terraform の state ロックを **DynamoDB から S3 ネイティブロック**（`use_lockfile = true`）へ移行。
+  DynamoDB ロックテーブル・関連変数/出力/IAM 権限を削除し、`required_version` を `>= 1.11` に。
+  `env/*.backend.hcl.example` を `use_lockfile = true` に更新。
+
+### Security
+
+- bootstrap の state バケットに、**非 HTTPS（平文 HTTP）アクセスを拒否**するバケットポリシー
+  （`aws:SecureTransport=false` を Deny）を追加。
+
+### Added
+
+- インフラ論理構成図 `docs/images/infra-architecture.drawio.svg`（draw.io で編集可能な
+  `*.drawio.svg`）を追加し、`docs/infrastructure.md` から参照。
+
 ## [0.0.2] - 2026-06-27
 
 ### Changed
@@ -48,6 +66,7 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/iwata-jawsug-jp/devcon/releases/tag/v0.0.1

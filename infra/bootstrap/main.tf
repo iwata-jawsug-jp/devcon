@@ -55,20 +55,42 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
-#############################################
-# Terraform state locking: DynamoDB table
-#############################################
+# Deny any request not made over TLS (i.e. plaintext HTTP).
+data "aws_iam_policy_document" "state_bucket" {
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.state.arn,
+      "${aws_s3_bucket.state.arn}/*",
+    ]
 
-resource "aws_dynamodb_table" "lock" {
-  name         = var.lock_table_name
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
 
-  attribute {
-    name = "LockID"
-    type = "S"
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
   }
 }
+
+resource "aws_s3_bucket_policy" "state" {
+  bucket = aws_s3_bucket.state.id
+  policy = data.aws_iam_policy_document.state_bucket.json
+
+  # Apply the public-access-block first so this Deny policy is not mistaken
+  # for one that grants public access.
+  depends_on = [aws_s3_bucket_public_access_block.state]
+}
+
+# State locking uses S3-native locking (`use_lockfile = true` in the backend),
+# so no DynamoDB table is needed — the lock is a `<key>.tflock` object stored in
+# the state bucket itself.
 
 #############################################
 # GitHub Actions OIDC provider
@@ -156,18 +178,14 @@ data "aws_iam_policy_document" "tfstate_access" {
     resources = [aws_s3_bucket.state.arn]
   }
 
+  # S3-native state locking (use_lockfile): the lock is a `<key>.tflock` object
+  # in the same bucket, so object read/write/delete also covers acquiring and
+  # releasing the lock.
   statement {
     sid       = "StateObjectRW"
     effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject"]
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = ["${aws_s3_bucket.state.arn}/*"]
-  }
-
-  statement {
-    sid       = "StateLock"
-    effect    = "Allow"
-    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"]
-    resources = [aws_dynamodb_table.lock.arn]
   }
 }
 

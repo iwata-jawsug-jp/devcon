@@ -5,8 +5,13 @@
 
 ## 全体像
 
+![インフラ論理構成図](images/infra-architecture.drawio.svg)
+
+> 図は draw.io で編集可能な `*.drawio.svg`（`docs/images/infra-architecture.drawio.svg`）。
+> draw.io で開くと SVG に埋め込まれた図を直接編集できる。以下はテキスト版。
+
 ```
-infra/bootstrap/   ── 初回のみ・ローカル state ──▶  state バケット / DynamoDB ロック
+infra/bootstrap/   ── 初回のみ・ローカル state ──▶  state バケット（S3 ネイティブロック）
                                                     GitHub OIDC プロバイダ / CI IAM ロール
         │ （上記が CI とリモート state の土台になる）
         ▼
@@ -28,8 +33,10 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
 
 作成するもの:
 
-- **S3 state バケット**（バージョニング + SSE + public-access-block）
-- **DynamoDB ロックテーブル**（hash key `LockID`）
+- **S3 state バケット**（バージョニング + SSE + public-access-block + 非 HTTPS を拒否する
+  TLS 限定バケットポリシー）。
+  ロックは **S3 ネイティブロック**（`use_lockfile`）を使用し、DynamoDB は不要
+  （ロックは state と同じバケットの `<key>.tflock` オブジェクト）。
 - **GitHub OIDC プロバイダ**（`token.actions.githubusercontent.com`, aud `sts.amazonaws.com`）
 - **CI 用 IAM ロール 2 つ**
   - `*-ci-plan` … PR 用の読み取り専用（plan）
@@ -77,7 +84,7 @@ make security     # Trivy + Checkov
 infra/env/
 ├── dev.tfvars.example          # project/environment/aws_region など
 ├── prod.tfvars.example
-├── dev.backend.hcl.example     # bucket/key/region/dynamodb_table/encrypt
+├── dev.backend.hcl.example     # bucket/key/region/use_lockfile/encrypt
 └── prod.backend.hcl.example
 ```
 
@@ -90,7 +97,7 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 
 - 2 スペースインデント、`terraform fmt`（`make tf-fmt`）。
 - タグは provider の `default_tags` で一括付与（個別リソースに手書きしない）。
-- state はリモート（S3 + DynamoDB ロック）。`*.tfstate` はコミットしない。
+- state はリモート（S3 + ネイティブロック `use_lockfile`）。`*.tfstate` はコミットしない。
 
 ---
 
