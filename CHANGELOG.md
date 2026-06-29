@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-29
+
+### Added
+
+- **GitHub Copilot ルール化**（#54）: 既存の `CLAUDE.md` 群のガードレールを Copilot
+  （IDE Chat / coding agent / code review）にも効かせるため、Copilot ネイティブの指示
+  ファイルを追加。リポジトリ全体ルールの `.github/copilot-instructions.md` と、ネスト
+  `CLAUDE.md` を `applyTo` グロブで 1:1 ミラーする `.github/instructions/` 配下の
+  backend / frontend / infra 各 `*.instructions.md`。詳細は `docs/` 参照型の薄い抽出に
+  留め、`CLAUDE.md` と同じ英語で記述してドリフト検出を容易にした。
+- **AI 開発ルールの同期手順** `docs/ai-instructions.md`: ルールの「正」を `docs/` に一本化し、
+  `docs/` ＋ `CLAUDE.md` ＋ Copilot 用ファイルを 1 PR でまとめて変更する運用を明文化
+  （ファイル対応表・ドリフト点検・既知の制約）。`docs/README.md` とルート `CLAUDE.md` から参照。
+- README に CI / Release バッジを追加（#53）。
+
 ## [0.0.6] - 2026-06-29
 
 ### Changed
@@ -147,7 +162,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.6...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.6...v0.1.0
 [0.0.6]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.3...v0.0.4

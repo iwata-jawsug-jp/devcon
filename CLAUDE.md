@@ -52,3 +52,5 @@ frontend's types are generated from it (`make gen-types`) — never hand-written
   `cd-app.yml`), and the fresh-clone bootstrap order.
 - `docs/issues.md` — working from a GitHub issue (branch, record findings, one focused PR).
 - `docs/development-environment.md` — Dev Container usage.
+- `docs/ai-instructions.md` — keeping these rules in sync with the Copilot
+  `.github/instructions/*` mirror (change `docs/` + `CLAUDE.md` + Copilot files together).

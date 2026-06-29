@@ -1,5 +1,7 @@
 # devcon
 
+[![CI](https://github.com/iwata-jawsug-jp/devcon/actions/workflows/ci.yml/badge.svg)](https://github.com/iwata-jawsug-jp/devcon/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/iwata-jawsug-jp/devcon?sort=semver)](https://github.com/iwata-jawsug-jp/devcon/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Web アプリケーションとそのインフラ（IaC）のためのモノレポ。Dev Container 上で、
