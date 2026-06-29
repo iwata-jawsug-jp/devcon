@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-29
+
+### Changed
+
+- **README を再編**（#57）: 「概要 / クイックスタート（ローカル）/ 本格セットアップ（自分の
+  AWS で実開発）/ リファレンス」の 4 ブロック構成へ。ローカル開発（AWS 不要）と本格セットアップ
+  （AWS 必要）を明確に分離し、公開リポジトリを fork して実開発を始めるまでの導線を追加。新サブ
+  セクション「自分の AWS にデプロイする」で、`infra/bootstrap/` の `github_org` / `github_repo`
+  を自分の fork に差し替える点（OIDC trust がリポジトリ限定のため）と リポジトリ変数 3 つの登録
+  を要約（実体は `docs/infrastructure.md` を参照）。fork 手順は `<your-org>/<your-repo>` の
+  プレースホルダで記述し、公開ミラー変換の整合を保つ。
+
 ## [0.1.0] - 2026-06-29
 
 ### Added
@@ -162,7 +174,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.6...v0.1.0
 [0.0.6]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.4...v0.0.5
