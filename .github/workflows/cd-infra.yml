@@ -1,19 +1,18 @@
 name: CD Infra
 
-# Terraform plan on PRs (posted as a PR comment), apply on merge to main.
+# Terraform plan on PRs (posted as a PR comment); apply is run manually.
 # Auth is GitHub OIDC -> an IAM role assumed per job (NO long-lived AWS keys):
 #   - PRs assume the read-only PLAN role.
-#   - main assumes the DEPLOY role, gated by the protected `production` env.
+#   - apply assumes the DEPLOY role. It is NOT triggered by merge to main:
+#     required-reviewer environment gating needs a paid plan on a private repo,
+#     so apply is gated behind a manual workflow_dispatch instead — prod is never
+#     provisioned without a deliberate human run.
 on:
   pull_request:
     paths:
       - 'infra/**'
       - '.github/workflows/cd-infra.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'infra/**'
-      - '.github/workflows/cd-infra.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -45,6 +44,15 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Materialize backend + tfvars from committed examples
+        # backend.hcl / *.tfvars are git-ignored, so render them at runtime from the
+        # committed .example templates. No secrets enter git or the logs: the bucket
+        # name is a repo variable, and the RDS master password is RDS-managed
+        # (Secrets Manager), never present in tfvars or state.
+        run: |
+          sed "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+            "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
+          cp "env/${TF_ENV}.tfvars.example" "env/${TF_ENV}.tfvars"
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -77,9 +85,11 @@ jobs:
             });
 
   apply:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    # Protected GitHub Environment: required reviewers gate the apply.
+    # Manual-only (workflow_dispatch) — this IS the gate. The `production`
+    # environment records the deployment; required-reviewer gating would need a
+    # paid plan on a private repo.
     environment: production
     permissions:
       id-token: write # OIDC
@@ -96,6 +106,13 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Materialize backend + tfvars from committed examples
+        # See the plan job: render git-ignored backend.hcl / *.tfvars from the
+        # committed .example templates at runtime; no secrets in git or logs.
+        run: |
+          sed "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+            "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
+          cp "env/${TF_ENV}.tfvars.example" "env/${TF_ENV}.tfvars"
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:

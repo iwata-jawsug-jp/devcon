@@ -56,17 +56,24 @@ terraform output               # state バケット名 / ロール ARN を控え
 
 出力した値を後段に配線する:
 
-- `state_bucket_name` → `infra/env/<env>.backend.hcl`（`use_lockfile = true`）
+- `state_bucket_name` → **リポジトリ変数** `AWS_TF_STATE_BUCKET`。`cd-infra.yml` は
+  各ジョブ冒頭で `env/<env>.backend.hcl.example` の `REPLACE-ME-tfstate` をこの値に
+  置換して `backend.hcl` を生成し（`*.tfvars` は `.example` をコピー）、init/plan する。
+  `backend.hcl` / `*.tfvars` は git-ignored のまま CI 実行時に組み立てる方式で、秘密値は
+  git にもログにも入らない（バケット名は非機密、RDS マスターパスワードは RDS 管理＝
+  Secrets Manager で state/tfvars に出ない）。ローカルで触る場合は同様に `.example` から
+  `infra/env/<env>.backend.hcl` を自前で穴埋めする。
 - `ci_plan_role_arn` / `ci_deploy_role_arn` → **リポジトリ変数**（`cd-infra.yml` /
   `cd-app.yml` が参照）。`gh` で登録する例:
 
 ```bash
+gh variable set AWS_TF_STATE_BUCKET --body "$(terraform -chdir=infra/bootstrap output -raw state_bucket_name)"
 gh variable set AWS_PLAN_ROLE_ARN   --body "$(terraform -chdir=infra/bootstrap output -raw ci_plan_role_arn)"
 gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform -chdir=infra/bootstrap output -raw ci_deploy_role_arn)"
 ```
 
-> **これらを登録するまで `cd-infra.yml` の plan/apply は失敗する**（下記「bootstrap 適用前の
-> CI 挙動」を参照）。
+> **これら 3 変数を登録するまで `cd-infra.yml` の plan/apply は失敗する**（下記「bootstrap
+> 適用前の CI 挙動」を参照）。
 
 ### 2. アプリ層（`infra/*.tf`・リモート state）
 
@@ -152,15 +159,56 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 ### `cd-infra.yml`
 
 - **PR**: `terraform plan` を実行し、結果を PR にコメント（plan ロール）。
-- **main マージ**: `terraform apply`。保護された GitHub Environment `production` で承認ゲート
-  （deploy ロール）。
+- **apply（手動）**: `workflow_dispatch` で手動実行する `terraform apply`（deploy ロール・
+  `TF_ENV=prod`）。private repo ＋現プランでは GitHub Environment の required reviewers が
+  使えないため、**main マージでは自動 apply せず**、手動実行そのものをゲートとする
+  （`production` 環境はデプロイ記録用）。
+
+#### 承認ゲートの恒久化（Enterprise / Team / Pro へ移行、または public 化した場合）
+
+GitHub Environment の保護ルール（**required reviewers** / wait timer / deployment branch policy）は
+**public リポジトリでは無料**、**private リポジトリでは Pro / Team / Enterprise** で利用できる。
+現状は private ＋無料プランのため API が `422`（`billing plan ... required reviewers protection
+rule`）を返し設定できないので、上記のとおり apply を手動 `workflow_dispatch` ゲートにしている。
+
+対応プランに移行（または public 化）したら、本来の「main マージ → `production` 環境の承認ゲートで
+待機 → 承認で apply」に戻せる。手順:
+
+1. `production` 環境に required reviewers を設定（UI: Settings → Environments、または API）:
+
+   ```bash
+   gh api --method PUT repos/<org>/<repo>/environments/production --input - <<'JSON'
+   { "wait_timer": 0, "prevent_self_review": false,
+     "reviewers": [{ "type": "User", "id": <REVIEWER_USER_ID> }],
+     "deployment_branch_policy": null }
+   JSON
+   # 単独運用で自分が承認者なら prevent_self_review=false。チームなら true 推奨。
+   # reviewers は Team も可: { "type": "Team", "id": <TEAM_ID> }
+   ```
+
+2. `.github/workflows/cd-infra.yml` の `apply` を「main push で起動」に戻す:
+   - `on:` に `push: { branches: [main], paths: ['infra/**', '.github/workflows/cd-infra.yml'] }`
+     を復活（`workflow_dispatch` は残しても良い）。
+   - `apply` ジョブの `if:` を
+     `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}` に戻す。
+   - `apply` ジョブの `environment: production` は既にあるので、保護ルールが効けば
+     **マージで apply がキューされ、承認されるまで待機**する（無承認の自動 provision は起きない）。
+
+3. 動作確認: infra 変更を含む PR をマージ → cd-infra の `apply` が「Waiting / Review required」で
+   停止 → 承認で初めて `terraform apply` が走ることを確認する。
+
+> 注: 移行するまでは手動 `workflow_dispatch` がゲート。prod を立てる時は Actions →
+> **CD Infra** → **Run workflow** で apply を起動する。
 
 > **bootstrap 適用前の CI 挙動（重要）**
 >
-> `cd-infra.yml` の `plan`（PR）/ `apply`（main）は **OIDC でロールを引き受けてから**動く。
+> `cd-infra.yml` の `plan`（PR）/ `apply`（手動 `workflow_dispatch`）は **OIDC でロールを
+> 引き受けてから**動く。
 > `infra/bootstrap/` を一度 apply し、出力したロール ARN を `AWS_PLAN_ROLE_ARN` /
-> `AWS_DEPLOY_ROLE_ARN` に登録するまでは、**AWS 認証ステップ（`configure-aws-credentials`）
-> で必ず失敗する**。これは想定挙動でありリグレッションではない。
+> `AWS_DEPLOY_ROLE_ARN` に、state バケット名を `AWS_TF_STATE_BUCKET` に登録するまでは、
+> **AWS 認証ステップ（`configure-aws-credentials`）で必ず失敗する**。これは想定挙動であり
+> リグレッションではない。`AWS_TF_STATE_BUCKET` 未設定の場合は、認証を越えても直後の
+> `terraform init`（backend.hcl のバケットが空）で失敗する。
 >
 > 一方 `ci.yml` の `infra` ジョブ（fmt / validate / tflint / checkov / trivy）は **AWS 認証
 > 不要**なので、bootstrap 未適用でも green になる。PR で「`infra` は緑なのに `plan` が赤」と

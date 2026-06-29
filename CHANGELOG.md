@@ -7,6 +7,32 @@
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-06-29
+
+### Changed
+
+- **`CLAUDE.md` を最適化**（毎セッション常時ロードの軽量化, #47）: ルートを高シグナルな
+  ~50 行に圧縮し、落とし穴を `## Critical rules` として前方集約。領域固有の規約は
+  path-scoped な nested `CLAUDE.md`（`services/api/` / `services/web/` / `infra/`）へ降ろし、
+  そのサブツリーを触ったときだけ on-demand ロードする構成に。詳細は `@` なしのプレーン参照
+  （raw SQL 禁止 / Alembic 必須 / `vue-tsc` / `make gen-types`）を各 1 箇所へ集約。
+- Working from issues フローを `docs/issues.md` として新規切り出し（ルートから参照）。
+- **`cd-infra.yml`**: `backend.hcl` / `*.tfvars` を git-ignored の `.example` から CI 実行時に
+  生成する方式へ（state バケット名はリポジトリ変数 `AWS_TF_STATE_BUCKET` で注入。秘密値は
+  git・ログに出さず、`*.example` のみコミットの方針を維持）。bootstrap 適用後に PR の
+  `terraform plan` が CI で通るようになった（#49, #50）。
+- **apply の承認ゲート変更**: private リポジトリ＋現プランでは GitHub Environment の
+  required reviewers が使えないため、`apply` を main push 自動実行から手動
+  `workflow_dispatch` に変更（`push: main` トリガー削除）。マージで prod が自動 provision
+  されず、手動実行そのものをゲートとする。恒久化手順（Enterprise / Team / Pro 移行・
+  public 化）は `docs/infrastructure.md` に追記（#50, #51）。
+
+### Fixed
+
+- **CI（cd-infra）**: OIDC のロール ARN / state バケット名が未登録のため `plan` / `apply` が
+  認証・`init` 段階で失敗していた問題を、`infra/bootstrap/` 適用＋リポジトリ変数
+  （`AWS_PLAN_ROLE_ARN` / `AWS_DEPLOY_ROLE_ARN` / `AWS_TF_STATE_BUCKET`）の登録で解消（#49）。
+
 ## [0.0.5] - 2026-06-27
 
 ### Added
@@ -121,7 +147,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.2...v0.0.3
