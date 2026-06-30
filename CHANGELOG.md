@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-30
+
+### Added
+
+- **SDD ツール導入提案書** `docs/proposal/sdd-tooling-proposal.md`（#67）: 実装フェーズの
+  ガードレールは整っている一方で空白だった**上流工程**（業務整理 → 要件定義 → 基本設計）に、
+  cc-sdd を中心とした **SDD（Spec-Driven Development）** ツールを段階的導入する提案。推奨案
+  （cc-sdd、合わなければ GitHub Spec Kit へ切替）・推奨ディレクトリ構成（`.kiro/` ↔ `docs/`）・
+  運用フロー・ロードマップ・留意点を整理。実現施策は Epic #66（子タスク #60–#65）として起票済み。
+
 ## [0.1.1] - 2026-06-29
 
 ### Changed
@@ -174,7 +184,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.6...v0.1.0
 [0.0.6]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.5...v0.0.6
