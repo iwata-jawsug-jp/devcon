@@ -55,10 +55,14 @@
 - github.com の Chat は**パス別 instructions が未対応**（coding agent / code review では有効）。
   全面で確実に効かせたいルールは `.github/copilot-instructions.md` 側に置く。
 - 詳細を `docs/` に一本化してもドリフトはゼロにはならない。上記の「3 点セット PR」運用で抑える。
+- **SDD 成果物（`.kiro/`）はこのミラーの対象外**。`.kiro/`（要件・設計＝「何を作るか」）と、この
+  対応表が扱う実装規約（`CLAUDE.md` / `*.instructions.md` ＝「どう書くか」）は役割が異なる。混同して
+  `.kiro/` を Copilot instructions に取り込まない。SDD の運用は [sdd.md](sdd.md) が正。
 
 ## 関連ドキュメント
 
 - [`../CLAUDE.md`](../CLAUDE.md) — アーキテクチャと規約の正（Claude Code 向け）。
 - [app-development.md](app-development.md) / [infrastructure.md](infrastructure.md) — ルール本文の詳細。
 - [issues.md](issues.md) — issue から実装するときのフロー（1 issue 1 PR・CI green 確認）。
+- [sdd.md](sdd.md) — 上流工程の SDD ワークフロー（`.kiro/` は実装規約ミラーと役割が別）。
 - 導入の経緯・方針比較は [proposal/copilot-rules-proposal.md](proposal/copilot-rules-proposal.md)。

@@ -54,3 +54,8 @@ frontend's types are generated from it (`make gen-types`) — never hand-written
 - `docs/development-environment.md` — Dev Container usage.
 - `docs/ai-instructions.md` — keeping these rules in sync with the Copilot
   `.github/instructions/*` mirror (change `docs/` + `CLAUDE.md` + Copilot files together).
+- `docs/adr/` — Architecture Decision Records: record the "why" behind infra/architecture
+  decisions; add an ADR when changing infra/CI-CD/service boundaries (see `adr/0001`).
+- `docs/sdd.md` — upstream Spec-Driven Development workflow (cc-sdd `/kiro-*` skills, `.kiro/`
+  layout, spec→`docs/` promotion). Don't let cc-sdd overwrite this `CLAUDE.md`: reinstall with
+  `--overwrite skip --backup` and keep our curated version.

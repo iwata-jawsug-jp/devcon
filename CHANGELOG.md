@@ -7,6 +7,35 @@
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-30
+
+### Added
+
+- **SDD（仕様駆動開発）ツールを導入**（Epic #66）: 上流工程（要件定義・基本設計）を成果物として
+  残すため、cc-sdd を `--claude-skills` 方式で導入。`.claude/skills/kiro-*`（`/kiro-*` スキル）と
+  `.kiro/`（settings / steering / 試験導入の spec `items-add-field`）を追加。提案書が前提にしていた
+  `--claude`（commands）方式は cc-sdd v3.0.2 で非推奨化したため、推奨の skills 方式を採用（#60, #61）。
+- **SDD 運用ドキュメント** `docs/sdd.md`（#62）: `/kiro-*` スキルの使い方・`.kiro/` 構成・
+  `.kiro/specs/<feature>` → `docs/requirements|design/` への昇格手順・**cc-sdd に `CLAUDE.md` を
+  所有させない保護ルール**・公開ミラー/gitignore 方針・四半期 OSS 点検を明文化。
+- **ADR（Architecture Decision Record）運用を開始** `docs/adr/`（#63）: ADR-0001（運用方針）＋
+  テンプレート。インフラ・アーキ上の重要判断を「なぜそう決めたか」で記録。SDD 採用の判断は
+  ADR-0002 として記録（#62）。
+- **基本設計の図表方針** `docs/design/`（#65）: Mermaid を既定とし、精密な AWS 構成図は Python
+  `diagrams` / draw.io を補助に使う方針と、`.drawio.svg` の round-trip 注意を文書化。
+- **確定要件の保管庫** `docs/requirements/`（#62）: リリース済み機能の要件を `.kiro/specs/` から
+  昇格して置く場所。
+
+### Changed
+
+- **`CONTRIBUTING.md` に SDD 適用基準を追記**（#64）: 粒度の大きい新機能は `.kiro/specs/` で要件定義
+  →基本設計→タスク分解を経てから実装、単一の小機能は `/kiro-spec-quick`、軽微な修正は Plan Mode
+  （`/plan`）で十分、という線引き（過剰適用＝「Waterfall の逆襲」を回避）。
+- **`CLAUDE.md` / `docs/README.md` / `docs/ai-instructions.md`**（#62, #63, #65）: 上記の新ドキュメント
+  （`docs/sdd.md` / `docs/adr/` / `docs/design/`）への参照を追加。SDD 成果物（`.kiro/`）は「何を作るか」、
+  実装規約（`CLAUDE.md` / Copilot instructions）は「どう書くか」と役割が異なるため、`.kiro/` を Copilot
+  ミラーの対象外とすることを明記。
+
 ## [0.1.2] - 2026-06-30
 
 ### Added
@@ -184,7 +213,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.0.6...v0.1.0
