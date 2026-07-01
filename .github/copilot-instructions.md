@@ -32,3 +32,8 @@ For details, see `docs/` and each `.github/instructions/*.instructions.md`.
 
 Prefer the root `Makefile` (`make help`):
 `make dev` / `make fmt` / `make lint` / `make test` / `make security` / `make gen-types`.
+
+## Spec-driven workflow
+
+`/kiro-*` skills under `.claude/skills/` (steering, requirements, design, tasks) are usable
+as-is from Copilot CLI — see `docs/sdd.md` for the workflow and known Copilot caveats.

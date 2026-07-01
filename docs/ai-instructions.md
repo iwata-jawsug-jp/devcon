@@ -58,6 +58,11 @@
 - **SDD 成果物（`.kiro/`）はこのミラーの対象外**。`.kiro/`（要件・設計＝「何を作るか」）と、この
   対応表が扱う実装規約（`CLAUDE.md` / `*.instructions.md` ＝「どう書くか」）は役割が異なる。混同して
   `.kiro/` を Copilot instructions に取り込まない。SDD の運用は [sdd.md](sdd.md) が正。
+- **`.claude/skills/kiro-*` はこの表の対象外（ミラー不要で両ツールから直接使える）**。`.kiro/` と
+  違い、GitHub Copilot CLI は `.claude/skills` を追加設定なしにそのままスキャンするため、Claude Code
+  と Copilot CLI が同じファイルを直接共有する。frontmatter（`allowed-tools` 等）の一部フィールドは
+  Copilot 側で解釈されないなどの非互換はあるが、それは「別ファイルとして同期する」話ではないため
+  対応表には載せない。詳細・既知の非互換点は [sdd.md](sdd.md) を参照。
 
 ## 関連ドキュメント
 

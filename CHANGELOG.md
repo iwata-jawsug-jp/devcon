@@ -7,6 +7,31 @@
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-07-01
+
+### Added
+
+- **カバレッジゲート** `api`（pytest-cov）・`web`（vitest）（#43）: CI にカバレッジ閾値のゲートを追加。
+- **a11y CI ゲート**（#83）: `web` の e2e に axe-core によるアクセシビリティチェックを追加し、CI で有効化。
+- **Lighthouse CI ＋ JS バンドルサイズ予算**（#84）: gzip 済み JS バンドルサイズの予算チェックと
+  Lighthouse CI（3 回実行で単発ノイズを低減）を導入。閾値は `docs/`（#90）に記録。
+- **CloudFront セキュリティヘッダー**（#79）: SPA 配信用 CloudFront にセキュリティヘッダーを追加。
+  `sandbox/*` で実 AWS 適用を検証してからマージ。
+- **TanStack Query 導入**（#82）: `services/web` にサーバー状態管理として `@tanstack/vue-query` を導入し、
+  `HealthBadge` を移行。
+- **Tailwind CSS ＋最小デザイントークン**（#81）: `@tailwindcss/vite` を導入し、ブランドカラー・フォント
+  スタックのみを定義した最小トークンセットを追加。
+- **ADR-0003**: #40（ドメイン機能拡充）・#41（認証・認可導入）を既存のモノレポ構成（`services/api` /
+  `services/web` / `infra`）のまま吸収する決定を記録。
+- **GitHub Copilot CLI 互換性ドキュメント**（#75, #76）: `.claude/skills` が Copilot CLI からも利用可能な
+  ことを明記。
+- **Web フロントエンドのサイトアーキテクチャ近代化 提案書**（#77）。
+
+### Changed
+
+- **`.devcontainer/Dockerfile`**: GitHub Copilot CLI（`@github/copilot`）へ切り替える場合の具体的な手順を
+  TODO コメントとして記録（実行内容・ビルド結果への影響なし）。
+
 ## [0.1.3] - 2026-06-30
 
 ### Added

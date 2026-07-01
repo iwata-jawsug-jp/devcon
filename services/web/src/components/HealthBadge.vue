@@ -1,31 +1,30 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { apiClient } from '../api';
+import { computed } from 'vue';
+import { useHealthQuery } from '../api';
 
-const status = ref<string>('loading');
+const { data, isError } = useHealthQuery();
 
-onMounted(async () => {
-  try {
-    const health = await apiClient.getHealth();
-    status.value = health.status;
-  } catch {
-    status.value = 'error';
+const status = computed(() => {
+  if (isError.value) return 'error';
+  return data.value?.status ?? 'loading';
+});
+
+const statusClasses = computed(() => {
+  switch (status.value) {
+    case 'ok':
+      return 'bg-brand-50 text-brand-700';
+    case 'error':
+      return 'bg-red-50 text-red-700';
+    default:
+      return 'bg-gray-100 text-gray-600';
   }
 });
 </script>
 
 <template>
   <span
-    class="health-badge"
+    class="health-badge inline-block rounded px-2 py-0.5 font-sans text-sm"
+    :class="statusClasses"
     :data-status="status"
   >API: {{ status }}</span>
 </template>
-
-<style scoped>
-.health-badge {
-  display: inline-block;
-  padding: 0.125rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.875rem;
-}
-</style>

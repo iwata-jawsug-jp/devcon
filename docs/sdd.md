@@ -8,13 +8,13 @@
 
 ## ディレクトリ構成
 
-| パス | 役割 | 追跡 |
-| --- | --- | --- |
-| `.claude/skills/kiro-*/` | cc-sdd のスキル本体（`SKILL.md` ＋ `rules/`）。`/kiro-*` で起動 | コミットする |
-| `.kiro/settings/templates/` | steering / specs の雛形。**チームの開発プロセスに合わせて編集**してよい | コミットする |
-| `.kiro/steering/` | プロジェクト全体の知識（`product` / `tech` / `structure`）。AI に常時効かせる前提 | コミットする |
-| `.kiro/specs/<feature>/` | 機能ごとの作業領域（`requirements.md` / `design.md` / `tasks.md` / `spec.json`） | コミットする |
-| `.cc-sdd.backup/` | 再導入時の自動バックアップ | **gitignore**（追跡しない） |
+| パス                        | 役割                                                                              | 追跡                        |
+| --------------------------- | --------------------------------------------------------------------------------- | --------------------------- |
+| `.claude/skills/kiro-*/`    | cc-sdd のスキル本体（`SKILL.md` ＋ `rules/`）。`/kiro-*` で起動                   | コミットする                |
+| `.kiro/settings/templates/` | steering / specs の雛形。**チームの開発プロセスに合わせて編集**してよい           | コミットする                |
+| `.kiro/steering/`           | プロジェクト全体の知識（`product` / `tech` / `structure`）。AI に常時効かせる前提 | コミットする                |
+| `.kiro/specs/<feature>/`    | 機能ごとの作業領域（`requirements.md` / `design.md` / `tasks.md` / `spec.json`）  | コミットする                |
+| `.cc-sdd.backup/`           | 再導入時の自動バックアップ                                                        | **gitignore**（追跡しない） |
 
 `.kiro/specs/<feature>/` は**開発中の作業領域**、`docs/requirements/` `docs/design/` は**完了後の
 確定版置き場**、という役割分担にする（「正は `docs/`」方針との整合は下記）。
@@ -68,11 +68,43 @@ cc-sdd の導入/更新（`npx cc-sdd@latest --claude-skills ...`）は、ルー
 - **Copilot ミラー対象外**: SDD 成果物（`.kiro/`）は「**何を作るか**」であり、実装規約
   （`CLAUDE.md` / `.github/instructions/*` ＝「**どう書くか**」）とは役割が異なる。両者を混同せず、
   `.kiro/` を Copilot instructions のミラー対象にはしない（[ai-instructions.md](ai-instructions.md)）。
+  これはあくまで `.kiro/` の成果物の話であり、次節の `.claude/skills/kiro-*` 自体の話ではない。
+
+## GitHub Copilot CLI からの利用
+
+`.claude/skills/kiro-*` は Claude Code 専用ではない。GitHub Copilot CLI はプロジェクトスキルとして
+`.github/skills` / `.claude/skills` / `.agents/skills` の 3 箇所を**追加設定なしにそのままスキャンする**
+（[公式ドキュメント](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills)）。
+実機（`copilot skill list`）でも `.claude/skills/kiro-*` 17 個が Project skills として認識されることを
+確認済み。したがって **Copilot 向けの別ディレクトリ・ミラーは作らない**。cc-sdd の再導入・更新時も
+本 doc の「CLAUDE.md を cc-sdd に所有させない」節と同じ運用（`--overwrite skip` ＋ `--backup`）を
+維持すれば、Copilot 側も自動的に追従する。
+
+### 既知の非互換点
+
+- **`allowed-tools` は Copilot 側で解釈されない。** 各 `SKILL.md` の `allowed-tools`（`Bash` /
+  `Agent` / `AskUserQuestion` / `MultiEdit` 等）は Claude Code 固有のツール名で、Copilot CLI は
+  これを見ない。Copilot 側で同等の効果を得るには、起動時に Copilot 自身のツール種別名
+  （`read` / `glob` / `grep` / `write` / `shell(cmd:*)`）で `--allow-tool` を指定する。
+  **`read` に加えて `glob` / `grep` を明示的に許可しないと、探索が不十分になり誤った（ハルシネートした）
+  レポートが返ることを実機確認済み**（単なる確認プロンプト増ではなく実害がある）。cc-sdd 側の
+  `allowed-tools` はこの非互換を理由に手で書き換えない（次回の cc-sdd 再導入で上書きされ消えるため）。
+- **`Agent`（サブエージェント並列実行）は Copilot 側に存在しない。** `kiro-impl` / `kiro-spec-design` /
+  `kiro-spec-tasks` / `kiro-spec-batch` / `kiro-discovery` / `kiro-validate-impl` は `allowed-tools` に
+  `Agent` を含み、Claude Code では並列サブエージェント実行を前提にした指示を持つ。Copilot CLI には
+  同等の並列ディスパッチ機構がないが、実機確認（`kiro-validate-impl`）では **致命的エラーにはならず、
+  単一エージェントとして逐次的に代替動作した**（未実装タスクを正しく検出して early-exit）。ただし
+  `Agent` を前提にした重い分解・並列実装フロー（`kiro-spec-batch` 等）の品質・速度が Claude Code と
+  同等かは未検証。実運用で気になる場合は都度確認すること。
+- **`AskUserQuestion` の代替動作は未検証。** `kiro-spec-init` 等が使う構造化質問 UI は、Copilot 側では
+  通常のテキスト質問にフォールバックすると推測されるが、実機での対話的検証はまだ行っていない。
 
 ## メンテナンス
 
 - cc-sdd は更新の速い OSS。**四半期に一度**、`npx cc-sdd@latest --version` とコマンド/スキル体系の
-  変更を確認する（ai-instructions.md のドリフト点検と同じ枠で実施）。
+  変更を確認する（ai-instructions.md のドリフト点検と同じ枠で実施）。このとき `copilot skill list`
+  で `kiro-*` が引き続き認識されるかも合わせて軽く確認する（新規の別プロセスは作らず、この四半期
+  点検に相乗りさせる）。
 - `.kiro/settings/templates/` を自プロジェクト向けに育てると、生成される steering / spec の質が上がる。
 
 ## 関連ドキュメント

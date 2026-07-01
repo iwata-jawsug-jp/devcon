@@ -79,6 +79,18 @@ USER vscode
 ENV NODE_OPTIONS=--no-deprecation
 ENV NPM_CONFIG_PREFIX=/home/vscode/.npm-global
 ENV PATH=/home/vscode/.local/bin:/home/vscode/.npm-global/bin:$PATH
+# TODO: GitHub Copilot CLI への切り替えを検討中（未実施）。切り替える場合の手順:
+#   1. 下記 RUN の `@anthropic-ai/claude-code` を `@github/copilot`（npm, Node.js 22+ 要）に置き換える。
+#      パッケージ名は要検証: https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
+#      （旧 `@githubnext/github-copilot-cli` はサポート終了、混同しないこと）
+#   2. 初回起動時に `/login` での GitHub 認証（要 Copilot サブスクリプション）が発生するため、
+#      Dev Container 起動後の初期セットアップ手順（README / docs/development-environment.md）に追記する。
+#   3. `.claude/skills/kiro-*` は docs/sdd.md の記載どおり Copilot CLI からも利用可能な想定だが、
+#      実際の起動コマンド・スラッシュコマンド互換性（.github/copilot-instructions.md 参照）を実機で再検証する。
+#   4. CLAUDE.md 群と .github/instructions/* のミラー運用（docs/ai-instructions.md）は
+#      Claude Code 前提の記述が残っていないか棚卸しする。
+#   5. Claude Code を完全に廃止するか、両方インストールして併用するかを決め、後者の場合は
+#      本コメントの TODO ではなく、両方の npm install を残す形に変更する。
 RUN mkdir -p /home/vscode/.npm-global \
     && npm install -g @anthropic-ai/claude-code
 

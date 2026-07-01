@@ -5,7 +5,13 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'playwright-report/**', 'src/api/schema.ts'],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'playwright-report/**',
+      'coverage/**',
+      'src/api/schema.ts',
+    ],
   },
   js.configs.recommended,
   ...pluginVue.configs['flat/recommended'],

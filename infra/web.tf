@@ -39,6 +39,56 @@ locals {
   cf_orp_all_viewer_nohdr = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AllViewerExceptHostHeader
 }
 
+# Security headers for the SPA (HTML/JS/CSS) responses from the S3 origin. Not attached to
+# the /api/* behavior: that origin returns JSON, not browser-rendered HTML, and gets its own
+# headers if/when the API adds them. The CSP has no 'unsafe-inline'/nonce because the Vite
+# production build (`dist/index.html`) has no inline <script>/<style> — verified against the
+# actual build output. If a future dependency injects inline styles/scripts, this policy will
+# need a nonce or hash added alongside it, not just a blanket 'unsafe-inline'.
+resource "aws_cloudfront_response_headers_policy" "web_security_headers" {
+  name = "${local.name_prefix}-web-security-headers"
+
+  security_headers_config {
+    content_security_policy {
+      override = true
+      content_security_policy = join("; ", [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self' data:",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+        "upgrade-insecure-requests",
+      ])
+    }
+
+    content_type_options {
+      override = true
+    }
+
+    frame_options {
+      override     = true
+      frame_option = "DENY"
+    }
+
+    referrer_policy {
+      override        = true
+      referrer_policy = "strict-origin-when-cross-origin"
+    }
+
+    strict_transport_security {
+      override                   = true
+      access_control_max_age_sec = 63072000 # 2 years
+      include_subdomains         = true
+      preload                    = true
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "web" {
   enabled             = true
   default_root_object = "index.html"
@@ -63,11 +113,12 @@ resource "aws_cloudfront_distribution" "web" {
   }
 
   default_cache_behavior {
-    target_origin_id       = "s3-web"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = local.cf_cache_optimized
+    target_origin_id           = "s3-web"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = local.cf_cache_optimized
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.web_security_headers.id
   }
 
   ordered_cache_behavior {

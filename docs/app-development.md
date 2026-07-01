@@ -106,6 +106,7 @@ cd services/api && uv run pytest # テスト（後述のとおり既定は SQLit
 ```
 
 規約:
+
 - **ルーターは生 SQL を書かない**。`Depends(get_session)` で `AsyncSession` を受け取り、
   `repositories/` 経由でアクセスする。
 - ORM モデルは `Mapped[...]` で型付け（mypy strict 準拠）。Pydantic スキーマ（API I/O）と
@@ -114,6 +115,7 @@ cd services/api && uv run pytest # テスト（後述のとおり既定は SQLit
 - DB 接続は `API_DATABASE_URL`（環境変数）。秘密はコミットせず、本番は Secrets Manager。
 
 テスト DB:
+
 - `TEST_DATABASE_URL` 未設定時は **in-memory SQLite（aiosqlite）** にフォールバック
   → docker 不要でどこでも実行可能。スキーマは `Base.metadata.create_all` で作成（Alembic は使わない）。
 - **CI は Postgres**（service container）に対して `alembic upgrade head` + pytest を実行し、
@@ -167,6 +169,23 @@ npm run build        # vue-tsc + vite build
 - フロントの環境変数は必ず **`VITE_` プレフィックス**かつ**非機密**（ビルドに同梱されブラウザに渡る）。
   秘密はサーバ側（SSM / Secrets Manager）に置く。
 - 画面は `src/views/`、再利用部品は `src/components/`、共有状態は `src/stores/`（Pinia）。
+
+### 品質ゲート（カバレッジ / a11y / パフォーマンス予算）
+
+CI（`ci.yml`）が強制するしきい値と計測方法。数値は現状のベースラインに合わせた「まず割らせない
+床」で、実装が増えるにつれ引き上げる前提（閾値自体を下げる変更は理由を issue に残す）。
+
+| ゲート                    | しきい値                                                               | 計測方法                                                                                                                                                                                                                                         |
+| ------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| api カバレッジ            | `--cov-fail-under=90`（現状 ~97%）                                     | `pyproject.toml` の `addopts`（`pytest-cov`）。`uv run pytest` / `make api-test` で自動適用                                                                                                                                                      |
+| web カバレッジ            | lines/statements 35%・functions 45%・branches 55%（現状 ~39%/50%/62%） | `vite.config.ts` の `test.coverage.thresholds`（`@vitest/coverage-v8`）。`npm test` で自動適用                                                                                                                                                   |
+| a11y                      | WCAG 2.0/2.1/2.2 の A+AA タグで違反ゼロ                                | `e2e/home.spec.ts` の `@axe-core/playwright` スキャン（Playwright e2e の一部として CI で実行）                                                                                                                                                   |
+| Core Web Vitals（lab）    | LCP ≤2.5s・CLS ≤0.1・Total Blocking Time ≤300ms（INP のラボ代替指標）  | `lighthouserc.json`（Lighthouse CI、`dist/` を `staticDistDir` で直接計測）                                                                                                                                                                      |
+| Lighthouse カテゴリスコア | performance / accessibility とも ≥0.9                                  | 同上                                                                                                                                                                                                                                             |
+| JS バンドル予算（gzip）   | script 400KB・stylesheet 100KB・total 600KB                            | `budget.json` を `scripts/check-bundle-budget.mjs` が読み、`dist/assets/` の実際の gzip サイズと突き合わせる（`npm run check:bundle-budget`）。Lighthouse 本体の `performance-budget`/`timing-budget` オーディットは上流で削除済みのため使わない |
+
+> 実際の INP（Interaction to Next Paint）はフィールドデータが必要で lab 計測では代替不可。
+> フロントエンドの RUM/エラートラッキングは可観測性エピック（issue #42）の範囲。
 
 ---
 

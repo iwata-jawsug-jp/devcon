@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import HealthBadge from '../HealthBadge.vue';
+
+function mountWithQueryClient() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return mount(HealthBadge, {
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient }]],
+    },
+  });
+}
 
 describe('HealthBadge', () => {
   afterEach(() => {
@@ -18,7 +30,7 @@ describe('HealthBadge', () => {
       }),
     );
 
-    const wrapper = mount(HealthBadge);
+    const wrapper = mountWithQueryClient();
     await flushPromises();
 
     expect(wrapper.text()).toContain('API: ok');
@@ -28,7 +40,7 @@ describe('HealthBadge', () => {
   it('shows an error state when the request fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
 
-    const wrapper = mount(HealthBadge);
+    const wrapper = mountWithQueryClient();
     await flushPromises();
 
     expect(wrapper.text()).toContain('API: error');
