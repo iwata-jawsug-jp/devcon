@@ -34,13 +34,13 @@ sequenceDiagram
 
 図の種類の目安:
 
-| 用途 | Mermaid 記法 |
-| --- | --- |
-| 処理フロー・分岐 | `flowchart` |
-| リクエスト/レスポンスの流れ | `sequenceDiagram` |
-| DB スキーマ・エンティティ関係 | `erDiagram` |
-| 状態遷移 | `stateDiagram-v2` |
-| 簡易な構成図 | `flowchart`（サブグラフでグルーピング） |
+| 用途                          | Mermaid 記法                            |
+| ----------------------------- | --------------------------------------- |
+| 処理フロー・分岐              | `flowchart`                             |
+| リクエスト/レスポンスの流れ   | `sequenceDiagram`                       |
+| DB スキーマ・エンティティ関係 | `erDiagram`                             |
+| 状態遷移                      | `stateDiagram-v2`                       |
+| 簡易な構成図                  | `flowchart`（サブグラフでグルーピング） |
 
 ## 補助: 精密な AWS 構成図が必要なとき
 

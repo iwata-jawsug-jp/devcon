@@ -12,12 +12,12 @@
 
 ## ファイル対応表
 
-| ルール本文の正                 | Claude Code              | GitHub Copilot                                  | スコープ          |
-| ------------------------------ | ------------------------ | ----------------------------------------------- | ----------------- |
-| `docs/app-development.md` ほか | `CLAUDE.md`（ルート）    | `.github/copilot-instructions.md`               | リポジトリ全体    |
-| `docs/app-development.md`      | `services/api/CLAUDE.md` | `.github/instructions/backend.instructions.md`  | `services/api/**` |
-| `docs/app-development.md`      | `services/web/CLAUDE.md` | `.github/instructions/frontend.instructions.md` | `services/web/**` |
-| `docs/infrastructure.md`       | `infra/CLAUDE.md`        | `.github/instructions/infra.instructions.md`    | `infra/**`        |
+| ルール本文の正                 | Claude Code                         | GitHub Copilot                                  | スコープ                     |
+| ------------------------------ | ----------------------------------- | ----------------------------------------------- | ---------------------------- |
+| `docs/app-development.md` ほか | `CLAUDE.md`（ルート）               | `.github/copilot-instructions.md`               | リポジトリ全体               |
+| `docs/app-development.md`      | `services/backend/python/CLAUDE.md` | `.github/instructions/backend.instructions.md`  | `services/backend/python/**` |
+| `docs/app-development.md`      | `services/frontend/CLAUDE.md`       | `.github/instructions/frontend.instructions.md` | `services/frontend/**`       |
+| `docs/infrastructure.md`       | `infra/CLAUDE.md`                   | `.github/instructions/infra.instructions.md`    | `infra/**`                   |
 
 - Claude Code はルート ＋ ネストの `CLAUDE.md` を読む。Copilot（IDE Chat / coding agent /
   code review）は `CLAUDE.md` を読まないため、同じ内容を `.github` 側に橋渡しする。

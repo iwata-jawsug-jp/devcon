@@ -4,7 +4,8 @@
 - **Date:** 2026-07-01
 - **Deciders:** itouhi
 - **Related:** [Epic #46](https://github.com/iwata-jawsug-jp/devcon/issues/46), #40, #41,
-  [ADR-0001](0001-record-architecture-decisions.md)
+  [ADR-0001](0001-record-architecture-decisions.md)。ディレクトリ命名は
+  [ADR-0004](0004-rename-services-by-role-and-nest-backend-by-language.md) で改名（境界自体は不変）。
 
 ## Context
 

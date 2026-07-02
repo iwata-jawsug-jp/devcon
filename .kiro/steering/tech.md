@@ -17,22 +17,25 @@
 
 ## Key Libraries
 
-- api: SQLAlchemy 2.0 async（asyncpg）＋リポジトリパターン、Alembic（マイグレーション）、
+- backend: SQLAlchemy 2.0 async（asyncpg）＋リポジトリパターン、Alembic（マイグレーション）、
   Pydantic / pydantic-settings
-- web: vue-router・Pinia・vue-tsc（型チェック）・Vitest・Playwright
-- 型生成: OpenAPI（`/openapi.json`）→ `services/web/src/api/schema.ts`（`make gen-types`）
+- frontend: vue-router・Pinia・vue-tsc（型チェック）・Vitest・Playwright
+- 型生成: OpenAPI（`/openapi.json`）→ `services/frontend/src/api/schema.ts`（`make gen-types`）
 
 ## Development Standards
 
 ### Type Safety
+
 - web は `vue-tsc` で型チェック。API 由来の型は**手書きせず** `make gen-types` で生成する。
 - raw SQL は禁止（SQLAlchemy 経由）。スキーマ変更は必ず Alembic マイグレーションで。
 
 ### Code Quality
+
 - `pre-commit`（fmt / lint / security）。`--no-verify` でフックを回避しない。
 - 「green locally == green in CI」。ゆるいローカル変種ではなく CI と同じコマンドでミラーする。
 
 ### Testing
+
 - api: pytest。`TEST_DATABASE_URL` 未設定時は in-memory SQLite にフォールバック、CI は Postgres
   service container で `alembic upgrade head` + pytest。
 - web: Vitest（unit）/ Playwright（E2E）。
@@ -40,9 +43,11 @@
 ## Development Environment
 
 ### Required Tools
+
 Dev Container（Terraform / AWS CLI / Python / Node / Claude Code）。`make hooks` で pre-commit を一度有効化。
 
 ### Common Commands
+
 ```bash
 # Dev:   make dev          # Postgres → api(:8000) + web(:5173)
 # Types: make gen-types    # OpenAPI からフロント型を再生成
@@ -60,4 +65,5 @@ Dev Container（Terraform / AWS CLI / Python / Node / Claude Code）。`make hoo
 - **state**: S3 ネイティブロック（`use_lockfile`）。詳細は `docs/`（正）・`docs/adr/` を参照。
 
 ---
+
 _Document standards and patterns, not every dependency_

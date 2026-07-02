@@ -2,7 +2,7 @@
 
 One-time bootstrap for the remote-state backend and CI authentication.
 
-This layer is **applied once, by a human, with local state**, *before* any
+This layer is **applied once, by a human, with local state**, _before_ any
 pipeline runs. It is **NOT** managed by `cd-infra.yml` — that workflow manages
 the app-infra layer, which depends on the resources created here.
 

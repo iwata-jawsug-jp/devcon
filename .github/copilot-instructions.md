@@ -5,10 +5,11 @@ For details, see `docs/` and each `.github/instructions/*.instructions.md`.
 
 ## Architecture
 
-- `services/api/` — backend REST API (Python / FastAPI / uvicorn)
-- `services/web/` — frontend SPA (TypeScript / Vite + Vue 3)
+- `services/backend/python/` — backend REST API (Python / FastAPI / uvicorn), nested by
+  language so future non-Python backend services can sit alongside it
+- `services/frontend/` — frontend SPA (TypeScript / Vite + Vue 3)
 - `infra/` — Terraform IaC (AWS, ap-northeast-1)
-- `web` is a static SPA, `api` a stateless JSON API. The browser calls `api`
+- `frontend` is a static SPA, `backend` a stateless JSON API. The browser calls the backend
   only via `/api/*` and never touches AWS directly.
 - The API contract is FastAPI's OpenAPI schema (`/openapi.json`) — the single
   source of truth. Generate frontend types with `make gen-types`; never
@@ -25,8 +26,9 @@ For details, see `docs/` and each `.github/instructions/*.instructions.md`.
 - **Frontend env vars MUST be `VITE_`-prefixed and non-secret** (they ship to
   the browser). Backend secrets stay server-side (SSM / Secrets Manager).
 - **Don't bypass pre-commit hooks with `--no-verify`.**
-- "Green locally" must equal "green in CI." Lint with the exact CI command
-  (e.g. `tflint --recursive`).
+- "Green locally" must equal "green in CI." The Makefile targets mirror the CI
+  commands (e.g. `make tf-lint` == CI's `tflint --recursive --config`, and
+  `make ci-frontend` reproduces the CI frontend job).
 
 ## Commands
 

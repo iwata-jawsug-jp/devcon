@@ -1,4 +1,4 @@
-# Api service hosting: container registry + (TODO) ECS Fargate behind an ALB.
+# Api service hosting: container registry + ECS Fargate behind an ALB.
 
 # ECR repository for the api image built/pushed by cd-app.yml.
 resource "aws_ecr_repository" "api" {
@@ -192,6 +192,56 @@ resource "aws_ecs_service" "api" {
   }
 
   depends_on = [aws_lb_listener.http]
+}
+
+# Application Auto Scaling target for the api service's desired count. This is
+# why aws_ecs_service.api ignores changes to desired_count — once this target
+# exists, Application Auto Scaling (not a fixed Terraform value) owns that
+# field. ecs_min_capacity == ecs_max_capacity (the dev default) effectively
+# disables scaling without removing these resources.
+resource "aws_appautoscaling_target" "api" {
+  max_capacity       = var.ecs_max_capacity
+  min_capacity       = var.ecs_min_capacity
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.api.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+# Scale out fast (60s cooldown), scale in cautiously (300s) to avoid flapping
+# on brief traffic dips. Two independent target-tracking policies (CPU and
+# memory) — whichever metric is further from target drives the scaling action.
+resource "aws_appautoscaling_policy" "api_cpu" {
+  name               = "${local.name_prefix}-api-cpu"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.api.resource_id
+  scalable_dimension = aws_appautoscaling_target.api.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.api.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = var.ecs_cpu_target_value
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
+}
+
+resource "aws_appautoscaling_policy" "api_memory" {
+  name               = "${local.name_prefix}-api-memory"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.api.resource_id
+  scalable_dimension = aws_appautoscaling_target.api.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.api.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageMemoryUtilization"
+    }
+    target_value       = var.ecs_memory_target_value
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
 }
 
 # Alt deployment shape (cheaper for low traffic): Lambda (container image from

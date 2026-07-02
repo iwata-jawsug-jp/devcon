@@ -1,5 +1,5 @@
 node_modules/
-services/web/dist/
+services/frontend/dist/
 **/.terraform/
 *.tfstate
 package-lock.json

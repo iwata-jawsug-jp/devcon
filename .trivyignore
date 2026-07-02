@@ -1,0 +1,26 @@
+# Deliberate dev-environment cost/scope trade-offs, mirroring the checkov
+# soft-fail rationale (#111). Trivy is BLOCKING in all three gate layers
+# (pre-commit / make security / CI) — new findings fail; accepted ones are
+# ignored here explicitly with a reason. Revisit when productionizing (#150).
+
+# Security group rules allow unrestricted egress (0.0.0.0/0) — standard dev
+# posture; egress restriction is a production-hardening task.
+AVD-AWS-0104
+
+# S3 buckets use SSE-S3, not customer-managed KMS keys — CMK adds cost and
+# key-management overhead not justified for this dev stack.
+AVD-AWS-0132
+
+# ALB listener is HTTP: TLS terminates at CloudFront; no custom domain/ACM
+# cert on the ALB yet (see #79 for the CloudFront security-header work).
+AVD-AWS-0054
+
+# ALB is public by design: CloudFront -> public ALB origin architecture.
+AVD-AWS-0053
+
+# drop_invalid_header_fields not enabled on the ALB — cheap to fix; candidate
+# for removal from this list when the ALB config is next touched.
+AVD-AWS-0052
+
+# No WAF on the CloudFront distribution — cost/scope decision for dev.
+AVD-AWS-0011

@@ -1,4 +1,17 @@
-FROM mcr.microsoft.com/devcontainers/base:ubuntu-22.04
+FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
+
+# ツールバージョンの単一ソース（#109）。
+# - TERRAFORM_VERSION は CI の pin（ci.yml / cd-infra.yml の terraform_version）と必ず同時に更新する。
+#   state を書くのは CI なので CI 側の pin が正。
+# - 更新手順は docs/development-environment.md の「ツールバージョンの更新手順」を参照。
+# - Node.js は CI（node-version: 24）と同じく major のみ固定（下の setup_24.x）。
+# - AWS CLI v2 / gh / Claude Code は CI のゲート（fmt/lint/test/security）対象ツールではなく
+#   結果の再現性に影響しないため、意図的に latest のまま。
+ARG TERRAFORM_VERSION=1.13.0
+ARG TFLINT_VERSION=0.63.1
+ARG TRIVY_VERSION=0.71.2
+ARG CHECKOV_VERSION=3.3.2
+ARG UV_VERSION=0.11.24
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -27,7 +40,7 @@ RUN add-apt-repository -y ppa:deadsnakes/ppa \
     && python3.14 -m ensurepip --upgrade \
     && python3.14 -m pip install --no-cache-dir --upgrade pip
 
-# Node.js 24
+# Node.js 24 — CI（ci.yml / cd-app.yml の node-version: 24）と同じく major のみ固定（minor は float）
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -49,22 +62,23 @@ RUN curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/sh
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
         > /etc/apt/sources.list.d/hashicorp.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends terraform \
+    && apt-get install -y --no-install-recommends "terraform=${TERRAFORM_VERSION}-*" \
     && rm -rf /var/lib/apt/lists/*
 
 # TFLint
-RUN curl -fsSL https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+RUN curl -fsSL https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh \
+    | TFLINT_VERSION="v${TFLINT_VERSION}" bash
 
 # Trivy (Aqua Security APT repo)
 RUN curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor -o /usr/share/keyrings/trivy.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -cs) main" \
         > /etc/apt/sources.list.d/trivy.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends trivy \
+    && apt-get install -y --no-install-recommends "trivy=${TRIVY_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
 # Checkov
-RUN python3.14 -m pip install --no-cache-dir checkov
+RUN python3.14 -m pip install --no-cache-dir "checkov==${CHECKOV_VERSION}"
 
 # GitHub CLI (gh)
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -79,20 +93,9 @@ USER vscode
 ENV NODE_OPTIONS=--no-deprecation
 ENV NPM_CONFIG_PREFIX=/home/vscode/.npm-global
 ENV PATH=/home/vscode/.local/bin:/home/vscode/.npm-global/bin:$PATH
-# TODO: GitHub Copilot CLI への切り替えを検討中（未実施）。切り替える場合の手順:
-#   1. 下記 RUN の `@anthropic-ai/claude-code` を `@github/copilot`（npm, Node.js 22+ 要）に置き換える。
-#      パッケージ名は要検証: https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
-#      （旧 `@githubnext/github-copilot-cli` はサポート終了、混同しないこと）
-#   2. 初回起動時に `/login` での GitHub 認証（要 Copilot サブスクリプション）が発生するため、
-#      Dev Container 起動後の初期セットアップ手順（README / docs/development-environment.md）に追記する。
-#   3. `.claude/skills/kiro-*` は docs/sdd.md の記載どおり Copilot CLI からも利用可能な想定だが、
-#      実際の起動コマンド・スラッシュコマンド互換性（.github/copilot-instructions.md 参照）を実機で再検証する。
-#   4. CLAUDE.md 群と .github/instructions/* のミラー運用（docs/ai-instructions.md）は
-#      Claude Code 前提の記述が残っていないか棚卸しする。
-#   5. Claude Code を完全に廃止するか、両方インストールして併用するかを決め、後者の場合は
-#      本コメントの TODO ではなく、両方の npm install を残す形に変更する。
+# NOTE: GitHub Copilot CLI への切り替え検討は https://github.com/iwata-jawsug-jp/devcon/issues/117 を参照
 RUN mkdir -p /home/vscode/.npm-global \
     && npm install -g @anthropic-ai/claude-code
 
 # uv (Astral) — vscode ユーザーのローカルにインストール
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh

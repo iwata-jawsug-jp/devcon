@@ -1,0 +1,86 @@
+# Dependabot — 依存更新の自動化 (issue #113)
+#
+# 方針:
+# - weekly / minor+patch は groups で 1 PR に集約し、PR 数を抑える (major は個別 PR)。
+# - Dependabot PR は通常 PR と同じく CI (ci.yml) のゲートで受ける。
+# - pre-commit の rev は Dependabot 非対応 → 四半期ごとに `pre-commit autoupdate` を
+#   手動実行して PR を出す運用 (CONTRIBUTING.md 参照)。
+version: 2
+updates:
+  # GitHub Actions (.github/workflows/)
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    labels: ['enhancement']
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        update-types: ['minor', 'patch']
+
+  # frontend (npm)
+  - package-ecosystem: 'npm'
+    directory: '/services/frontend'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    labels: ['enhancement']
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      npm-minor-patch:
+        applies-to: version-updates
+        update-types: ['minor', 'patch']
+
+  # backend (uv — pyproject.toml + uv.lock)
+  - package-ecosystem: 'uv'
+    directory: '/services/backend/python'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    labels: ['enhancement']
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      uv-minor-patch:
+        applies-to: version-updates
+        update-types: ['minor', 'patch']
+
+  # Terraform providers (infra/ と infra/bootstrap/ の両方に provider 定義がある)
+  - package-ecosystem: 'terraform'
+    directories:
+      - '/infra'
+      - '/infra/bootstrap'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    labels: ['enhancement', 'infra']
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      terraform-minor-patch:
+        applies-to: version-updates
+        update-types: ['minor', 'patch']
+
+  # Dev Container features (.devcontainer/devcontainer.json)
+  - package-ecosystem: 'devcontainers'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    labels: ['enhancement']
+    commit-message:
+      prefix: 'chore(deps)'
+
+  # Dev Container のベースイメージ (.devcontainer/Dockerfile)
+  - package-ecosystem: 'docker'
+    directory: '/.devcontainer'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    labels: ['enhancement']
+    commit-message:
+      prefix: 'chore(deps)'

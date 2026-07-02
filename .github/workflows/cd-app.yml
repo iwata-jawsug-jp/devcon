@@ -1,11 +1,13 @@
 name: CD App
 
 # Runs after infra exists. Builds & ships the application:
-#   build      -> build api image & push to ECR (tag = commit SHA)
+#   preflight  -> check the app-layer repository variables; if any are unset
+#                 (infra not applied yet), skip every deploy job explicitly (#145)
+#   build      -> build backend (services/backend/python) image & push to ECR (tag = commit SHA)
 #   migrate    -> register a new api task-def revision with that image, then run
 #                 Alembic as a one-off Fargate task on it (gated before the roll)
 #   deploy-api -> roll the ECS service to the new revision
-#   web        -> npm run build, sync dist/ to S3, invalidate CloudFront
+#   frontend   -> npm run build, sync dist/ to S3, invalidate CloudFront
 # Auth is GitHub OIDC -> the DEPLOY role (NO long-lived AWS keys).
 on:
   push:
@@ -26,15 +28,50 @@ env:
   AWS_REGION: ap-northeast-1
 
 jobs:
+  # 0) Deploys need repository variables that only exist once the infra layer has
+  #    been applied and its outputs registered. Until then, skip (don't fail) so
+  #    main stays green (#145).
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Check that the app-layer repository variables are set
+        id: check
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+          PRIVATE_SUBNET_IDS: ${{ vars.PRIVATE_SUBNET_IDS }}
+          APP_SECURITY_GROUP_ID: ${{ vars.APP_SECURITY_GROUP_ID }}
+          WEB_BUCKET: ${{ vars.WEB_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          missing=()
+          for v in AWS_DEPLOY_ROLE_ARN ECR_REPOSITORY ECS_TASK_FAMILY ECS_CLUSTER ECS_SERVICE \
+                   PRIVATE_SUBNET_IDS APP_SECURITY_GROUP_ID WEB_BUCKET CLOUDFRONT_DISTRIBUTION_ID; do
+            [ -n "${!v}" ] || missing+=("$v")
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping deploy — repository variables not set: ${missing[*]}. Apply the infra layer and register its outputs (see #145 / docs/infrastructure.md)."
+          fi
+
   # 1) Build & push the api image to ECR.
   build:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
     environment: production
     permissions:
       id-token: write # OIDC
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Configure AWS credentials (deploy role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -43,13 +80,13 @@ jobs:
       - name: Log in to Amazon ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - name: Build & push api image
+      - name: Build & push backend image
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           REPOSITORY: ${{ vars.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" services/api
+          docker build -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" services/backend/python
           docker push "$REGISTRY/$REPOSITORY:$IMAGE_TAG"
 
   # 2) Register a new task-def revision with the built image, then run DB
@@ -140,7 +177,9 @@ jobs:
           aws ecs wait services-stable --cluster "$CLUSTER" --service "$SERVICE"
           echo "service rolled to $REV"
 
-  web:
+  frontend:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -148,15 +187,15 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: services/web
+        working-directory: services/frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: services/web/package-lock.json
+          cache-dependency-path: services/frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
       - name: Build

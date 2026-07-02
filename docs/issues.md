@@ -4,8 +4,10 @@ GitHub issue を実装するときの運用ルール。全体の規約は [`../C
 
 ## 基本ループ
 
-- **最新の `main` からブランチを切る。** 1 issue = 1 ブランチ。バグは `fix/<slug>`、機能は
-  `feat/<slug>`。無関係な既存ブランチ（sandbox 等）を流用しない。
+- **最新の `main` からブランチを切る。** 1 issue = 1 ブランチ。内容に応じたプレフィックスを
+  使う: バグは `fix/<slug>`、機能は `feat/<slug>`、ドキュメントは `docs/<slug>`、テスト/CI
+  ゲートは `test/<slug>`、インフラは `infra/<slug>`、リリース作業は `release/<slug>`。
+  無関係な既存ブランチ（sandbox 等）を流用しない。
 - **見つけた事象は、直す前に issue へ記録する。** デバッグは固定の 3 ステップではなくループ:
   1. **着手時** — ブランチ + 計画をコメント。
   2. **原因ごと** — 見つけた原因（特に修正の途中で CI が新たに表面化させた root cause）を、
@@ -18,12 +20,14 @@ GitHub issue を実装するときの運用ルール。全体の規約は [`../C
   該当ジョブが _緑_ になるのを確認する。「トリガーされた」「走った」は成功ではない。失敗時は
   `gh run view --job <id> --log-failed` でログを読んでから「直った」と言う。
 - **ローカル検証は CI と同じコマンドで。** ゆるいローカル変種ではなく workflow のステップを
-  ミラーする。例: CI は `tflint --recursive`（`infra/bootstrap/` も走査）を回すが `make tf-lint`
-  は回さない。green な Makefile ターゲットは CI が green である証明にはならない。
+  ミラーする。例: `make tf-lint` は CI と同じ `tflint --recursive --config`（`infra/bootstrap/`
+  も走査）を回し、CI の frontend ジョブは `make ci-frontend` で一発再現できる。ゲートを変える
+  ときは pre-commit / Makefile / CI の三層を揃えて更新する。
 - **記録した原因が誤りと分かったら訂正する。** 調査で root cause が違うと分かったら、古い記述を
   残さず正確な原因をコメントする。
 - **確認なしに `main` へマージしない。** PR は開いたまま「準備できた」と伝える。マージはユーザー
-  の判断（`.claude/settings.json` のゲートも参照）。
+  の判断（`.claude/settings.json` に `gh pr merge` 等の allow エントリがなく、デフォルトで
+  確認を挟む）。
 
 ## 関連ドキュメント
 

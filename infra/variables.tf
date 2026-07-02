@@ -106,3 +106,29 @@ variable "db_skip_final_snapshot" {
   type        = bool
   default     = false
 }
+
+# --- ECS Application Auto Scaling (api.tf) ---
+
+variable "ecs_min_capacity" {
+  description = "Minimum number of running api tasks."
+  type        = number
+  default     = 1
+}
+
+variable "ecs_max_capacity" {
+  description = "Maximum number of running api tasks Application Auto Scaling can create. Equal to ecs_min_capacity effectively disables scaling (dev default)."
+  type        = number
+  default     = 1
+}
+
+variable "ecs_cpu_target_value" {
+  description = "Target average CPU utilization percentage for ECS task autoscaling."
+  type        = number
+  default     = 60
+}
+
+variable "ecs_memory_target_value" {
+  description = "Target average memory utilization percentage for ECS task autoscaling."
+  type        = number
+  default     = 70
+}

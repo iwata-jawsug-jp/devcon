@@ -210,13 +210,290 @@ resource "aws_iam_role_policy" "ci_deploy_state" {
   policy = data.aws_iam_policy_document.tfstate_access.json
 }
 
-# TODO: tighten to least privilege per service once the app infra stabilises.
-# For now grant the broad scopes the deploy pipeline needs (S3 web bucket,
-# CloudFront invalidation, ECR push, ECS deploy, plus IAM/logs for resource
-# management). Replace these managed policies with scoped inline policies.
-resource "aws_iam_role_policy_attachment" "ci_deploy_power" {
-  role       = aws_iam_role.ci_deploy.name
-  policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
+# Least-privilege scoped policies (#45), replacing a prior PowerUserAccess
+# attachment. Split by service group to stay under per-policy size limits and
+# to keep each block reviewable. Resource ARNs are scoped to this project's
+# naming (`${var.project}-*` / `/${var.project}/*`) everywhere AWS IAM
+# supports resource-level restriction for the action; a handful of
+# describe/list/create actions genuinely require Resource "*" because the
+# service doesn't support resource-level permissions for them (called out
+# per statement below). This was derived from the AWS resource types actually
+# declared in infra/*.tf, not from CloudTrail access-history — validate with
+# `terraform plan`/`apply` against a real environment before relying on it,
+# and watch for AccessDenied errors on first use (see docs/infrastructure.md).
+
+# Networking (network.tf, endpoints.tf): VPC, subnets, IGW, route tables,
+# security groups + rules, VPC endpoints. EC2 doesn't support resource-level
+# ARN restriction for most of these actions (its managed policies like
+# AmazonVPCFullAccess use Resource "*" too), so this is scoped by action
+# rather than resource — still far narrower than PowerUserAccess, which grants
+# every EC2 action plus ~350 other services this project doesn't use.
+data "aws_iam_policy_document" "ci_deploy_network" {
+  statement {
+    sid    = "Ec2Networking"
+    effect = "Allow"
+    actions = [
+      "ec2:DescribeVpcs",
+      "ec2:CreateVpc",
+      "ec2:DeleteVpc",
+      "ec2:ModifyVpcAttribute",
+      "ec2:DescribeVpcAttribute",
+      "ec2:DescribeAvailabilityZones",
+      "ec2:DescribeAccountAttributes",
+      "ec2:DescribeSubnets",
+      "ec2:CreateSubnet",
+      "ec2:DeleteSubnet",
+      "ec2:ModifySubnetAttribute",
+      "ec2:DescribeInternetGateways",
+      "ec2:CreateInternetGateway",
+      "ec2:DeleteInternetGateway",
+      "ec2:AttachInternetGateway",
+      "ec2:DetachInternetGateway",
+      "ec2:DescribeRouteTables",
+      "ec2:CreateRouteTable",
+      "ec2:DeleteRouteTable",
+      "ec2:CreateRoute",
+      "ec2:DeleteRoute",
+      "ec2:ReplaceRoute",
+      "ec2:AssociateRouteTable",
+      "ec2:DisassociateRouteTable",
+      "ec2:ReplaceRouteTableAssociation",
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeSecurityGroupRules",
+      "ec2:CreateSecurityGroup",
+      "ec2:DeleteSecurityGroup",
+      "ec2:AuthorizeSecurityGroupIngress",
+      "ec2:AuthorizeSecurityGroupEgress",
+      "ec2:RevokeSecurityGroupIngress",
+      "ec2:RevokeSecurityGroupEgress",
+      "ec2:UpdateSecurityGroupRuleDescriptionsIngress",
+      "ec2:UpdateSecurityGroupRuleDescriptionsEgress",
+      "ec2:DescribeVpcEndpoints",
+      "ec2:CreateVpcEndpoint",
+      "ec2:DeleteVpcEndpoints",
+      "ec2:ModifyVpcEndpoint",
+      "ec2:DescribeManagedPrefixLists",
+      "ec2:GetManagedPrefixListEntries",
+      "ec2:CreateTags",
+      "ec2:DeleteTags",
+      "ec2:DescribeTags",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_deploy_network" {
+  name   = "deploy-network"
+  role   = aws_iam_role.ci_deploy.id
+  policy = data.aws_iam_policy_document.ci_deploy_network.json
+}
+
+# Compute (api.tf): ECS cluster/service/task-definition + autoscaling, ECR
+# repository (incl. the image push cd-app.yml does), and the ALB in front of
+# it. ECR repository actions and ECS cluster/service/task-definition-family
+# actions are scoped by ARN/name; `ecr:GetAuthorizationToken` and most ELB +
+# Application Auto Scaling actions require Resource "*" (no resource-level
+# support in those APIs).
+data "aws_iam_policy_document" "ci_deploy_compute" {
+  statement {
+    sid       = "EcrAuth"
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+  statement {
+    sid    = "EcrProjectRepo"
+    effect = "Allow"
+    actions = [
+      "ecr:DescribeRepositories",
+      "ecr:CreateRepository",
+      "ecr:DeleteRepository",
+      "ecr:PutLifecyclePolicy",
+      "ecr:GetLifecyclePolicy",
+      "ecr:DeleteLifecyclePolicy",
+      "ecr:SetRepositoryPolicy",
+      "ecr:GetRepositoryPolicy",
+      "ecr:PutImageScanningConfiguration",
+      "ecr:TagResource",
+      "ecr:UntagResource",
+      "ecr:ListTagsForResource",
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+      "ecr:PutImage",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+      "ecr:DescribeImages",
+      "ecr:ListImages",
+    ]
+    resources = ["arn:aws:ecr:*:*:repository/${var.project}-*"]
+  }
+  statement {
+    sid    = "EcsProjectResources"
+    effect = "Allow"
+    actions = [
+      "ecs:DescribeClusters",
+      "ecs:CreateCluster",
+      "ecs:DeleteCluster",
+      "ecs:UpdateClusterSettings",
+      "ecs:DescribeServices",
+      "ecs:CreateService",
+      "ecs:UpdateService",
+      "ecs:DeleteService",
+      "ecs:DescribeTasks",
+      "ecs:RunTask",
+      "ecs:StopTask",
+      "ecs:TagResource",
+      "ecs:UntagResource",
+      "ecs:ListTagsForResource",
+    ]
+    resources = [
+      "arn:aws:ecs:*:*:cluster/${var.project}-*",
+      "arn:aws:ecs:*:*:service/${var.project}-*/*",
+      "arn:aws:ecs:*:*:task/${var.project}-*/*",
+    ]
+  }
+  statement {
+    # Task-definition family actions don't support resource-level ARN scoping
+    # for Register/Deregister (only the resulting revision ARN exists after
+    # the call); the ecs:task-definition-family condition key restricts which
+    # family names the caller may register/describe against instead.
+    sid    = "EcsTaskDefinitions"
+    effect = "Allow"
+    actions = [
+      "ecs:RegisterTaskDefinition",
+      "ecs:DeregisterTaskDefinition",
+      "ecs:DescribeTaskDefinition",
+      "ecs:ListTaskDefinitions",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringLike"
+      variable = "ecs:task-definition-family"
+      values   = ["${var.project}-*"]
+    }
+  }
+  statement {
+    sid       = "Elb"
+    effect    = "Allow"
+    actions   = ["elasticloadbalancing:*"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "ApplicationAutoScaling"
+    effect    = "Allow"
+    actions   = ["application-autoscaling:*"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_deploy_compute" {
+  name   = "deploy-compute"
+  role   = aws_iam_role.ci_deploy.id
+  policy = data.aws_iam_policy_document.ci_deploy_compute.json
+}
+
+# Storage + CDN (web.tf): the SPA's S3 bucket + CloudFront distribution.
+# S3 is scoped to this project's bucket names; CloudFront has no
+# resource-level ARN support for most management actions.
+data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
+  statement {
+    sid    = "S3ProjectBuckets"
+    effect = "Allow"
+    actions = [
+      "s3:CreateBucket",
+      "s3:DeleteBucket",
+      "s3:GetBucketPolicy",
+      "s3:PutBucketPolicy",
+      "s3:DeleteBucketPolicy",
+      "s3:GetBucketVersioning",
+      "s3:PutBucketVersioning",
+      "s3:GetBucketPublicAccessBlock",
+      "s3:PutBucketPublicAccessBlock",
+      "s3:GetBucketTagging",
+      "s3:PutBucketTagging",
+      "s3:ListBucket",
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+    ]
+    resources = [
+      "arn:aws:s3:::${var.project}-*",
+      "arn:aws:s3:::${var.project}-*/*",
+    ]
+  }
+  statement {
+    sid       = "CloudFront"
+    effect    = "Allow"
+    actions   = ["cloudfront:*"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_deploy_storage_cdn" {
+  name   = "deploy-storage-cdn"
+  role   = aws_iam_role.ci_deploy.id
+  policy = data.aws_iam_policy_document.ci_deploy_storage_cdn.json
+}
+
+# Data + logs (db.tf, shared.tf): RDS instance/subnet group and the
+# CloudWatch log group. RDS Describe*/List* actions require Resource "*";
+# the mutating actions are scoped to this project's DB identifier/subnet
+# group name.
+data "aws_iam_policy_document" "ci_deploy_data" {
+  statement {
+    sid    = "RdsDescribe"
+    effect = "Allow"
+    actions = [
+      "rds:DescribeDBInstances",
+      "rds:DescribeDBSubnetGroups",
+      "rds:ListTagsForResource",
+    ]
+    resources = ["*"]
+  }
+  statement {
+    sid    = "RdsProjectResources"
+    effect = "Allow"
+    actions = [
+      "rds:CreateDBInstance",
+      "rds:ModifyDBInstance",
+      "rds:DeleteDBInstance",
+      "rds:AddTagsToResource",
+      "rds:RemoveTagsFromResource",
+    ]
+    resources = ["arn:aws:rds:*:*:db:${var.project}-*"]
+  }
+  statement {
+    sid    = "RdsSubnetGroup"
+    effect = "Allow"
+    actions = [
+      "rds:CreateDBSubnetGroup",
+      "rds:ModifyDBSubnetGroup",
+      "rds:DeleteDBSubnetGroup",
+    ]
+    resources = ["arn:aws:rds:*:*:subgrp:${var.project}-*"]
+  }
+  statement {
+    sid    = "LogsProjectGroup"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:DeleteLogGroup",
+      "logs:DescribeLogGroups",
+      "logs:PutRetentionPolicy",
+      "logs:TagResource",
+      "logs:UntagResource",
+      "logs:ListTagsForResource",
+    ]
+    resources = ["arn:aws:logs:*:*:log-group:/${var.project}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_deploy_data" {
+  name   = "deploy-data"
+  role   = aws_iam_role.ci_deploy.id
+  policy = data.aws_iam_policy_document.ci_deploy_data.json
 }
 
 # PowerUserAccess excludes IAM writes, but the app infra creates/manages its own

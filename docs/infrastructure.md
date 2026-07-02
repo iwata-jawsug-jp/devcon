@@ -39,8 +39,19 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
   （ロックは state と同じバケットの `<key>.tflock` オブジェクト）。
 - **GitHub OIDC プロバイダ**（`token.actions.githubusercontent.com`, aud `sts.amazonaws.com`）
 - **CI 用 IAM ロール 2 つ**
-  - `*-ci-plan` … PR 用の読み取り専用（plan）
-  - `*-ci-deploy` … main / `production` 用のデプロイ
+  - `*-ci-plan` … PR 用の読み取り専用（plan）。AWS 管理の `ReadOnlyAccess`。
+  - `*-ci-deploy` … main / `production` 用のデプロイ。**最小権限化済み**（#45）: 以前は
+    `PowerUserAccess` だったが、`infra/*.tf` が実際に宣言するリソース種別（EC2 ネットワーク・
+    ECS・ECR・ELB・RDS・S3・CloudFront・CloudWatch Logs・Application Auto Scaling）ごとに
+    スコープした inline policy（`ci_deploy_network`/`ci_deploy_compute`/
+    `ci_deploy_storage_cdn`/`ci_deploy_data`、`bootstrap/main.tf`）に置き換えた。IAM 自体の
+    権限（ECS タスクロールの作成・PassRole）は元から `${var.project}-*` ロール名に
+    スコープ済み（`ci_deploy_iam`）。
+    **注意**: `bootstrap/` は `cd-infra.yml` の管理対象外 — このポリシー変更は
+    CI では自動適用されない。ローカルで `cd infra/bootstrap && terraform apply` を
+    実行して初めて反映される。CloudTrail 等の実アクセス履歴からではなく静的なリソース種別
+    分析から導出したため、初回 apply/デプロイで `AccessDenied` が出た場合は
+    該当アクションを追加すること。
   - いずれも assume-role を OIDC の `sub`/`aud` 条件（org/repo）で制限
 
 > **Terraform バージョン要件**: bootstrap 層は `>= 1.9`、アプリ層は `>= 1.11`
@@ -80,14 +91,20 @@ gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform -chdir=infra/bootstrap o
 `cd-infra.yml` が管理。`backend.tf` は **部分設定**（`backend "s3" {}`）で、env ごとの
 hcl を渡して初期化する。
 
-| ファイル | 内容 |
-| --- | --- |
-| `network.tf` | VPC（2 AZ・public/private subnet・IGW）、app SG / db SG。TODO: NAT / VPC エンドポイント |
-| `db.tf` | **RDS for PostgreSQL**（private subnet・暗号化・非公開・Secrets Manager マネージド認証） |
-| `web.tf` | SPA 配信用のプライベート S3。TODO: CloudFront(OAC) / ACM・Route53 |
-| `api.tf` | ECR リポジトリ。TODO: ECS Fargate + ALB（代替: Lambda + API GW） |
-| `shared.tf` | CloudWatch ロググループ。TODO: タスク IAM |
-| `providers.tf` / `versions.tf` / `variables.tf` / `outputs.tf` / `backend.tf` | 共通定義 |
+> ファイル名・リソース論理名の `api`/`web` は `services/backend/python` / `services/frontend`
+> という**アプリ側のディレクトリ名とは独立**（[ADR-0004](adr/0004-rename-services-by-role-and-nest-backend-by-language.md)）。
+> リソース名を追従させるとリソースの再作成（replace）を招くため、意図的に変更していない。
+
+| ファイル                                                                      | 内容                                                                                                                                                                             |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.tf`                                                                     | レイヤ共通の locals（`name_prefix`）・データソース（caller identity / region）                                                                                                   |
+| `network.tf`                                                                  | VPC（2 AZ・public/private subnet・IGW）、app SG / db SG。TODO: NAT ゲートウェイ（private subnet の egress 用）                                                                   |
+| `endpoints.tf`                                                                | ECR / CloudWatch Logs / Secrets Manager 向け VPC インターフェースエンドポイント + S3 ゲートウェイエンドポイント（NAT なしで Fargate タスクがプライベートリンク経由でアクセス）   |
+| `db.tf`                                                                       | **RDS for PostgreSQL**（private subnet・暗号化・非公開・Secrets Manager マネージド認証）                                                                                         |
+| `web.tf`                                                                      | SPA 配信（S3 + CloudFront（OAC）+ セキュリティヘッダーポリシー）。TODO: カスタムドメイン用の ACM 証明書 / Route53（`var.domain_name` 設定時のみ）                                |
+| `api.tf`                                                                      | ECR リポジトリ + ECS Fargate（クラスタ・タスク定義・サービス）+ ALB + Application Auto Scaling（CPU/メモリのターゲット追跡、#44）。代替案としてコメントに Lambda + API GW も記載 |
+| `shared.tf`                                                                   | CloudWatch ロググループ、ECS タスク実行ロール / タスクロール（IAM）                                                                                                              |
+| `providers.tf` / `versions.tf` / `variables.tf` / `outputs.tf` / `backend.tf` | 共通定義                                                                                                                                                                         |
 
 ### データベース（RDS for PostgreSQL）
 
@@ -99,6 +116,20 @@ hcl を渡して初期化する。
 - 保管時暗号化・自動バックアップ・IAM 認証・Performance Insights を有効化。multi-AZ /
   削除保護 / final snapshot は env 変数（dev は安価、prod は堅牢）。
 - **マイグレーションの適用は CD（`cd-app.yml` の専用ジョブ）**が担う（下記）。
+
+### API（ECS Fargate）のオートスケール（#44）
+
+`api.tf` の `aws_appautoscaling_target` + `aws_appautoscaling_policy`（CPU / メモリの
+target tracking、2本）。`aws_ecs_service.api` は `desired_count` を `lifecycle.ignore_changes`
+で無視しているため、初期作成後は Application Auto Scaling とデプロイパイプライン
+（`cd-app.yml` の `update-service`）が実際の値を管理する。
+
+- `ecs_min_capacity` / `ecs_max_capacity` / `ecs_cpu_target_value` / `ecs_memory_target_value`
+  （`variables.tf`）で調整。**dev は `min == max == 1` でスケール実質無効化**、
+  **prod は `min=1, max=4` で実際にスケールする**（`env/{dev,prod}.tfvars.example` 参照）。
+  スケールアウトは 60 秒、スケールインは 300 秒のクールダウン（頻繁な増減を避ける）。
+- ALB リクエスト数ベースのターゲット追跡（`ALBRequestCountPerTarget`）は未導入。CPU/メモリで
+  不足する場合に追加を検討。
 
 ```bash
 # リモート state で初期化（env ごとの backend hcl を指定）
@@ -142,11 +173,11 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 `.github/workflows/` に配置。CI は Makefile / pre-commit と同じゲートを通すので
 「ローカルで green == CI で green」。
 
-| ワークフロー | トリガー | 役割 |
-| --- | --- | --- |
-| `ci.yml` | PR / main push | 変更パスのみ per-service で検証 |
-| `cd-infra.yml` | PR / main push | Terraform plan（PR）/ apply（main） |
-| `cd-app.yml` | main push / 手動 | アプリのビルド & デプロイ |
+| ワークフロー   | トリガー         | 役割                                                    |
+| -------------- | ---------------- | ------------------------------------------------------- |
+| `ci.yml`       | PR / main push   | 変更パスのみ per-service で検証                         |
+| `cd-infra.yml` | PR / 手動        | Terraform plan（PR）/ apply（手動 `workflow_dispatch`） |
+| `cd-app.yml`   | main push / 手動 | アプリのビルド & デプロイ                               |
 
 ### `ci.yml`
 

@@ -59,14 +59,14 @@ node_modules/
 npm-debug.log*
 yarn-error.log
 .pnpm-debug.log*
-services/web/dist/
+services/frontend/dist/
 coverage/
-# ---- Web (Vite / Vitest / Playwright) ----
-services/web/openapi.json
-services/web/playwright-report/
-services/web/test-results/
-services/web/.vite/
-services/web/.lighthouseci/
+# ---- Frontend (Vite / Vitest / Playwright) ----
+services/frontend/openapi.json
+services/frontend/playwright-report/
+services/frontend/test-results/
+services/frontend/.vite/
+services/frontend/.lighthouseci/
 
 # cc-sdd の導入時バックアップ（SDD 試験導入 #61）
 .cc-sdd.backup/

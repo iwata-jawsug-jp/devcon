@@ -1,6 +1,6 @@
 # Run `pre-commit install` once to enable. See `make hooks`.
 # Update hook versions with `pre-commit autoupdate`.
-minimum_pre_commit_version: "3.5.0"
+minimum_pre_commit_version: '3.5.0'
 
 repos:
   # ---- General hygiene ----
@@ -10,14 +10,14 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-        args: ["--allow-multiple-documents"]
+        args: ['--allow-multiple-documents']
       - id: check-json
       - id: check-merge-conflict
       - id: check-added-large-files
-        args: ["--maxkb=1024"]
+        args: ['--maxkb=1024']
       - id: detect-private-key
       - id: mixed-line-ending
-        args: ["--fix=lf"]
+        args: ['--fix=lf']
 
   # ---- Terraform ----
   - repo: https://github.com/antonbabenko/pre-commit-terraform
@@ -27,29 +27,44 @@ repos:
       - id: terraform_validate
       - id: terraform_tflint
         args:
-          - "--args=--config=__GIT_WORKING_DIR__/.tflint.hcl"
+          - '--args=--config=__GIT_WORKING_DIR__/.tflint.hcl'
+      # Informational (--soft-fail), matching `make security` and CI's soft_fail —
+      # remaining findings are deliberate cost/scope trade-offs (see issue #111).
       - id: terraform_checkov
         args:
-          - "--args=--quiet"
-          - "--args=--compact"
+          - '--args=--quiet'
+          - '--args=--compact'
+          - '--args=--soft-fail'
+      # Blocking, like `make security` and CI — accepted findings live in
+      # .trivyignore with reasons (#150).
       - id: terraform_trivy
         args:
-          - "--args=--severity=HIGH,CRITICAL"
+          - '--args=--severity=HIGH,CRITICAL'
+          - '--args=--ignorefile=__GIT_WORKING_DIR__/.trivyignore'
 
   # ---- Python (ruff: lint + format) ----
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.13
     hooks:
       - id: ruff
-        args: ["--fix"]
-        files: ^services/api/
+        args: ['--fix']
+        files: ^services/backend/python/
       - id: ruff-format
-        files: ^services/api/
+        files: ^services/backend/python/
 
   # ---- Node / TypeScript / web assets (prettier) ----
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v4.0.0-alpha.8
+  # Uses the frontend's own prettier (version pinned by services/frontend/package.json +
+  # package-lock.json) so the hook and `npm run format` always agree. Requires
+  # services/frontend/node_modules (installed by `make setup`); fails with a clear
+  # "Executable ... not found" otherwise. Deliberately NOT `npx`: npx silently falls back
+  # to fetching prettier@latest from the registry when node_modules is missing.
+  - repo: local
     hooks:
       - id: prettier
+        name: prettier
+        entry: services/frontend/node_modules/.bin/prettier --write --ignore-unknown
+        language: system
         files: \.(ts|tsx|js|jsx|mjs|cjs|vue|json|yaml|yml|md|html|css)$
-        exclude: ^(services/web/dist/|services/web/src/api/schema\.ts|services/web/playwright-report/|.*\.terraform/)
+        # .claude/skills/ and .kiro/settings/templates/ are cc-sdd upstream artifacts
+        # (docs/sdd.md) — leave them unformatted to keep diffs vs upstream small (#127).
+        exclude: ^(services/frontend/dist/|services/frontend/src/api/schema\.ts|services/frontend/playwright-report/|.*\.terraform/|\.claude/skills/|\.kiro/settings/templates/)

@@ -1,0 +1,9 @@
+# Mirrors the repo-root .prettierignore for runs from this directory
+# (`npm run format`); prettier only reads .prettierignore from the cwd. #127
+dist/
+dev-dist/
+coverage/
+playwright-report/
+test-results/
+# Generated from the API's OpenAPI schema by `make gen-types` — never format or edit
+src/api/schema.ts

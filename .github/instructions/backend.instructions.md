@@ -1,10 +1,10 @@
 ---
-applyTo: 'services/api/**'
+applyTo: 'services/backend/python/**'
 ---
 
 # Backend (Python / FastAPI)
 
-Details: `docs/app-development.md`, `services/api/CLAUDE.md`.
+Details: `docs/app-development.md`, `services/backend/python/CLAUDE.md`.
 
 - Always run Python via `uv run`. Never use bare `python` / `pip`.
 - Route handlers are async. Inject dependencies with `Depends`.

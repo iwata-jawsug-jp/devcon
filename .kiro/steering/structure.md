@@ -2,16 +2,20 @@
 
 ## Organization Philosophy
 
-トップは**サービス別**（`services/api` / `services/web` / `infra`）のモノレポ。各サービス内は
-**レイヤード**（api は router → repository → model、web は view/component → api client → 生成型）。
+トップは**サービス別**（`services/backend/python` / `services/frontend` / `infra`）のモノレポ。
+`backend/` は開発言語ごとにサブフォルダを分ける（将来 Python 以外を追加する場合は
+`services/backend/<言語>/` を並置）。各サービス内は**レイヤード**（backend は
+router → repository → model、frontend は view/component → api client → 生成型）。
 規約・ルールの「正」は `docs/` に一本化し、`CLAUDE.md` 群はそれを参照する薄い抽出に留める。
 
 ## Directory Patterns
 
 ### バックエンド API
-**Location**: `services/api/src/api/`
+
+**Location**: `services/backend/python/src/api/`
 **Purpose**: FastAPI アプリ。レイヤごとにディレクトリ分割。
 **Example**:
+
 - `routers/` — エンドポイント（`items.py` は `/api/items` の GET/POST）
 - `schemas/` — Pydantic の request/response（`ItemBase` → `ItemCreate` / `Item`）
 - `repositories/` — データアクセス（`ItemRepository`、raw SQL 禁止）
@@ -19,12 +23,14 @@
 - `alembic/versions/` — マイグレーション（`<rev>_<slug>.py`、現 head = `0001`）
 
 ### フロントエンド Web
-**Location**: `services/web/src/`
+
+**Location**: `services/frontend/src/`
 **Purpose**: Vite + Vue 3 SPA。
 **Example**: `views/` / `components/` / `api/`（`client.ts` ＝ API クライアント、
 `schema.ts` ＝ **OpenAPI から自動生成・手書き禁止**）
 
 ### インフラ / ドキュメント
+
 **Location**: `infra/`（Terraform 2 層）/ `docs/`（規約の正）/ `.kiro/`（SDD 成果物）
 
 ## Naming Conventions
@@ -42,4 +48,5 @@
 - **秘密は持ち込まない**: `.env`/`*.tfvars`/鍵は git-ignore、`*.example` のみコミット。
 
 ---
+
 _Document patterns, not file trees. New files following patterns shouldn't require updates_

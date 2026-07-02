@@ -10,7 +10,7 @@
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
   },
   "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {
       "version": "latest",
       "moby": true,
       "dockerDashComposeVersion": "v2"
@@ -51,5 +51,5 @@
       }
     }
   },
-  "postCreateCommand": "bash .devcontainer/init-persist.sh && terraform -version && tflint --version && trivy --version && checkov --version && aws --version && node --version && python3 --version && uv --version && rg --version | head -1 && gh --version | head -1 && docker --version"
+  "postCreateCommand": "bash .devcontainer/post-create.sh"
 }

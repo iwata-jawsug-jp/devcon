@@ -3,38 +3,38 @@ SHELL := /bin/bash
 
 INFRA_DIR     := infra
 BOOTSTRAP_DIR := infra/bootstrap
-API_DIR       := services/api
-WEB_DIR       := services/web
+BACKEND_DIR   := services/backend/python
+FRONTEND_DIR  := services/frontend
 
-.PHONY: help setup hooks dev gen-types fmt lint test security \
+.PHONY: help setup hooks dev gen-types fmt lint test security ci-frontend \
         db-up db-down migrate makemigration \
         tf-init tf-fmt tf-validate tf-plan tf-lint \
-        api-setup api-dev api-test api-lint \
-        web-setup web-dev web-build web-lint web-test web-test-e2e
+        backend-setup backend-dev backend-test backend-lint \
+        frontend-setup frontend-dev frontend-build frontend-lint frontend-test frontend-test-e2e
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 ## ---- Bootstrap ----
-setup: api-setup web-setup hooks ## Install all toolchains + git hooks
+setup: backend-setup frontend-setup hooks ## Install all toolchains + git hooks
 
 hooks: ## Install pre-commit git hooks
 	pip install --quiet pre-commit || python3 -m pip install --quiet pre-commit
 	pre-commit install
 
 ## ---- Run locally ----
-dev: db-up ## Run api (:8000) and web (:5173) together (starts the db first)
-	@echo "api → http://localhost:8000/docs   web → http://localhost:5173   (Ctrl-C to stop)"
+dev: db-up ## Run backend (:8000) and frontend (:5173) together (starts the db first)
+	@echo "backend → http://localhost:8000/docs   frontend → http://localhost:5173   (Ctrl-C to stop)"
 	@trap 'kill 0' INT TERM EXIT; \
-		( cd $(API_DIR) && uv run uvicorn api.main:app --reload --port 8000 ) & \
-		( cd $(WEB_DIR) && npm run dev ) & \
+		( cd $(BACKEND_DIR) && uv run uvicorn api.main:app --reload --port 8000 ) & \
+		( cd $(FRONTEND_DIR) && npm run dev ) & \
 		wait
 
-gen-types: ## Generate web TS types from the API OpenAPI schema
-	cd $(API_DIR) && uv run python -c "import json,sys; from api.main import app; json.dump(app.openapi(), sys.stdout)" > $(CURDIR)/$(WEB_DIR)/openapi.json
-	cd $(WEB_DIR) && npx --yes openapi-typescript openapi.json -o src/api/schema.ts
-	rm -f $(WEB_DIR)/openapi.json
+gen-types: ## Generate frontend TS types from the API OpenAPI schema
+	cd $(BACKEND_DIR) && uv run python -c "import json,sys; from api.main import app; json.dump(app.openapi(), sys.stdout)" > $(CURDIR)/$(FRONTEND_DIR)/openapi.json
+	cd $(FRONTEND_DIR) && npx --yes openapi-typescript openapi.json -o src/api/schema.ts
+	rm -f $(FRONTEND_DIR)/openapi.json
 
 ## ---- Database ----
 db-up: ## Start the local Postgres container (detached)
@@ -44,23 +44,35 @@ db-down: ## Stop and remove local containers
 	docker compose down
 
 migrate: ## Apply Alembic migrations (alembic upgrade head)
-	cd $(API_DIR) && uv run alembic upgrade head
+	cd $(BACKEND_DIR) && uv run alembic upgrade head
 
 makemigration: ## Autogenerate a migration: make makemigration m="message"
-	cd $(API_DIR) && uv run alembic revision --autogenerate -m "$(m)"
+	cd $(BACKEND_DIR) && uv run alembic revision --autogenerate -m "$(m)"
 
 ## ---- Aggregate ----
 fmt: tf-fmt ## Format everything
-	cd $(API_DIR) && uv run ruff format .
-	cd $(WEB_DIR) && npm run format
+	cd $(BACKEND_DIR) && uv run ruff format .
+	cd $(FRONTEND_DIR) && npm run format
 
-lint: tf-lint api-lint web-lint ## Lint everything
+lint: tf-lint backend-lint frontend-lint ## Lint everything
 
-test: api-test web-test ## Run all unit tests (api pytest + web vitest)
+test: backend-test frontend-test ## Run all unit tests (backend pytest + frontend vitest)
 
-security: ## Run Trivy + Checkov over infra
-	trivy config $(INFRA_DIR)
-	checkov -d $(INFRA_DIR) --quiet --compact
+# checkov is informational (--soft-fail) in all three gates (pre-commit / make / CI) —
+# remaining findings (WAF, Multi-AZ RDS, KMS CMKs, custom-domain HTTPS, access logging, ...)
+# are deliberate cost/scope trade-offs for this dev-tier stack. See issue #111.
+security: ## Run Trivy + Checkov over infra (same severity/soft-fail as pre-commit and CI)
+	trivy config --severity HIGH,CRITICAL --ignorefile .trivyignore $(INFRA_DIR)
+	checkov -d $(INFRA_DIR) --quiet --compact --soft-fail
+
+ci-frontend: ## Reproduce the CI frontend job locally (mirrors ci.yml step order)
+	cd $(FRONTEND_DIR) && npm run lint
+	cd $(FRONTEND_DIR) && npx vue-tsc --noEmit
+	cd $(FRONTEND_DIR) && npm test
+	cd $(FRONTEND_DIR) && npm run build
+	cd $(FRONTEND_DIR) && npm run check:bundle-budget
+	cd $(FRONTEND_DIR) && npx lhci autorun
+	cd $(FRONTEND_DIR) && npm run test:e2e
 
 ## ---- Terraform ----
 tf-init: ## terraform init (app layer; pass BACKEND=env/<env>.backend.hcl for remote state)
@@ -75,37 +87,38 @@ tf-validate: ## terraform validate
 tf-plan: ## terraform plan (uses env/dev.tfvars if present)
 	cd $(INFRA_DIR) && terraform plan $$( [ -f env/dev.tfvars ] && echo -var-file=env/dev.tfvars )
 
-tf-lint: ## tflint
-	cd $(INFRA_DIR) && tflint --init && tflint --config=$(CURDIR)/.tflint.hcl
+tf-lint: ## tflint --recursive over infra (same command as CI)
+	cd $(INFRA_DIR) && tflint --init --config=$(CURDIR)/.tflint.hcl \
+		&& tflint --recursive --config=$(CURDIR)/.tflint.hcl
 
-## ---- Python API (services/api, FastAPI) ----
-api-setup: ## uv sync (install deps)
-	cd $(API_DIR) && uv sync
+## ---- Backend (services/backend/python, FastAPI) ----
+backend-setup: ## uv sync (install deps)
+	cd $(BACKEND_DIR) && uv sync
 
-api-dev: ## uvicorn --reload on :8000
-	cd $(API_DIR) && uv run uvicorn api.main:app --reload --port 8000
+backend-dev: ## uvicorn --reload on :8000
+	cd $(BACKEND_DIR) && uv run uvicorn api.main:app --reload --port 8000
 
-api-test: ## pytest
-	cd $(API_DIR) && uv run pytest
+backend-test: ## pytest
+	cd $(BACKEND_DIR) && uv run pytest
 
-api-lint: ## ruff check + mypy
-	cd $(API_DIR) && uv run ruff check . && uv run mypy
+backend-lint: ## ruff check + mypy
+	cd $(BACKEND_DIR) && uv run ruff check . && uv run mypy
 
-## ---- Web SPA (services/web, Vite + Vue 3) ----
-web-setup: ## npm install
-	cd $(WEB_DIR) && npm install
+## ---- Frontend (services/frontend, Vite + Vue 3) ----
+frontend-setup: ## npm install
+	cd $(FRONTEND_DIR) && npm install
 
-web-dev: ## vite dev server on :5173
-	cd $(WEB_DIR) && npm run dev
+frontend-dev: ## vite dev server on :5173
+	cd $(FRONTEND_DIR) && npm run dev
 
-web-build: ## vue-tsc + vite build
-	cd $(WEB_DIR) && npm run build
+frontend-build: ## vue-tsc + vite build
+	cd $(FRONTEND_DIR) && npm run build
 
-web-lint: ## eslint + vue-tsc typecheck
-	cd $(WEB_DIR) && npm run lint && npm run typecheck
+frontend-lint: ## eslint + vue-tsc typecheck
+	cd $(FRONTEND_DIR) && npm run lint && npm run typecheck
 
-web-test: ## vitest unit tests
-	cd $(WEB_DIR) && npm test
+frontend-test: ## vitest unit tests
+	cd $(FRONTEND_DIR) && npm test
 
-web-test-e2e: ## playwright e2e tests
-	cd $(WEB_DIR) && npm run test:e2e
+frontend-test-e2e: ## playwright e2e tests
+	cd $(FRONTEND_DIR) && npm run test:e2e

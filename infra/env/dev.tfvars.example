@@ -23,3 +23,9 @@ db_backup_retention      = 7
 db_multi_az              = false
 db_deletion_protection   = false
 db_skip_final_snapshot   = true
+
+# --- ECS Application Auto Scaling — min=max disables scaling (dev doesn't need it) ---
+ecs_min_capacity         = 1
+ecs_max_capacity         = 1
+ecs_cpu_target_value     = 60
+ecs_memory_target_value  = 70

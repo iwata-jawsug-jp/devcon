@@ -21,8 +21,8 @@ Remote state per env: `terraform init -backend-config=env/<env>.backend.hcl`; va
 ## Commands
 
 - `make tf-init` · `make tf-plan` · `make tf-validate` · `make security` (Trivy + Checkov)
-- **Lint:** CI runs `tflint --recursive` (it scans `bootstrap/` too); `make tf-lint` does
-  NOT. A green `make tf-lint` is not proof CI is green — when in doubt run `tflint --recursive`.
+- **Lint:** `make tf-lint` runs the same `tflint --recursive --config=.tflint.hcl` as CI
+  (it scans `bootstrap/` too).
 
 ## Conventions
 
@@ -34,8 +34,9 @@ Remote state per env: `terraform init -backend-config=env/<env>.backend.hcl`; va
 
 ## Deploys happen in CI, not locally
 
-Don't run `terraform apply`/`destroy` or push images by hand — `cd-infra.yml` (gated by the
-`production` GitHub Environment on merge to main) owns app-infra changes. Auth is GitHub OIDC
-→ an IAM role per job; never add an `AWS_ACCESS_KEY_ID` secret.
+Don't run `terraform apply`/`destroy` or push images by hand — `cd-infra.yml` (`apply` gated
+behind manual `workflow_dispatch`, not automatic on merge to main — see `docs/infrastructure.md`
+for why) owns app-infra changes. Auth is GitHub OIDC → an IAM role per job; never add an
+`AWS_ACCESS_KEY_ID` secret.
 
 See `docs/infrastructure.md` for `cd-infra.yml` / `cd-app.yml` detail.
