@@ -140,7 +140,7 @@ jobs:
           terraform init -backend=false
           terraform validate
       - name: Set up TFLint
-        uses: terraform-linters/setup-tflint@v4
+        uses: terraform-linters/setup-tflint@v6
       # Same command as `make tf-lint`: without --config, tflint would silently
       # ignore the repo-root .tflint.hcl (and its AWS ruleset).
       - name: TFLint
