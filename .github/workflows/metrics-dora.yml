@@ -1,0 +1,134 @@
+name: DORA Metrics
+
+# Weekly deployment frequency / lead time for changes (see docs/adr/0006-...).
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Start date (YYYY-MM-DD, inclusive). Defaults to 6 days before "until".'
+        required: false
+      until:
+        description: 'End date (YYYY-MM-DD, inclusive). Defaults to yesterday (UTC).'
+        required: false
+
+permissions:
+  contents: write # to push the docs/metrics/ snapshot branch (not main directly)
+  actions: read # to list cd-app.yml workflow runs
+  pull-requests: read # to search merged PRs
+
+concurrency:
+  group: metrics-dora
+  cancel-in-progress: false
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Compute date range
+        id: range
+        run: |
+          set -euo pipefail
+          until="${{ inputs.until }}"
+          since="${{ inputs.since }}"
+          [ -n "$until" ] || until=$(date -u -d 'yesterday' +%F)
+          [ -n "$since" ] || since=$(date -u -d "$until - 6 days" +%F)
+          echo "since=$since" >> "$GITHUB_OUTPUT"
+          echo "until=$until" >> "$GITHUB_OUTPUT"
+          echo "month=$(date -u -d "$until" +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Aggregate DORA metrics
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .github/scripts/dora_metrics.py \
+            --owner "${{ github.repository_owner }}" \
+            --repo "${{ github.event.repository.name }}" \
+            --since "${{ steps.range.outputs.since }}" \
+            --until "${{ steps.range.outputs.until }}" \
+            --format markdown | tee metrics.md
+
+      # Separate 4-week window purely to compute a moving-average line — the
+      # snapshot log entry above stays scoped to the requested since/until so
+      # weekly runs don't re-log overlapping weeks.
+      - name: Compute trailing 4-week average
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trailing_since=$(date -u -d "${{ steps.range.outputs.until }} - 27 days" +%F)
+          python3 .github/scripts/dora_metrics.py \
+            --owner "${{ github.repository_owner }}" \
+            --repo "${{ github.event.repository.name }}" \
+            --since "$trailing_since" \
+            --until "${{ steps.range.outputs.until }}" \
+            --format summary | tee trailing.txt
+
+      - name: Write job summary
+        run: |
+          {
+            echo "### DORA metrics: ${{ steps.range.outputs.since }} .. ${{ steps.range.outputs.until }}"
+            echo
+            cat metrics.md
+            echo
+            cat trailing.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Append monthly snapshot
+        id: snapshot
+        run: |
+          set -euo pipefail
+          mkdir -p docs/metrics
+          file="docs/metrics/${{ steps.range.outputs.month }}.md"
+          if [ ! -f "$file" ]; then
+            printf '# DORA metrics snapshot: %s\n' "${{ steps.range.outputs.month }}" > "$file"
+            printf '\nMeasurement definitions: [ADR-0006](../adr/0006-dora-deployment-frequency-and-lead-time-definitions.md).\n' >> "$file"
+          fi
+          {
+            printf '\n## %s .. %s (recorded %s)\n\n' \
+              "${{ steps.range.outputs.since }}" "${{ steps.range.outputs.until }}" "$(date -u +%FT%TZ)"
+            cat metrics.md
+            echo
+            cat trailing.txt
+            echo
+          } >> "$file"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      # main requires the "guard" status check even on direct pushes (repo ruleset),
+      # so the snapshot has to land via a PR like everything else, not `git push` to main.
+      - name: Commit snapshot to a branch
+        id: commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${{ steps.snapshot.outputs.file }}"
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          branch="chore/dora-metrics-snapshot-${{ steps.range.outputs.until }}-${{ github.run_id }}"
+          git checkout -b "$branch"
+          git commit -m "chore(metrics): DORA weekly snapshot ${{ steps.range.outputs.since }}..${{ steps.range.outputs.until }}"
+          git push -u origin "$branch"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      # This repo has "Allow GitHub Actions to create and approve pull requests"
+      # disabled (deliberately, per its no-standing-privilege security posture), so
+      # `gh pr create` here would fail. Push the branch and hand off a one-click
+      # compare link instead of a PAT that would bypass that control.
+      - name: Print snapshot PR link
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          compare_url="${{ github.server_url }}/${{ github.repository }}/compare/main...${{ steps.commit.outputs.branch }}?expand=1"
+          {
+            echo
+            echo "Snapshot branch pushed: \`${{ steps.commit.outputs.branch }}\`."
+            echo "Open a PR to land it on main: $compare_url"
+          } >> "$GITHUB_STEP_SUMMARY"

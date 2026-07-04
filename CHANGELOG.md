@@ -7,6 +7,40 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-04
+
+### Added
+
+- **DORAメトリクスの週次自動計測**（#237）: DORA Four Keysのうちデプロイ頻度・変更リード
+  タイムを、追加インフラなしにGitHub Actions/GitHub APIのデータだけで自動集計する。
+  - 計測定義（デプロイイベント・リードタイムの判定ロジック）をADR-0006として記録。
+  - `.github/scripts/dora_metrics.py`（Python標準ライブラリのみ、単体テスト付き）で
+    週次のデプロイ回数（backend/frontend/合算）とリードタイム（中央値・p85）を算出。
+  - `.github/workflows/metrics-dora.yml` を `schedule`（週次）+ `workflow_dispatch`
+    （任意期間指定）で実行し、job summaryへの出力と `docs/metrics/` への月次スナップ
+    ショット追記を行う。`main` の必須ステータスチェックにより直接pushできないため、
+    スナップショットはブランチpush + job summaryへのcompareリンク提示で、PRは手動で開く。
+  - 直近4週間の移動平均をあわせて出力。
+  - 公開用リポジトリへの変換公開時は `schedule` トリガーのみ除去する（継続的な自動実行は
+    公開用には想定しないため）。
+- **SDDの実装フェーズ運用規約**（#211, #212, #213）: 帳簿同期・design整合・非機能要件の
+  所有について、実装フェーズ中の運用ルールを追加。
+- **authn-authz spec の承認**: 認証・認可の要件・設計・タスクをspecとして追加し、現行の
+  ディレクトリ構成に追従の上、tasksの承認を反映。
+
+### Fixed
+
+- **eslintとprettierの整形ルール衝突**（#214）: `eslint-config-prettier` を導入し、
+  両ツールが競合する整形ルールを無効化。
+- **`make ci-frontend` のLighthouse実行**（#215）: ローカルにChromeが無い環境向けに、
+  LHCIの起動先をPlaywright同梱のchromiumへフォールバックする。
+- **`cd-app-sandbox.yml` のデプロイジョブ**（#185）: app層のリポジトリ変数が未設定の間は
+  デプロイジョブを明示的にskipし、main相当のゲート方針を sandbox 系ワークフローにも合わせる。
+
+### Changed
+
+  除外する運用）を明文化。
+
 ## [0.2.0] - 2026-07-02
 
 ### Added
@@ -315,7 +349,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.2...v0.1.3

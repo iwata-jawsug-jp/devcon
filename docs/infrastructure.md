@@ -260,6 +260,13 @@ rule`）を返し設定できないので、上記のとおり apply を手動 `
 `WEB_BUCKET` / `CLOUDFRONT_DISTRIBUTION_ID` / `ECS_CLUSTER` / `ECS_SERVICE` /
 `ECS_TASK_FAMILY` / `PRIVATE_SUBNET_IDS` / `APP_SECURITY_GROUP_ID`。
 
+### `metrics-dora.yml`（DORAメトリクス計測）
+
+`cd-app.yml` の実行結果と merge 済み PR から、デプロイ頻度・変更リードタイムを週次で自動集計
+（`schedule` + `workflow_dispatch`）し、job summary と [docs/metrics/](metrics/README.md) に
+記録する。計測定義は [ADR-0006](adr/0006-dora-deployment-frequency-and-lead-time-definitions.md)
+を参照（issue #237）。
+
 ### CI/CD のルール
 
 - **長期 AWS キーを置かない。** 認証は GitHub OIDC → ジョブごとに IAM ロールを引き受ける
@@ -282,4 +289,5 @@ rule`）を返し設定できないので、上記のとおり apply を手動 `
 ## 関連ドキュメント
 
 - [app-development.md](app-development.md) — api / web のアプリ開発
+- [metrics/README.md](metrics/README.md) — DORAメトリクス（デプロイ頻度・変更リードタイム）
 - [`../CLAUDE.md`](../CLAUDE.md) — アーキテクチャと規約の正

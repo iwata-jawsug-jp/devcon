@@ -22,6 +22,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       infra: ${{ steps.filter.outputs.infra }}
+      scripts: ${{ steps.filter.outputs.scripts }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -36,6 +37,9 @@ jobs:
               - '.github/workflows/ci.yml'
             infra:
               - 'infra/**'
+              - '.github/workflows/ci.yml'
+            scripts:
+              - '.github/scripts/**'
               - '.github/workflows/ci.yml'
 
   backend:
@@ -170,3 +174,18 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           trivyignores: .trivyignore
+
+  scripts:
+    needs: changes
+    if: ${{ needs.changes.outputs.scripts == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Ruff (lint + format check)
+        run: make metrics-dora-lint
+      - name: Unit tests (stdlib-only, no deps to install)
+        run: make metrics-dora-test

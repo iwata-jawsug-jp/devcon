@@ -10,7 +10,8 @@ FRONTEND_DIR  := services/frontend
         db-up db-down migrate makemigration \
         tf-init tf-fmt tf-validate tf-plan tf-lint \
         backend-setup backend-dev backend-test backend-lint \
-        frontend-setup frontend-dev frontend-build frontend-lint frontend-test frontend-test-e2e
+        frontend-setup frontend-dev frontend-build frontend-lint frontend-test frontend-test-e2e \
+        metrics-dora-lint metrics-dora-test
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -54,9 +55,9 @@ fmt: tf-fmt ## Format everything
 	cd $(BACKEND_DIR) && uv run ruff format .
 	cd $(FRONTEND_DIR) && npm run format
 
-lint: tf-lint backend-lint frontend-lint ## Lint everything
+lint: tf-lint backend-lint frontend-lint metrics-dora-lint ## Lint everything
 
-test: backend-test frontend-test ## Run all unit tests (backend pytest + frontend vitest)
+test: backend-test frontend-test metrics-dora-test ## Run all unit tests (backend pytest + frontend vitest + metrics unittest)
 
 # checkov is informational (--soft-fail) in all three gates (pre-commit / make / CI) —
 # remaining findings (WAF, Multi-AZ RDS, KMS CMKs, custom-domain HTTPS, access logging, ...)
@@ -71,7 +72,16 @@ ci-frontend: ## Reproduce the CI frontend job locally (mirrors ci.yml step order
 	cd $(FRONTEND_DIR) && npm test
 	cd $(FRONTEND_DIR) && npm run build
 	cd $(FRONTEND_DIR) && npm run check:bundle-budget
-	cd $(FRONTEND_DIR) && npx lhci autorun
+	cd $(FRONTEND_DIR) && \
+		if [ -z "$$CHROME_PATH" ] && ! command -v google-chrome >/dev/null 2>&1 \
+			&& ! command -v google-chrome-stable >/dev/null 2>&1 \
+			&& ! command -v chromium >/dev/null 2>&1 \
+			&& ! command -v chromium-browser >/dev/null 2>&1; then \
+			CHROME_PATH="$$(node -e 'console.log(require("@playwright/test").chromium.executablePath())')"; \
+			export CHROME_PATH; \
+			echo "lhci: no Chrome found — falling back to Playwright chromium: $$CHROME_PATH"; \
+		fi; \
+		npx lhci autorun
 	cd $(FRONTEND_DIR) && npm run test:e2e
 
 ## ---- Terraform ----
@@ -122,3 +132,16 @@ frontend-test: ## vitest unit tests
 
 frontend-test-e2e: ## playwright e2e tests
 	cd $(FRONTEND_DIR) && npm run test:e2e
+
+## ---- Metrics (.github/scripts, stdlib-only) ----
+# ruff version pinned here MUST match .pre-commit-config.yaml's rev (ruff-pre-commit) —
+# not services/backend/python's uv-managed ruff, which pins independently and would drift.
+METRICS_RUFF_VERSION := 0.11.13
+
+metrics-dora-lint: ## ruff check + format --check over .github/scripts
+	python3 -m pip install --quiet "ruff==$(METRICS_RUFF_VERSION)"
+	python3 -m ruff check .github/scripts
+	python3 -m ruff format --check .github/scripts
+
+metrics-dora-test: ## Run the DORA metrics script's unit tests
+	cd .github/scripts && python3 -m unittest discover -s tests -t . -v

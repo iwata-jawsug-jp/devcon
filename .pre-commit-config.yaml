@@ -43,14 +43,16 @@ repos:
           - '--args=--ignorefile=__GIT_WORKING_DIR__/.trivyignore'
 
   # ---- Python (ruff: lint + format) ----
+  # .github/scripts/ has no dependencies of its own (stdlib-only tooling scripts), so it
+  # has no pyproject.toml — ruff falls back to its defaults there, which is fine for it.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.13
     hooks:
       - id: ruff
         args: ['--fix']
-        files: ^services/backend/python/
+        files: ^(services/backend/python/|\.github/scripts/)
       - id: ruff-format
-        files: ^services/backend/python/
+        files: ^(services/backend/python/|\.github/scripts/)
 
   # ---- Node / TypeScript / web assets (prettier) ----
   # Uses the frontend's own prettier (version pinned by services/frontend/package.json +

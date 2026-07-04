@@ -130,6 +130,12 @@ npm run build     # vue-tsc + vite-ssg build（全ルートをプリレンダー
 規約: Vue 3 Composition API（`<script setup lang="ts">`）、strict mode、ESM（`type: module`）、
 eslint + prettier。型チェックは必ず `vue-tsc`（`tsc` は Vue の型を解決できないため不可）。
 
+> `make ci-frontend`（CI のフロントエンドジョブのローカル再現）に含まれる Lighthouse CI は
+> Chrome を必要とするが、Dev Container には Chrome を同梱していない。そのため Makefile は
+> `CHROME_PATH` 未設定かつ Chrome 系コマンドが見つからない場合に限り、Playwright の
+> chromium（`npx playwright install chromium` で導入済みのもの）へ自動フォールバックする。
+> CI の Ubuntu ランナーは Chrome 同梱のためフォールバックは発動しない。
+
 ---
 
 ## 5. コミット前の品質ゲート
