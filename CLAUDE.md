@@ -5,6 +5,9 @@ Guidance for Claude Code in this repo. Area-specific rules live in nested `CLAUD
 
 ## Critical rules
 
+- **Respond in Japanese in chat by default.** Code, commit messages, PR/issue bodies, and
+  other artifacts still follow existing conventions (English/Japanese mixed); this only
+  governs the conversational reply language.
 - **Never merge to `main` without explicit confirmation.** Leave the PR open and say it's
   ready; merging is the user's call (`.claude/settings.json` has no allow entry for
   `gh pr merge` / `merge_pull_request`, so it defaults to asking). Note: `.claude/settings.local.json`

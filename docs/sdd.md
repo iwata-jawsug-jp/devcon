@@ -114,6 +114,7 @@ cc-sdd の導入/更新（`npx cc-sdd@latest --claude-skills ...`）は、ルー
 - **公開ミラー**: `.claude/skills/kiro-*` と `.kiro/`（settings / steering / 提示できる specs）は
   公開リポジトリ（`iwata-jawsug-jp/devcon`）にそのまま出してよい（SDD ワークフローの実例として
   価値がある）。**生煮えの作業中 spec をコミットしたまま Release しない**こと。除外が必要になった
+  場合のみ release.md の除外リストに追加する。
 - **Copilot ミラー対象外**: SDD 成果物（`.kiro/`）は「**何を作るか**」であり、実装規約
   （`CLAUDE.md` / `.github/instructions/*` ＝「**どう書くか**」）とは役割が異なる。両者を混同せず、
   `.kiro/` を Copilot instructions のミラー対象にはしない（[ai-instructions.md](ai-instructions.md)）。

@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-05
+
+
+### Changed
+
+- **チャット応答の既定言語を明記**（#289）: `CLAUDE.md`／`.github/copilot-instructions.md` に、
+  対話の応答は原則日本語である旨を追記。成果物（コード・コミットメッセージ・PR/issue 本文等）
+  の言語運用は変更しない。
+
 ## [0.2.2] - 2026-07-05
 
 ### Added
@@ -290,6 +299,7 @@
   ~50 行に圧縮し、落とし穴を `## Critical rules` として前方集約。領域固有の規約は
   path-scoped な nested `CLAUDE.md`（`services/api/` / `services/web/` / `infra/`）へ降ろし、
   そのサブツリーを触ったときだけ on-demand ロードする構成に。詳細は `@` なしのプレーン参照
+  （`docs/app-development.md` / `docs/infrastructure.md` / `docs/sandbox.md`）へ委譲。重複
   （raw SQL 禁止 / Alembic 必須 / `vue-tsc` / `make gen-types`）を各 1 箇所へ集約。
 - Working from issues フローを `docs/issues.md` として新規切り出し（ルートから参照）。
 - **`cd-infra.yml`**: `backend.hcl` / `*.tfvars` を git-ignored の `.example` から CI 実行時に
@@ -320,6 +330,7 @@
 - **sandbox 開発環境**: `sandbox/*` 隔離ブランチで CI/CD を実 AWS 検証。専用ワークフロー
   `ci-sandbox.yml` / `cd-infra-sandbox.yml` / `cd-app-sandbox.yml`（`push:[sandbox/**]`）、
   `sandbox-guard.yml` + GitHub ルールセットで **`sandbox/*` → 非 sandbox のマージを禁止**、
+  `env/sandbox.*.example`、`docs/sandbox.md`。sandbox 関連リソースは公開ミラー対象外。
 - bootstrap の deploy ロールに **プロジェクト限定の IAM 管理権限**（ECS ロール作成 / PassRole /
   ServiceLinkedRole）を付与。deploy 信頼に `refs/heads/sandbox/*` を追加。
 - 運用ドキュメント: `CLAUDE.md` に「Working from issues」と sandbox ポリシー、

@@ -17,6 +17,9 @@ For details, see `docs/` and each `.github/instructions/*.instructions.md`.
 
 ## Rules you must follow
 
+- **Respond in Japanese in chat by default.** Code, commit messages, PR/issue bodies, and
+  other artifacts still follow existing conventions (English/Japanese mixed); this only
+  governs the conversational reply language.
 - **Never merge directly to `main`.** Leave the PR open; merging is a human's
   call.
 - **Never commit secrets.** `.env` / `*.tfvars` / keys are git-ignored. Commit

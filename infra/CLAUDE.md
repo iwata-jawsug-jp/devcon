@@ -40,3 +40,4 @@ for why) owns app-infra changes. Auth is GitHub OIDC → an IAM role per job; ne
 `AWS_ACCESS_KEY_ID` secret.
 
 See `docs/infrastructure.md` for `cd-infra.yml` / `cd-app.yml` detail.
+See `docs/sandbox.md` for `sandbox/*` real-AWS verification.

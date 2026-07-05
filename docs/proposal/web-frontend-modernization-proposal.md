@@ -133,6 +133,7 @@ flowchart LR
   静的 HTML を返す方式（`vite-ssg` の `prerender: true` 相当）に限定する。
 - **すべてのテーマを 1 issue に詰め込まない。** Epic #46 と同じ運用（親 issue は方針検討、決まった
   範囲ごとに 1 issue → 1 focused PR）に倣う。
+- **CloudFront の設定変更は `sandbox/*` で実 AWS 検証してから `main` へ**（sandbox.md 方針）。
 - **認証（#41）が未実装の間は、認証 UI に関する意思決定を急がない。** 先に決めすぎるとバックエンド
   設計との齟齬が生じるリスクがある。
 

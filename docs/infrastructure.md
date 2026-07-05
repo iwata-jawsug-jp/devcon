@@ -227,6 +227,7 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 | `ci.yml`       | PR / main push   | 変更パスのみ per-service で検証                         |
 | `cd-infra.yml` | PR / 手動        | Terraform plan（PR）/ apply（手動 `workflow_dispatch`） |
 | `cd-app.yml`   | main push / 手動 | アプリのビルド & デプロイ                               |
+| `publish.yml`  | Release 公開     | 公開リポジトリへのミラー（release.md）    |
 
 ### `ci.yml`
 
