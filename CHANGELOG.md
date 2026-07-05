@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-07-05
+
+### Security
+
+- **frontend の開発用依存関係にある Dependabot アラート対応**: `@lhci/cli`（Lighthouse CI、
+  開発時のみ使用でプロダクションビルドには含まれない）が要求する `tmp@^0.1.0` /
+  `uuid@^8.3.1` の範囲がパッチ済みバージョンを含まず、Dependabot が
+  [`tmp` の Path Traversal（CVE-2026-44705, High）](https://github.com/iwata-jawsug-jp/devcon/security/dependabot/3)、
+  [`uuid` のバッファ境界チェック漏れ（CVE-2026-41907, Medium）](https://github.com/iwata-jawsug-jp/devcon/security/dependabot/2)、
+  [`tmp` のシンボリックリンク経由の任意ファイル書き込み（CVE-2025-54798, Low）](https://github.com/iwata-jawsug-jp/devcon/security/dependabot/1)
+  を検知していた。`package.json` の `overrides` で `tmp@^0.2.6` / `uuid@^11.1.1` に強制固定し、
+  `npm audit` の指摘を解消（lint/typecheck/test/`lhci healthcheck` で動作確認済み）。
+
 ## [0.2.4] - 2026-07-05
 
 ### Added

@@ -56,5 +56,9 @@
     "vite-ssg-sitemap": "^0.10.0",
     "vitest": "^4.1.9",
     "vue-tsc": "^2.1.0"
+  },
+  "overrides": {
+    "tmp": "^0.2.6",
+    "uuid": "^11.1.1"
   }
 }
