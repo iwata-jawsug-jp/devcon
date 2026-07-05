@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-05
+
+### Added
+
+- **SECURITY.md**: 公開用リポジトリ（`iwata-jawsug-jp/devcon`）向けに脆弱性報告ポリシーを追加。
+  GitHub の Private Vulnerability Reporting 経由での報告を案内する
+
+
 ## [0.2.3] - 2026-07-05
 
 
