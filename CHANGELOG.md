@@ -7,6 +7,83 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-05
+
+### Added
+
+- **認証・認可（Cognito/JWT）の導入**（#41, Epic #46）: Cognito Hosted UI + JWT による
+  認証・認可を追加。Terraform で User Pool・Resource Server（`api/items.read`/
+  `api/items.write` スコープ）・パブリッククライアント（PKCE）を構築し、backend は
+  `get_current_user`（JWT 署名/exp/iss/token_use/client_id 検証）と `require_scope`、
+  frontend は `oidc-client-ts` ベースの `AuthStore`（トークンはメモリ限定保持）・
+  ログイン/コールバック画面・ルーターガード・401 時の 1 回限りのリフレッシュ＋再試行を実装。
+  既存 `items` ルーターに GET=読み取り/POST=書き込みスコープを適用。read/write を超える
+  ロール・所有者ベース認可（→ #40）、WAF・レート制限（→ #44）、MFA 等はスコープ外として
+  次の issue へ切り出し。
+  - `.env.example` への Cognito サンプル値追記（#255）。
+- **可観測性の整備**（Epic #42）: メトリクス・ダッシュボード・アラーム・トレース・SLO を
+  一式追加。
+  - **構造化ログ＋リクエスト相関 ID**（backend のみ）: JSON 1 行ログ（`JsonFormatter`）と、
+    `X-Request-ID` を引き継ぐ/生成する `CorrelationIdMiddleware` を追加。
+  - **分散トレーシング**: OpenTelemetry 計装＋ ADOT コレクタサイドカー→ AWS X-Ray を採用
+    （ADR-0007）。`API_OTEL_TRACES_ENABLED`（dev 既定 false・prod 既定 true）で有効化し、
+    無効時は追加コスト 0。JSON ログにも `trace_id`/`span_id` を付与。
+  - **CloudWatch アラーム＋ SNS 通知**: ALB 5xx/レイテンシ、ECS CPU/メモリ、RDS CPU/
+    接続数/空き容量の 7 アラームをメール通知（`alert_email` 未設定なら購読自体を作らない）。
+  - **CloudWatch ダッシュボード**: 上記と同じ指標を 1 枚にまとめ、
+    `terraform output cloudwatch_dashboard_url` で確認できる出力を追加。
+  - **ヘルスチェックの DB 疎通確認＋ SLO/SLI 方針**: `GET /api/health` が `SELECT 1` で
+    DB 疎通を確認し、失敗時は 503 を返すよう修正（従来は DB 全断でも 200 を返していた）。
+    SLI（可用性＝ ALB 2XX 比率、レイテンシ＝ p95 TargetResponseTime）を
+    `docs/infrastructure.md` に提案として記録。
+- **負荷・性能テスト（k6）の導入**（#43）: `perf/k6/items-smoke.js` で health→list→get→
+  create のシナリオを p95 レイテンシ・エラー率のしきい値で判定。毎週日曜＋手動実行のみで
+  PR ごとには回さない。認証はスタブ化し、自前 API（ルーティング/バリデーション/DB 層）の
+  性能に計測範囲を意図的に限定。
+- **フロントエンドの DESIGN.md 仕様ビジュアルアイデンティティ文書**（#263）:
+  `docs/frontend-design.md` を DESIGN.md 仕様（YAML トークン＋ prose）で追加し、既存の
+  `brand-*` カラー・`font-sans` スタックから 1:1 で作成。
+- **DESIGN.md からのテーマトークン自動生成**（#264）: `@google/design.md` を導入し、
+  `docs/frontend-design.md` のトークンから `main.css` の `@theme` ブロックを生成する
+  `make gen-design-tokens` を追加。`design:lint`（トークン整合性・WCAG コントラスト検証）を
+  `make ci-frontend`/CI に組み込み。
+
+### Security
+
+- **deploy IAM ロールの権限をさらに縮小**（#45 follow-up）: `aws:RequestedRegion` 条件の
+  追加（リージョン依存サービスのみ）、`elasticloadbalancing:*`/`application-autoscaling:*`/
+  `cloudfront:*` の実使用アクションへの縮小、`iam:PassRole` を
+  `iam:PassedToService=ecs-tasks.amazonaws.com` 条件付きの専用ステートメントへ分離。
+  `infra/bootstrap/` は CI/CD 管理外のため、実 AWS への反映には人による手動
+  `terraform apply` が必要。
+- **plan ロールの state アクセスを dev キーのみに限定**（#45, #153）: `ci_plan` ロールが
+  `ci_deploy` と同じ state バケット全体ポリシーを共有しており、PR を開くだけで理論上
+  prod/sandbox の state ファイルを上書き・削除できた問題を修正。`ci_plan` 専用ポリシーを
+  新設し、読み取りは dev 環境の state オブジェクトのみ、書き込みは dev のロックファイルのみに
+  限定。
+- **CloudFront オリジンを ALB でシークレットヘッダー検証**（#271）: ALB のセキュリティ
+  グループは全 CloudFront ディストリビューションで共有される AWS 管理プレフィックス
+  リストしか見ておらず、他人のディストリビューションからこの ALB へ直接到達できた問題を
+  修正。CloudFront が `X-Origin-Verify` シークレットヘッダーを付与し、ALB リスナーは
+  デフォルト拒否（403）＋ヘッダー一致時のみ転送するルールへ変更。
+
+### Fixed
+
+- **CI ツールのバージョン固定**（#272）: `setup-tflint`/`trivy-action`/checkov が
+  `.devcontainer/Dockerfile` の固定バージョンと異なるバージョンで実行されていた問題を修正し、
+  tflint 0.63.1 / trivy 0.71.2 / checkov 3.3.2 に統一。
+- **frontend の生成型ドリフト**（#270）: `HealthResponse` が手書きのままで、生成済み
+  `HealthStatus`（`database` フィールド追加済み）から乖離していた問題を修正。
+- **mypy のスコープ不一致**（#269）: CI の `uv run mypy .` と `make backend-lint` の
+  `mypy` が異なるファイル集合を検査していた（`alembic/` が CI のみ対象）問題を修正。
+
+### Changed
+
+- **`settings.local.json` がマージ確認ゲートを緩めうる点を明記**（#268）: `CLAUDE.md` の
+  「main への無断マージ禁止」が permission 設定だけに依存するものではなく、標準的な運用
+  ルールであることを明確化。
+
+
 ## [0.2.1] - 2026-07-04
 
 ### Added
@@ -34,12 +111,8 @@
   両ツールが競合する整形ルールを無効化。
 - **`make ci-frontend` のLighthouse実行**（#215）: ローカルにChromeが無い環境向けに、
   LHCIの起動先をPlaywright同梱のchromiumへフォールバックする。
-- **`cd-app-sandbox.yml` のデプロイジョブ**（#185）: app層のリポジトリ変数が未設定の間は
-  デプロイジョブを明示的にskipし、main相当のゲート方針を sandbox 系ワークフローにも合わせる。
 
-### Changed
 
-  除外する運用）を明文化。
 
 ## [0.2.0] - 2026-07-02
 
@@ -349,7 +422,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.3...v0.1.4

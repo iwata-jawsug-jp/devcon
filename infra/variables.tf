@@ -132,3 +132,67 @@ variable "ecs_memory_target_value" {
   type        = number
   default     = 70
 }
+
+# --- Observability (observability.tf, #42) ---
+
+variable "alert_email" {
+  description = "Email address subscribed to the CloudWatch alarm SNS topic. Empty disables the subscription."
+  type        = string
+  default     = ""
+}
+
+variable "alarm_alb_5xx_threshold" {
+  description = "ALB target 5xx count (per 5-minute period) above which the alarm fires."
+  type        = number
+  default     = 5
+}
+
+variable "alarm_alb_latency_seconds" {
+  description = "ALB average target response time (seconds) above which the alarm fires."
+  type        = number
+  default     = 1
+}
+
+variable "alarm_ecs_cpu_threshold" {
+  description = "ECS api service average CPU utilization percentage above which the alarm fires."
+  type        = number
+  default     = 80
+}
+
+variable "alarm_ecs_memory_threshold" {
+  description = "ECS api service average memory utilization percentage above which the alarm fires."
+  type        = number
+  default     = 80
+}
+
+variable "alarm_rds_cpu_threshold" {
+  description = "RDS average CPU utilization percentage above which the alarm fires."
+  type        = number
+  default     = 80
+}
+
+variable "alarm_rds_connections_threshold" {
+  description = "RDS average connection count above which the alarm fires. Sized for the dev default (db.t4g.micro, ~110 max connections); lower prod headroom means raising this if the instance class grows."
+  type        = number
+  default     = 80
+}
+
+variable "alarm_rds_free_storage_bytes" {
+  description = "RDS free storage space (bytes) below which the alarm fires."
+  type        = number
+  default     = 2000000000 # 2 GiB
+}
+
+# --- Distributed tracing (ADR-0007) ---
+
+variable "otel_traces_enabled" {
+  description = "Whether to schedule the ADOT collector sidecar + enable app tracing. Off by default (extra task cpu/memory, VPC endpoint, and IAM only apply when true)."
+  type        = bool
+  default     = false
+}
+
+variable "otel_collector_image" {
+  description = "ADOT (AWS Distro for OpenTelemetry) collector image, only scheduled when otel_traces_enabled is true."
+  type        = string
+  default     = "public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0"
+}

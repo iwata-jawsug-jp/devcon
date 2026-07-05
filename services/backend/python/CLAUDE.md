@@ -9,7 +9,10 @@ language so a future non-Python backend service can sit alongside it.
 uv-managed (`pyproject.toml`, `src/api`, `tests/`). FastAPI `app` in `src/api/main.py`;
 routers in `routers/`, Pydantic models in `schemas/`, settings in `config.py`
 (`pydantic-settings`). DB layer in `db/` (SQLAlchemy `Base`, async engine/session, ORM
-models), data access in `repositories/`, migrations in `alembic/`.
+models), data access in `repositories/`, migrations in `alembic/`. Structured (JSON)
+logging + request-correlation ID in `logging_config.py` / `middleware.py` (#42) — use
+plain stdlib `logging`, don't `print()`. Distributed tracing (OpenTelemetry, off unless
+`API_OTEL_TRACES_ENABLED=true`) in `tracing.py` (ADR-0007).
 
 ## Commands (use `uv run`, never bare `python`/`pip`)
 

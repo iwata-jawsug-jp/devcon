@@ -40,13 +40,26 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
 - **GitHub OIDC プロバイダ**（`token.actions.githubusercontent.com`, aud `sts.amazonaws.com`）
 - **CI 用 IAM ロール 2 つ**
   - `*-ci-plan` … PR 用の読み取り専用（plan）。AWS 管理の `ReadOnlyAccess`。
+    state バケットへのアクセスは **`dev` キーのみ**に限定（`tfstate_access_plan`、#45/#153）:
+    `cd-infra.yml` の plan ジョブは常に `TF_ENV=dev` で走るため、PR 経由の plan が
+    prod/sandbox の state を読み書き・削除できないようにした（以前は `ci-deploy` と同じ
+    バケット全体への read/write ポリシーを共有しており、PR を開くだけで理論上 prod state を
+    削除できた）。ロック（`<key>.tflock`）の put/delete は plan にも必要なため許可するが、
+    実体の state オブジェクトへの put/delete は許可しない（apply 専用）。
   - `*-ci-deploy` … main / `production` 用のデプロイ。**最小権限化済み**（#45）: 以前は
     `PowerUserAccess` だったが、`infra/*.tf` が実際に宣言するリソース種別（EC2 ネットワーク・
     ECS・ECR・ELB・RDS・S3・CloudFront・CloudWatch Logs・Application Auto Scaling）ごとに
     スコープした inline policy（`ci_deploy_network`/`ci_deploy_compute`/
     `ci_deploy_storage_cdn`/`ci_deploy_data`、`bootstrap/main.tf`）に置き換えた。IAM 自体の
     権限（ECS タスクロールの作成・PassRole）は元から `${var.project}-*` ロール名に
-    スコープ済み（`ci_deploy_iam`）。
+    スコープ済み（`ci_deploy_iam`）。追加の絞り込み（#45）として、リージョン依存サービス
+    （EC2/ECS/ECR/RDS/CloudWatch Logs/ELB/Application Auto Scaling）の各ステートメントに
+    `aws:RequestedRegion` 条件（`var.aws_region` 限定）を付与し、`elasticloadbalancing:*`/
+    `application-autoscaling:*`/`cloudfront:*` のアクション丸ごとワイルドカードは
+    `infra/*.tf` が宣言するリソース種別から導ける個別アクションへ絞り込み、
+    `iam:PassRole` は `iam:PassedToService`（`ecs-tasks.amazonaws.com` 限定）付きの
+    独立ステートメントへ分離した。IAM/S3/CloudFront はグローバル性質のため
+    `aws:RequestedRegion` は付けていない（誤検知で `AccessDenied` になるリスクを避けた）。
     **注意**: `bootstrap/` は `cd-infra.yml` の管理対象外 — このポリシー変更は
     CI では自動適用されない。ローカルで `cd infra/bootstrap && terraform apply` を
     実行して初めて反映される。CloudTrail 等の実アクセス履歴からではなく静的なリソース種別
@@ -104,6 +117,7 @@ hcl を渡して初期化する。
 | `web.tf`                                                                      | SPA 配信（S3 + CloudFront（OAC）+ セキュリティヘッダーポリシー）。TODO: カスタムドメイン用の ACM 証明書 / Route53（`var.domain_name` 設定時のみ）                                |
 | `api.tf`                                                                      | ECR リポジトリ + ECS Fargate（クラスタ・タスク定義・サービス）+ ALB + Application Auto Scaling（CPU/メモリのターゲット追跡、#44）。代替案としてコメントに Lambda + API GW も記載 |
 | `shared.tf`                                                                   | CloudWatch ロググループ、ECS タスク実行ロール / タスクロール（IAM）                                                                                                              |
+| `observability.tf`                                                            | CloudWatch アラーム（ALB 5xx/レイテンシ、ECS CPU/メモリ、RDS CPU/接続数/空き容量）+ 通知用 SNS トピック（#42）                                                                   |
 | `providers.tf` / `versions.tf` / `variables.tf` / `outputs.tf` / `backend.tf` | 共通定義                                                                                                                                                                         |
 
 ### データベース（RDS for PostgreSQL）
@@ -130,6 +144,41 @@ target tracking、2本）。`aws_ecs_service.api` は `desired_count` を `lifec
   スケールアウトは 60 秒、スケールインは 300 秒のクールダウン（頻繁な増減を避ける）。
 - ALB リクエスト数ベースのターゲット追跡（`ALBRequestCountPerTarget`）は未導入。CPU/メモリで
   不足する場合に追加を検討。
+
+### 可観測性（アラーム・通知、#42）
+
+`observability.tf` が `aws_cloudwatch_metric_alarm` 7 本（ALB 5xx・レイテンシ、ECS
+CPU・メモリ、RDS CPU・接続数・空き容量）を `aws_sns_topic.alerts` に紐づける。
+
+- `var.alert_email` が空文字なら email 購読（`aws_sns_topic_subscription`）自体を作らない
+  （`count`）。**dev の既定値は空**（使い捨て環境でアラーム疲れを避ける）。**prod で apply
+  する前に `env/prod.tfvars` の `alert_email` を実際の宛先に差し替えること。**
+- しきい値（`alarm_*_threshold` / `alarm_*_seconds` / `alarm_*_bytes`、`variables.tf`）は
+  env ごとに上書き可能。RDS 接続数は現行のインスタンスクラス（dev: `db.t4g.micro` ≈110接続、
+  prod: `db.t4g.small` ≈225接続）を踏まえた値を `env/{dev,prod}.tfvars.example` に設定して
+  いるため、インスタンスクラスを変える際は見直すこと。
+- `aws_cloudwatch_dashboard.main`（`${name_prefix}-overview`）で上記アラームと同じ指標
+  （ALB 5xx/レイテンシ、ECS CPU/メモリ、RDS CPU/接続数/空き容量）を1枚にまとめている。
+  URL は `terraform output cloudwatch_dashboard_url`。
+- **分散トレーシング**（[ADR-0007](adr/0007-opentelemetry-adot-sidecar-for-distributed-tracing.md)）:
+  `var.otel_traces_enabled`（**dev既定はfalse、prodはtrue**）で ADOT コレクタサイドカーを
+  `aws_ecs_task_definition.api` に追加し、backend（OpenTelemetry計装済み、
+  `services/backend/python/src/api/tracing.py`）からのトレースを OTLP-gRPC で受け取って
+  AWS X-Ray へ転送する。true にすると: タスクの cpu/memory を 256/512 → 512/1024 に増やし、
+  `xray` の VPCインターフェースエンドポイント（`endpoints.tf`）と、task role への
+  `AWSXRayDaemonWriteAccess` アタッチ（`observability.tf`）が有効になる（＝月額固定費が増える）。
+- **ヘルスチェック**: `GET /api/health`（`services/backend/python/src/api/routers/health.py`）が
+  `SELECT 1` で DB 疎通を確認するようになった。DB 不通なら `503` を返し `{"database": "error"}`
+  になる（従来は DB が全断でも `200 {"status": "ok"}` を返していた — #153 finding #10）。
+  ALB のターゲットグループヘルスチェック（`api.tf` の `health_check`）も同じパスを見ているため、
+  DB 障害時は自動的にターゲットが unhealthy になり、ALB がトラフィックを止める
+  （＝ DB 障害を握りつぶさず、素早く外形に反映する設計判断）。
+- **SLI/SLO（提案、しきい値は未確定）**: 可用性 SLI = ALB `HTTPCode_Target_2XX_Count` /
+  （`2XX+4XX+5XX`合計）、レイテンシ SLI = `TargetResponseTime` の p95。目標値・エラーバジェット
+  運用は、このダッシュボード運用で数ヶ月分のベースラインが取れてから検討する
+  （DORA メトリクス [ADR-0006](adr/0006-dora-deployment-frequency-and-lead-time-definitions.md)
+  と同じ方針: 先に観測、しきい値は後で）。合成監視（CloudWatch Synthetics 等の外形監視）は
+  今回未導入 — ALB ヘルスチェック + アラームで当面代替する。
 
 ```bash
 # リモート state で初期化（env ごとの backend hcl を指定）

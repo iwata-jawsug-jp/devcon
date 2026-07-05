@@ -24,3 +24,9 @@ AVD-AWS-0052
 
 # No WAF on the CloudFront distribution — cost/scope decision for dev.
 AVD-AWS-0011
+
+# Alerts SNS topic (#42) uses the AWS-managed key (alias/aws/sns), not a
+# customer-managed KMS key — CMK adds cost/key-management overhead not
+# justified for alarm notification text on this dev stack (same rationale as
+# AVD-AWS-0132 for S3).
+AVD-AWS-0136

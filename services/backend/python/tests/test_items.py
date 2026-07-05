@@ -1,13 +1,19 @@
+from collections.abc import Callable
+
 from httpx import AsyncClient
 
+AuthedClientFactory = Callable[[list[str] | None], AsyncClient]
 
-async def test_list_items_empty(client: AsyncClient) -> None:
+
+async def test_list_items_empty(authed_client: AuthedClientFactory) -> None:
+    client = authed_client(None)
     response = await client.get("/api/items")
     assert response.status_code == 200
     assert response.json() == []
 
 
-async def test_create_item_returns_201(client: AsyncClient) -> None:
+async def test_create_item_returns_201(authed_client: AuthedClientFactory) -> None:
+    client = authed_client(None)
     payload = {"name": "widget", "description": "a test widget"}
     response = await client.post("/api/items", json=payload)
     assert response.status_code == 201
@@ -17,19 +23,22 @@ async def test_create_item_returns_201(client: AsyncClient) -> None:
     assert body["description"] == "a test widget"
 
 
-async def test_get_item_returns_200(client: AsyncClient) -> None:
+async def test_get_item_returns_200(authed_client: AuthedClientFactory) -> None:
+    client = authed_client(None)
     created = (await client.post("/api/items", json={"name": "gadget"})).json()
     response = await client.get(f"/api/items/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
-async def test_created_item_appears_in_list(client: AsyncClient) -> None:
+async def test_created_item_appears_in_list(authed_client: AuthedClientFactory) -> None:
+    client = authed_client(None)
     created = (await client.post("/api/items", json={"name": "listed"})).json()
     listed = (await client.get("/api/items")).json()
     assert any(item["id"] == created["id"] for item in listed)
 
 
-async def test_get_missing_item_returns_404(client: AsyncClient) -> None:
+async def test_get_missing_item_returns_404(authed_client: AuthedClientFactory) -> None:
+    client = authed_client(None)
     response = await client.get("/api/items/999999")
     assert response.status_code == 404

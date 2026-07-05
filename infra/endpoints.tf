@@ -45,13 +45,18 @@ resource "aws_vpc_endpoint" "s3" {
 }
 
 # Interface endpoints for ECR (api + dkr), CloudWatch Logs, and Secrets Manager.
+# `xray` is added only when tracing is enabled (ADR-0007) — the ADOT collector
+# sidecar needs it to reach the X-Ray API with no NAT gateway in this VPC.
 locals {
-  interface_endpoints = {
-    ecr_api        = "ecr.api"
-    ecr_dkr        = "ecr.dkr"
-    logs           = "logs"
-    secretsmanager = "secretsmanager"
-  }
+  interface_endpoints = merge(
+    {
+      ecr_api        = "ecr.api"
+      ecr_dkr        = "ecr.dkr"
+      logs           = "logs"
+      secretsmanager = "secretsmanager"
+    },
+    var.otel_traces_enabled ? { xray = "xray" } : {}
+  )
 }
 
 resource "aws_vpc_endpoint" "interface" {

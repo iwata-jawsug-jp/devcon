@@ -11,6 +11,12 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.51",
     "asyncpg>=0.29",
     "alembic>=1.13",
+    "PyJWT[crypto]>=2.10.0",
+    "opentelemetry-api>=1.43.0",
+    "opentelemetry-sdk>=1.43.0",
+    "opentelemetry-instrumentation-fastapi>=0.64b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.64b0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.43.0",
 ]
 
 [dependency-groups]
@@ -52,4 +58,7 @@ source = ["src/api"]
 [tool.mypy]
 python_version = "3.14"
 strict = true
-files = ["src", "tests"]
+# Keep in sync with CI's `mypy .` (ci.yml) — the CLI path argument there overrides this
+# `files` list, so both must cover the same set or "green locally" can diverge from CI (#153,
+# #269). alembic/ is included because it already passes strict mypy cleanly.
+files = ["src", "tests", "perf", "alembic"]

@@ -13,7 +13,11 @@ export interface paths {
         };
         /**
          * Health
-         * @description Return service health status.
+         * @description Return service health, including DB reachability.
+         *
+         *     This is also the ALB target-group health check (``infra/api.tf``), so a DB
+         *     outage now correctly takes the target out of rotation instead of reporting
+         *     "ok" while every real request would fail (#42, #153 finding #10).
          */
         get: operations["health_api_health_get"];
         put?: never;
@@ -33,13 +37,13 @@ export interface paths {
         };
         /**
          * List Items
-         * @description Return all items.
+         * @description Return all items. Requires an authenticated caller with read scope.
          */
         get: operations["list_items_api_items_get"];
         put?: never;
         /**
          * Create Item
-         * @description Create a new item and return it.
+         * @description Create a new item and return it. Requires an authenticated caller with write scope.
          */
         post: operations["create_item_api_items_post"];
         delete?: never;
@@ -57,7 +61,7 @@ export interface paths {
         };
         /**
          * Get Item
-         * @description Return a single item by id, or 404 if not found.
+         * @description Return a single item by id, or 404 if not found. Requires read scope.
          */
         get: operations["get_item_api_items__item_id__get"];
         put?: never;
@@ -84,6 +88,8 @@ export interface components {
         HealthStatus: {
             /** Status */
             status: string;
+            /** Database */
+            database: string;
         };
         /**
          * Item

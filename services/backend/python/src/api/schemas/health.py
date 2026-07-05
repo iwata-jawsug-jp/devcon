@@ -7,3 +7,4 @@ class HealthStatus(BaseModel):
     """Service health status."""
 
     status: str
+    database: str

@@ -171,8 +171,57 @@ resource "aws_iam_role_policy_attachment" "ci_plan_readonly" {
   policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
-# Plan also needs to read remote state + acquire the lock.
-data "aws_iam_policy_document" "tfstate_access" {
+# Plan (PRs) only ever runs against the `dev` key (cd-infra.yml hardcodes
+# TF_ENV=dev for the plan job; prod/sandbox are only ever touched via the
+# DEPLOY role). Scope ci_plan's state access to that one key so a PR-triggered
+# plan can never read, overwrite, or delete prod/sandbox state (#45, #153
+# finding: the plan role previously shared the DEPLOY role's bucket-wide
+# read/write policy).
+data "aws_iam_policy_document" "tfstate_access_plan" {
+  statement {
+    sid       = "StateBucketListDevOnly"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.state.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["${var.project}/dev/*"]
+    }
+  }
+
+  statement {
+    sid       = "StateObjectReadDevOnly"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.state.arn}/${var.project}/dev/terraform.tfstate"]
+  }
+
+  # S3-native state locking (use_lockfile): the lock is a `<key>.tflock`
+  # object in the same bucket. `plan` must still acquire/release this lock to
+  # safely read state, but (unlike `apply`) never needs to write the state
+  # object itself -- so Put/Delete is scoped to the lock file only, not the
+  # real state object.
+  statement {
+    sid       = "StateLockRWDevOnly"
+    effect    = "Allow"
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.state.arn}/${var.project}/dev/terraform.tfstate.tflock"]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_plan_state" {
+  name   = "tfstate-access-dev"
+  role   = aws_iam_role.ci_plan.id
+  policy = data.aws_iam_policy_document.tfstate_access_plan.json
+}
+
+# DEPLOY role (push to main / production env): can apply app infra against
+# any environment key (prod via cd-infra.yml's manual apply, sandbox via
+# cd-infra-sandbox.yml) -- genuinely needs read/write across the whole
+# bucket, unlike the plan role above.
+data "aws_iam_policy_document" "tfstate_access_deploy" {
   statement {
     sid       = "StateBucketList"
     effect    = "Allow"
@@ -191,13 +240,6 @@ data "aws_iam_policy_document" "tfstate_access" {
   }
 }
 
-resource "aws_iam_role_policy" "ci_plan_state" {
-  name   = "tfstate-access"
-  role   = aws_iam_role.ci_plan.id
-  policy = data.aws_iam_policy_document.tfstate_access.json
-}
-
-# DEPLOY role (push to main / production env): can apply app infra.
 resource "aws_iam_role" "ci_deploy" {
   name               = "${var.project}-ci-deploy"
   assume_role_policy = data.aws_iam_policy_document.deploy_assume_role.json
@@ -207,7 +249,7 @@ resource "aws_iam_role" "ci_deploy" {
 resource "aws_iam_role_policy" "ci_deploy_state" {
   name   = "tfstate-access"
   role   = aws_iam_role.ci_deploy.id
-  policy = data.aws_iam_policy_document.tfstate_access.json
+  policy = data.aws_iam_policy_document.tfstate_access_deploy.json
 }
 
 # Least-privilege scoped policies (#45), replacing a prior PowerUserAccess
@@ -221,6 +263,16 @@ resource "aws_iam_role_policy" "ci_deploy_state" {
 # declared in infra/*.tf, not from CloudTrail access-history — validate with
 # `terraform plan`/`apply` against a real environment before relying on it,
 # and watch for AccessDenied errors on first use (see docs/infrastructure.md).
+#
+# Follow-up narrowing (#45): the statements below also add an
+# `aws:RequestedRegion` condition (scoped to `var.aws_region`) on every
+# genuinely regional service (EC2/ECS/ECR/RDS/CloudWatch Logs/ELB/Application
+# Auto Scaling) — deliberately NOT on IAM, S3, or CloudFront, which are
+# global or have unreliable aws:RequestedRegion support. The `elasticloadbalancing:*` /
+# `application-autoscaling:*` / `cloudfront:*` action wildcards were narrowed
+# to the enumerated actions the declared resource types actually need, and
+# `iam:PassRole` was split into its own statement carrying an
+# `iam:PassedToService` condition (`ecs-tasks.amazonaws.com` only).
 
 # Networking (network.tf, endpoints.tf): VPC, subnets, IGW, route tables,
 # security groups + rules, VPC endpoints. EC2 doesn't support resource-level
@@ -279,6 +331,14 @@ data "aws_iam_policy_document" "ci_deploy_network" {
       "ec2:DescribeTags",
     ]
     resources = ["*"]
+
+    # EC2 networking is entirely regional; nothing here legitimately targets a
+    # region other than where this project's infra lives (#45).
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
 }
 
@@ -300,6 +360,12 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     effect    = "Allow"
     actions   = ["ecr:GetAuthorizationToken"]
     resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
   statement {
     sid    = "EcrProjectRepo"
@@ -328,6 +394,12 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
       "ecr:ListImages",
     ]
     resources = ["arn:aws:ecr:*:*:repository/${var.project}-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
   statement {
     sid    = "EcsProjectResources"
@@ -353,6 +425,12 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
       "arn:aws:ecs:*:*:service/${var.project}-*/*",
       "arn:aws:ecs:*:*:task/${var.project}-*/*",
     ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
   statement {
     # Task-definition family actions don't support resource-level ARN scoping
@@ -373,18 +451,81 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
       variable = "ecs:task-definition-family"
       values   = ["${var.project}-*"]
     }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
+  # ELB has no resource-level ARN support for load balancer / target group /
+  # listener creation (the ARN doesn't exist until after Create*), so this is
+  # scoped by action instead of resource -- narrowed from `elasticloadbalancing:*`
+  # to only the actions the ALB resources actually declared in api.tf need
+  # (aws_lb, aws_lb_target_group, aws_lb_listener, aws_lb_listener_rule) (#45).
   statement {
-    sid       = "Elb"
-    effect    = "Allow"
-    actions   = ["elasticloadbalancing:*"]
+    sid    = "Elb"
+    effect = "Allow"
+    actions = [
+      "elasticloadbalancing:CreateLoadBalancer",
+      "elasticloadbalancing:DeleteLoadBalancer",
+      "elasticloadbalancing:DescribeLoadBalancers",
+      "elasticloadbalancing:DescribeLoadBalancerAttributes",
+      "elasticloadbalancing:ModifyLoadBalancerAttributes",
+      "elasticloadbalancing:SetSecurityGroups",
+      "elasticloadbalancing:SetSubnets",
+      "elasticloadbalancing:CreateTargetGroup",
+      "elasticloadbalancing:DeleteTargetGroup",
+      "elasticloadbalancing:ModifyTargetGroup",
+      "elasticloadbalancing:DescribeTargetGroups",
+      "elasticloadbalancing:DescribeTargetGroupAttributes",
+      "elasticloadbalancing:ModifyTargetGroupAttributes",
+      "elasticloadbalancing:DescribeTargetHealth",
+      "elasticloadbalancing:CreateListener",
+      "elasticloadbalancing:DeleteListener",
+      "elasticloadbalancing:ModifyListener",
+      "elasticloadbalancing:DescribeListeners",
+      "elasticloadbalancing:DescribeListenerAttributes",
+      "elasticloadbalancing:CreateRule",
+      "elasticloadbalancing:DeleteRule",
+      "elasticloadbalancing:ModifyRule",
+      "elasticloadbalancing:DescribeRules",
+      "elasticloadbalancing:AddTags",
+      "elasticloadbalancing:RemoveTags",
+      "elasticloadbalancing:DescribeTags",
+    ]
     resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
+  # Application Auto Scaling has no resource-level ARN support either --
+  # narrowed from `application-autoscaling:*` to only the actions the
+  # ECS scalable-target/policy resources in api.tf need (#45).
   statement {
-    sid       = "ApplicationAutoScaling"
-    effect    = "Allow"
-    actions   = ["application-autoscaling:*"]
+    sid    = "ApplicationAutoScaling"
+    effect = "Allow"
+    actions = [
+      "application-autoscaling:RegisterScalableTarget",
+      "application-autoscaling:DeregisterScalableTarget",
+      "application-autoscaling:DescribeScalableTargets",
+      "application-autoscaling:PutScalingPolicy",
+      "application-autoscaling:DeleteScalingPolicy",
+      "application-autoscaling:DescribeScalingPolicies",
+      "application-autoscaling:DescribeScalingActivities",
+      "application-autoscaling:TagResource",
+      "application-autoscaling:UntagResource",
+      "application-autoscaling:ListTagsForResource",
+    ]
     resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
 }
 
@@ -422,11 +563,43 @@ data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
       "arn:aws:s3:::${var.project}-*",
       "arn:aws:s3:::${var.project}-*/*",
     ]
+
+    # No aws:RequestedRegion condition here: S3 bucket names are global and
+    # some SDKs/CLI (incl. cd-app.yml's `aws s3 sync`) may route through the
+    # global/us-east-1 endpoint even for a bucket created in ap-northeast-1,
+    # so adding a region condition risks spurious AccessDenied (#45).
   }
+  # CloudFront is a global service (no resource-level ARN support, no
+  # meaningful aws:RequestedRegion), so this stays scoped by action only --
+  # narrowed from `cloudfront:*` to what the OAC / response-headers-policy /
+  # distribution resources in web.tf need, plus the `aws cloudfront
+  # create-invalidation` call cd-app.yml / cd-app-sandbox.yml run directly (#45).
   statement {
-    sid       = "CloudFront"
-    effect    = "Allow"
-    actions   = ["cloudfront:*"]
+    sid    = "CloudFront"
+    effect = "Allow"
+    actions = [
+      "cloudfront:CreateOriginAccessControl",
+      "cloudfront:GetOriginAccessControl",
+      "cloudfront:UpdateOriginAccessControl",
+      "cloudfront:DeleteOriginAccessControl",
+      "cloudfront:ListOriginAccessControls",
+      "cloudfront:CreateResponseHeadersPolicy",
+      "cloudfront:GetResponseHeadersPolicy",
+      "cloudfront:UpdateResponseHeadersPolicy",
+      "cloudfront:DeleteResponseHeadersPolicy",
+      "cloudfront:ListResponseHeadersPolicies",
+      "cloudfront:CreateDistribution",
+      "cloudfront:GetDistribution",
+      "cloudfront:UpdateDistribution",
+      "cloudfront:DeleteDistribution",
+      "cloudfront:ListDistributions",
+      "cloudfront:TagResource",
+      "cloudfront:UntagResource",
+      "cloudfront:ListTagsForResource",
+      "cloudfront:CreateInvalidation",
+      "cloudfront:GetInvalidation",
+      "cloudfront:ListInvalidations",
+    ]
     resources = ["*"]
   }
 }
@@ -451,6 +624,12 @@ data "aws_iam_policy_document" "ci_deploy_data" {
       "rds:ListTagsForResource",
     ]
     resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
   statement {
     sid    = "RdsProjectResources"
@@ -463,6 +642,12 @@ data "aws_iam_policy_document" "ci_deploy_data" {
       "rds:RemoveTagsFromResource",
     ]
     resources = ["arn:aws:rds:*:*:db:${var.project}-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
   statement {
     sid    = "RdsSubnetGroup"
@@ -473,6 +658,12 @@ data "aws_iam_policy_document" "ci_deploy_data" {
       "rds:DeleteDBSubnetGroup",
     ]
     resources = ["arn:aws:rds:*:*:subgrp:${var.project}-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
   statement {
     sid    = "LogsProjectGroup"
@@ -487,6 +678,12 @@ data "aws_iam_policy_document" "ci_deploy_data" {
       "logs:ListTagsForResource",
     ]
     resources = ["arn:aws:logs:*:*:log-group:/${var.project}/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
 }
 
@@ -500,6 +697,16 @@ resource "aws_iam_role_policy" "ci_deploy_data" {
 # IAM roles (ECS task execution/task roles) and must pass them to ECS. Grant
 # IAM role management scoped to this project's role names + PassRole + the ECS/ELB
 # service-linked roles.
+#
+# PassRole is split into its own statement (rather than folded into
+# ManageProjectRoles) so it can carry an iam:PassedToService condition (#45):
+# without it, this role could pass any ${var.project}-* role to *any* AWS
+# service that supports PassRole, not just the ECS tasks service that
+# shared.tf's ecs_assume trust policy actually expects
+# (principals { type = "Service", identifiers = ["ecs-tasks.amazonaws.com"] }).
+# iam:PassedToService is only present in the request context for PassRole
+# calls, so it can't be added to a statement that also grants
+# CreateRole/AttachRolePolicy/etc.
 data "aws_iam_policy_document" "ci_deploy_iam" {
   statement {
     sid    = "ManageProjectRoles"
@@ -518,9 +725,20 @@ data "aws_iam_policy_document" "ci_deploy_iam" {
       "iam:GetRolePolicy",
       "iam:ListRolePolicies",
       "iam:ListRoleTags",
-      "iam:PassRole",
     ]
     resources = ["arn:aws:iam::*:role/${var.project}-*"]
+  }
+  statement {
+    sid       = "PassProjectRolesToEcsTasks"
+    effect    = "Allow"
+    actions   = ["iam:PassRole"]
+    resources = ["arn:aws:iam::*:role/${var.project}-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
   }
   statement {
     sid       = "ServiceLinkedRoles"

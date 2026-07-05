@@ -187,10 +187,11 @@ sequenceDiagram
 
 主要な判断: 401受信時はフロントで一度だけサイレントリフレッシュを試み、失敗時のみRequirement 4の再認証誘導を表示する（無限リトライを避ける）。
 
-**コード交換のCORS制約**: Cognitoの `/oauth2/token` エンドポイントはブラウザからの直接fetchに対し `Access-Control-Allow-Origin` を返さない場合があることが広く報告されている（実装前に対象User PoolでCORS応答を確認する）。`oidc-client-ts` は既定でこのエンドポイントに直接fetchするため、CORSが利用できない場合は以下いずれかで対応する（実装タスク側で確定する）:
+**コード交換のCORS制約（task 1.4で決定）**: AWS公式ドキュメント・re:Postでの言及により、Cognitoの `/oauth2/token`・`/oauth2/userInfo` エンドポイントはブラウザからのCORS/fetchを明示的にサポートしていることを確認した（`/oauth2/authorize`・Hosted UIの `/logout` はページ遷移前提でCORS対象外だが、これらは今回いずれもフルページリダイレクトで使うため問題にならない）。加えて、本設計のクライアントはパブリッククライアント（`generate_secret = false`）のため、コード交換リクエストは `Authorization` ヘッダ（Basic認証）を使わずbody（`client_id` 含む form-urlencoded）のみで送る形になり、confidentialクライアントで報告されている「Authorizationヘッダ付与によりnon-simple requestになりpreflightで失敗する」パターンにも該当しない。
 
-1. Cognito側の設定（Hosted UIドメイン経由のリクエストではCORS制約が緩和されるケースがあるため、Hosted UIのリダイレクトチェーン内で完結させる）で解決できるか検証する
-2. 解決できない場合、コード交換だけを担う最小限のプロキシ（CloudFront Function等）を追加する — この場合はBFF化の一部前倒しとして Revalidation Trigger に追加する
+**決定**: `oidc-client-ts` 既定の直接fetchをそのまま採用する（プロキシは追加しない）。ただし本決定は一般に公開されている情報に基づく判断であり、対象User Pool固有の挙動は未確認のため、task 4.3（sandbox実機検証）でのログイン〜コード交換の実地確認を本決定の最終確認ゲートとする。プロキシ追加（案2）は4.3で実際にCORSエラーが出た場合のフォールバックとして温存する。
+
+参考: [AWS re:Post — How to restrict CORS allowed-origins on Cognito user pool](https://repost.aws/questions/QUYiyxBJMrS-GKLrnnqvob3g/how-to-restrict-cors-allowed-orgins-on-cognito-user-pool)、[AWS re:Post — Cognito logout endpoint doesn't support OPTIONS](https://repost.aws/questions/QUqc-ds9V5TueWcUPU2_LPDw/cognito-logout-endpoint-doesn-t-support-options-so-how-can-cors-preflight-work)
 
 ## Requirements Traceability
 
@@ -488,7 +489,7 @@ class ApiClient {
 
 ## Open Questions / Risks
 
-- Cognitoトークンエンドポイントのブラウザ直接fetchに対するCORS応答は、実装開始前に対象User Poolで実際に確認する必要がある（System Flows参照）。未対応の場合はプロキシ追加が必要になり、タスクの見積もりに影響する
+- ~~Cognitoトークンエンドポイントのブラウザ直接fetchに対するCORS応答は、実装開始前に対象User Poolで実際に確認する必要がある~~ → task 1.4で調査済み。公開情報ベースで直接fetch採用に決定（System Flows参照）。対象User Pool固有の最終確認はtask 4.3のsandbox実機検証に持ち越し
 - リフレッシュトークンをメモリのみで扱うことによるUX低下（ページリロードで再ログインが必要）は許容するトレードオフとして記録する。将来的にBFF/エッジ関数によるhttpOnly Cookie化を検討する余地がある（Revalidation Trigger）
 - Cognito Hosted UIとのフルE2Eフローの自動テストはCI環境の制約上見送る。sandbox環境での手動確認手順をタスクフェーズで定義する
 - read/writeスコープを超えるロール管理・ユーザーへのスコープ付与は手動運用となる（Issue #40でのドメイン拡充時に見直す）

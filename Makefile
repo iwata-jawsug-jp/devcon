@@ -6,7 +6,7 @@ BOOTSTRAP_DIR := infra/bootstrap
 BACKEND_DIR   := services/backend/python
 FRONTEND_DIR  := services/frontend
 
-.PHONY: help setup hooks dev gen-types fmt lint test security ci-frontend \
+.PHONY: help setup hooks dev gen-types gen-design-tokens fmt lint test security perf-test ci-frontend \
         db-up db-down migrate makemigration \
         tf-init tf-fmt tf-validate tf-plan tf-lint \
         backend-setup backend-dev backend-test backend-lint \
@@ -37,6 +37,10 @@ gen-types: ## Generate frontend TS types from the API OpenAPI schema
 	cd $(FRONTEND_DIR) && npx --yes openapi-typescript openapi.json -o src/api/schema.ts
 	rm -f $(FRONTEND_DIR)/openapi.json
 
+gen-design-tokens: ## Regenerate src/main.css's @theme block from docs/frontend-design.md (DESIGN.md)
+	cd $(FRONTEND_DIR) && npm run design:gen-theme
+	cd $(FRONTEND_DIR) && npx prettier --write src/main.css
+
 ## ---- Database ----
 db-up: ## Start the local Postgres container (detached)
 	docker compose up -d db
@@ -66,9 +70,21 @@ security: ## Run Trivy + Checkov over infra (same severity/soft-fail as pre-comm
 	trivy config --severity HIGH,CRITICAL --ignorefile .trivyignore $(INFRA_DIR)
 	checkov -d $(INFRA_DIR) --quiet --compact --soft-fail
 
+## ---- Perf (Issue #43; not part of the PR-blocking CI gate — see .github/workflows/perf.yml) ----
+perf-test: ## Run the k6 load/perf smoke test against a local uvicorn instance (needs k6 on PATH, Postgres via `make db-up`)
+	cd $(BACKEND_DIR) && uv run alembic upgrade head
+	cd $(BACKEND_DIR) && ( uv run uvicorn perf.app:app --host 127.0.0.1 --port 8000 & echo $$! > /tmp/devcon-perf-app.pid )
+	@for i in $$(seq 1 20); do curl -sf http://127.0.0.1:8000/api/health > /dev/null && break; sleep 0.5; done
+	k6 run perf/k6/items-smoke.js; \
+		status=$$?; \
+		kill "$$(cat /tmp/devcon-perf-app.pid)" 2>/dev/null; \
+		rm -f /tmp/devcon-perf-app.pid; \
+		exit $$status
+
 ci-frontend: ## Reproduce the CI frontend job locally (mirrors ci.yml step order)
 	cd $(FRONTEND_DIR) && npm run lint
 	cd $(FRONTEND_DIR) && npx vue-tsc --noEmit
+	cd $(FRONTEND_DIR) && npm run design:lint
 	cd $(FRONTEND_DIR) && npm test
 	cd $(FRONTEND_DIR) && npm run build
 	cd $(FRONTEND_DIR) && npm run check:bundle-budget
@@ -124,8 +140,8 @@ frontend-dev: ## vite dev server on :5173
 frontend-build: ## vue-tsc + vite build
 	cd $(FRONTEND_DIR) && npm run build
 
-frontend-lint: ## eslint + vue-tsc typecheck
-	cd $(FRONTEND_DIR) && npm run lint && npm run typecheck
+frontend-lint: ## eslint + vue-tsc typecheck + design.md lint
+	cd $(FRONTEND_DIR) && npm run lint && npm run typecheck && npm run design:lint
 
 frontend-test: ## vitest unit tests
 	cd $(FRONTEND_DIR) && npm test

@@ -76,6 +76,8 @@ jobs:
         run: uv sync --all-extras --dev
       - name: Ruff
         run: uv run ruff check .
+      # `.` here must cover the same files as pyproject.toml's [tool.mypy] `files` list
+      # (make backend-lint runs bare `mypy`, which uses that config) — #153, #269.
       - name: Mypy
         run: uv run mypy .
       - name: Alembic migrate (validate migration on Postgres)
@@ -104,6 +106,8 @@ jobs:
         run: npm run lint
       - name: Type-check (vue-tsc)
         run: npx vue-tsc --noEmit
+      - name: DESIGN.md lint (design tokens)
+        run: npm run design:lint
       - name: Unit tests (vitest, with coverage gate)
         run: npm test
       - name: Build
@@ -143,8 +147,12 @@ jobs:
         run: |
           terraform init -backend=false
           terraform validate
+      # Version pinned to match .devcontainer/Dockerfile's TFLINT_VERSION — the single
+      # source for this repo's security/lint tool versions (#153, #272).
       - name: Set up TFLint
         uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: 'v0.63.1'
       # Same command as `make tf-lint`: without --config, tflint would silently
       # ignore the repo-root .tflint.hcl (and its AWS ruleset).
       - name: TFLint
@@ -157,15 +165,22 @@ jobs:
       # remaining findings (WAF, Multi-AZ RDS, KMS CMKs, custom-domain HTTPS, access
       # logging, ...) are deliberate cost/scope trade-offs for this dev-tier stack.
       # See issue #111.
-      - name: Checkov
-        uses: bridgecrewio/checkov-action@v12
+      #
+      # Run directly (same as `make security`) instead of bridgecrewio/checkov-action:
+      # that action has no version input and hardcodes its own checkov release per action
+      # tag (v12 currently bundles 3.3.6, not this repo's pinned CHECKOV_VERSION) — #153, #272.
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          directory: infra
-          framework: terraform
-          quiet: true
-          soft_fail: true
+          python-version: '3.14'
+      - name: Checkov
+        run: |
+          pip install --quiet checkov==3.3.2
+          checkov -d infra --quiet --compact --soft-fail
       # Trivy is BLOCKING (exit-code 1) in all three gates (pre-commit / make / CI);
       # accepted findings are ignored explicitly in .trivyignore with reasons (#150).
+      # `version` pinned to match .devcontainer/Dockerfile's TRIVY_VERSION (#153, #272) —
+      # the action's own default (e.g. v0.70.0 as of trivy-action v0.36.0) drifts over time.
       - name: Trivy config scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -174,6 +189,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           trivyignores: .trivyignore
+          version: 'v0.71.2'
 
   scripts:
     needs: changes

@@ -7,7 +7,12 @@ Guidance for Claude Code in this repo. Area-specific rules live in nested `CLAUD
 
 - **Never merge to `main` without explicit confirmation.** Leave the PR open and say it's
   ready; merging is the user's call (`.claude/settings.json` has no allow entry for
-  `gh pr merge` / `merge_pull_request`, so it defaults to asking).
+  `gh pr merge` / `merge_pull_request`, so it defaults to asking). Note: `.claude/settings.local.json`
+  is per-machine and git-ignored — it can accumulate a broad allow pattern (e.g. `Bash(gh pr *)`)
+  from past "always allow" choices that technically also covers `gh pr merge`. Don't rely on the
+  permission prompt alone to enforce this rule; treat "wait for the user's explicit go-ahead
+  before merging" as a standing behavioral rule regardless of what a local settings file happens
+  to permit.
 - **"Green locally" must equal "green in CI."** CI mirrors the Makefile / pre-commit gates —
   e.g. `make tf-lint` runs the same `tflint --recursive --config` as CI (scanning
   `infra/bootstrap/` too), and `make ci-frontend` reproduces the CI frontend job. When

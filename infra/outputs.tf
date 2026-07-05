@@ -99,3 +99,33 @@ output "alb_dns_name" {
   description = "Public DNS name of the api ALB."
   value       = aws_lb.api.dns_name
 }
+
+output "sns_alerts_topic_arn" {
+  description = "SNS topic ARN that CloudWatch alarms notify (observability.tf, #42)."
+  value       = aws_sns_topic.alerts.arn
+}
+
+output "cloudwatch_dashboard_url" {
+  description = "Console URL of the observability dashboard (observability.tf, #42)."
+  value       = "https://${data.aws_region.current.name}.console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#dashboards:name=${aws_cloudwatch_dashboard.main.dashboard_name}"
+}
+
+# --- Cognito (authn/authz, Issue #41) ---
+# Non-sensitive identifiers only: the app client is public (generate_secret =
+# false), so there is no client secret to ever output. `region` above already
+# covers the region identifier consumed alongside these.
+
+output "cognito_user_pool_id" {
+  description = "Cognito user pool ID (API: JWT `iss` verification; frontend: oidc-client-ts authority)."
+  value       = aws_cognito_user_pool.users.id
+}
+
+output "cognito_user_pool_client_id" {
+  description = "Cognito app client ID (public client, no secret)."
+  value       = aws_cognito_user_pool_client.web.id
+}
+
+output "cognito_hosted_ui_domain" {
+  description = "Fully-qualified Cognito Hosted UI domain (Cognito-prefix, no ACM cert)."
+  value       = "https://${aws_cognito_user_pool_domain.hosted_ui.domain}.auth.${var.aws_region}.amazoncognito.com"
+}

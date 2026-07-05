@@ -3,6 +3,16 @@
 Loaded on demand when working in `services/frontend/`. Root rules still apply; see
 `../../CLAUDE.md`. Full guide: `docs/app-development.md`.
 
+## Visual identity
+
+@../../docs/frontend-design.md
+
+Source of truth for brand tokens is `docs/frontend-design.md`'s front matter. `src/main.css`'s
+`@theme` block is **generated** from it — never hand-edit between its `design-tokens:start`/`:end`
+markers. After changing the front matter, run `make gen-design-tokens` and commit both files
+together. `npm run design:lint` (part of `make frontend-lint` / `make ci-frontend`) validates the
+DESIGN.md front matter itself (broken token refs, WCAG contrast, missing sections).
+
 ## Stack & layout
 
 Vite app (`package.json`, `vite.config.ts`, `tsconfig.json`, `src/`), built with **vite-ssg**

@@ -26,4 +26,6 @@ RUN uv sync --frozen --no-dev
 EXPOSE 8000
 # --no-sync: the venv is already built; never reach the network at runtime
 # (Fargate tasks run in private subnets with no internet egress).
-CMD ["uv", "run", "--no-sync", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --no-access-log: uvicorn's own (plain-text) access log would duplicate the
+# JSON one CorrelationIdMiddleware already emits (api/middleware.py, #42).
+CMD ["uv", "run", "--no-sync", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

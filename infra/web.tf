@@ -110,6 +110,14 @@ resource "aws_cloudfront_distribution" "web" {
       origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
     }
+
+    # Proves to the ALB (see aws_lb_listener_rule.api_from_cloudfront, api.tf) that a
+    # request actually came through this distribution, not a third party's CloudFront
+    # pointed at the same public ALB DNS name (#153, #271).
+    custom_header {
+      name  = "X-Origin-Verify"
+      value = random_password.cf_origin_verify.result
+    }
   }
 
   default_cache_behavior {

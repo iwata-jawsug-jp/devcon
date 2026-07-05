@@ -29,3 +29,17 @@ ecs_min_capacity         = 1
 ecs_max_capacity         = 4
 ecs_cpu_target_value     = 60
 ecs_memory_target_value  = 70
+
+# --- Observability — set a real recipient before applying ---
+alert_email                = "ops@example.com"
+alarm_alb_5xx_threshold    = 5
+alarm_alb_latency_seconds  = 1
+alarm_ecs_cpu_threshold    = 80
+alarm_ecs_memory_threshold = 80
+alarm_rds_cpu_threshold    = 80
+# db.t4g.small max_connections ~= 225 (LEAST(DBInstanceClassMemory/9531392, 5000)); 180 = ~80%.
+alarm_rds_connections_threshold = 180
+alarm_rds_free_storage_bytes    = 5000000000
+
+# --- Distributed tracing (ADR-0007) ---
+otel_traces_enabled = true

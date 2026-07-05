@@ -1,7 +1,7 @@
 """Shared pytest fixtures: async DB engine, session, and HTTP client."""
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import pytest
@@ -13,9 +13,13 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from api.auth.dependencies import get_current_user
+from api.auth.schemas import AuthenticatedUser
 from api.db.base import Base
 from api.db.session import get_session
 from api.main import app
+
+DEFAULT_TEST_SCOPES = ["api/items.read", "api/items.write"]
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
@@ -54,3 +58,39 @@ async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=transport, base_url="http://test") as http_client:
         yield http_client
     app.dependency_overrides.pop(get_session, None)
+
+
+@pytest.fixture
+async def authed_client(
+    client: AsyncClient,
+) -> AsyncIterator[Callable[[list[str] | None], AsyncClient]]:
+    """Yield a factory that authenticates ``client`` as a fake user with given scopes.
+
+    Overrides ``get_current_user`` (the Task 2.1 dependency that ``require_scope``
+    composes with) so requests resolve to a fake :class:`AuthenticatedUser`
+    without ever calling real Cognito/JWKS. Call the factory with the scopes
+    the test needs, e.g. ``authed_client(["api/items.read"])`` for read-only,
+    or with no arguments (or ``None``) for a user with both
+    ``api/items.read`` and ``api/items.write`` (the common "fully authorized"
+    case most pre-existing tests want).
+
+    Deliberately separate from the plain ``client`` fixture: tests that want
+    to exercise the genuine unauthenticated (401) path should keep depending
+    on ``client`` directly, since it never touches
+    ``app.dependency_overrides[get_current_user]`` and therefore still hits
+    the real dependency. The override installed here is popped after the
+    test regardless of how many times (or whether) the factory was called,
+    mirroring the ``client`` fixture's own ``get_session`` teardown above.
+    """
+
+    def _authed_client(scopes: list[str] | None = None) -> AsyncClient:
+        resolved_scopes = DEFAULT_TEST_SCOPES if scopes is None else scopes
+
+        def override_get_current_user() -> AuthenticatedUser:
+            return AuthenticatedUser(sub="test-user", scopes=resolved_scopes)
+
+        app.dependency_overrides[get_current_user] = override_get_current_user
+        return client
+
+    yield _authed_client
+    app.dependency_overrides.pop(get_current_user, None)

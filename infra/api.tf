@@ -111,15 +111,74 @@ resource "aws_lb_target_group" "api" {
   }
 }
 
+# CloudFront's origin-facing prefix list (SG rule above) is shared by every CloudFront
+# distribution on AWS, not just this one -- anyone can point their own distribution's
+# origin at this ALB's DNS name (an output) and reach it. Defense in depth: CloudFront
+# attaches a secret header (below) that only requests actually routed through *our*
+# distribution carry; the listener denies everything else by default (#153, #271).
+resource "random_password" "cf_origin_verify" {
+  length  = 32
+  special = false
+}
+
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.api.arn
   port              = 80
   protocol          = "HTTP"
 
+  # Deny by default; only the rule below (matching our CloudFront's secret header)
+  # forwards to the target group.
   default_action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Forbidden"
+      status_code  = "403"
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "api_from_cloudfront" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 1
+
+  action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.api.arn
   }
+
+  condition {
+    http_header {
+      http_header_name = "X-Origin-Verify"
+      values           = [random_password.cf_origin_verify.result]
+    }
+  }
+}
+
+# ADOT collector sidecar config (ADR-0007): OTLP-gRPC in, AWS X-Ray out. Passed
+# inline via AOT_CONFIG_CONTENT so no custom image/build is needed.
+locals {
+  adot_collector_config = yamlencode({
+    receivers = {
+      otlp = {
+        protocols = {
+          grpc = { endpoint = "0.0.0.0:4317" }
+        }
+      }
+    }
+    exporters = {
+      awsxray = { region = data.aws_region.current.name }
+    }
+    service = {
+      pipelines = {
+        traces = {
+          receivers = ["otlp"]
+          exporters = ["awsxray"]
+        }
+      }
+    }
+  })
 }
 
 # Task definition. The image is a placeholder until cd-app registers a new
@@ -128,42 +187,67 @@ resource "aws_ecs_task_definition" "api" {
   family                   = "${local.name_prefix}-api"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "256"
-  memory                   = "512"
-  execution_role_arn       = aws_iam_role.ecs_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
+  # The ADOT sidecar (tracing, ADR-0007) needs its own headroom; bump the task
+  # total only when it's actually scheduled, so tracing-disabled envs pay
+  # nothing extra.
+  cpu    = var.otel_traces_enabled ? "512" : "256"
+  memory = var.otel_traces_enabled ? "1024" : "512"
 
-  container_definitions = jsonencode([
-    {
-      name      = "api"
-      image     = var.container_image != "" ? var.container_image : "${aws_ecr_repository.api.repository_url}:bootstrap"
-      essential = true
-      portMappings = [
-        { containerPort = 8000, protocol = "tcp" }
-      ]
-      environment = [
-        { name = "API_DB_HOST", value = aws_db_instance.postgres.address },
-        { name = "API_DB_PORT", value = tostring(aws_db_instance.postgres.port) },
-        { name = "API_DB_NAME", value = var.db_name },
-        { name = "API_DB_USER", value = var.db_username },
-        { name = "API_ENVIRONMENT", value = var.environment },
-      ]
-      secrets = [
-        {
-          name      = "API_DB_PASSWORD"
-          valueFrom = "${aws_db_instance.postgres.master_user_secret[0].secret_arn}:password::"
-        }
-      ]
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.app.name
-          "awslogs-region"        = data.aws_region.current.name
-          "awslogs-stream-prefix" = "api"
+  execution_role_arn = aws_iam_role.ecs_execution.arn
+  task_role_arn      = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode(concat(
+    [
+      {
+        name      = "api"
+        image     = var.container_image != "" ? var.container_image : "${aws_ecr_repository.api.repository_url}:bootstrap"
+        essential = true
+        portMappings = [
+          { containerPort = 8000, protocol = "tcp" }
+        ]
+        environment = [
+          { name = "API_DB_HOST", value = aws_db_instance.postgres.address },
+          { name = "API_DB_PORT", value = tostring(aws_db_instance.postgres.port) },
+          { name = "API_DB_NAME", value = var.db_name },
+          { name = "API_DB_USER", value = var.db_username },
+          { name = "API_ENVIRONMENT", value = var.environment },
+          { name = "API_OTEL_TRACES_ENABLED", value = tostring(var.otel_traces_enabled) },
+        ]
+        secrets = [
+          {
+            name      = "API_DB_PASSWORD"
+            valueFrom = "${aws_db_instance.postgres.master_user_secret[0].secret_arn}:password::"
+          }
+        ]
+        logConfiguration = {
+          logDriver = "awslogs"
+          options = {
+            "awslogs-group"         = aws_cloudwatch_log_group.app.name
+            "awslogs-region"        = data.aws_region.current.name
+            "awslogs-stream-prefix" = "api"
+          }
         }
       }
-    }
-  ])
+    ],
+    var.otel_traces_enabled ? [
+      {
+        name      = "adot-collector"
+        image     = var.otel_collector_image
+        essential = false # tracing outage shouldn't take the api container down with it
+        environment = [
+          { name = "AOT_CONFIG_CONTENT", value = local.adot_collector_config },
+        ]
+        logConfiguration = {
+          logDriver = "awslogs"
+          options = {
+            "awslogs-group"         = aws_cloudwatch_log_group.app.name
+            "awslogs-region"        = data.aws_region.current.name
+            "awslogs-stream-prefix" = "adot"
+          }
+        }
+      }
+    ] : []
+  ))
 }
 
 resource "aws_ecs_service" "api" {

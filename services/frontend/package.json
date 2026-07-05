@@ -17,10 +17,13 @@
     "test:e2e": "playwright test",
     "lhci": "lhci autorun",
     "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
-    "gen-types": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.ts"
+    "gen-types": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.ts",
+    "design:lint": "designmd lint ../../docs/frontend-design.md",
+    "design:gen-theme": "node scripts/gen-design-tokens.mjs"
   },
   "dependencies": {
     "@tanstack/vue-query": "^5.101.2",
+    "oidc-client-ts": "^3.5.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.0",
     "vue-router": "^5.1.0"
@@ -28,6 +31,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^9.0.0",
+    "@google/design.md": "^0.3.0",
     "@lhci/cli": "^0.15.1",
     "@playwright/test": "^1.47.0",
     "@tailwindcss/vite": "^4.3.2",

@@ -1,0 +1,93 @@
+name: Perf
+
+# Load/perf smoke test (Issue #43). Deliberately NOT run on every PR (would
+# slow down the inner dev loop and is noisy on shared runners) -- scheduled
+# weekly plus on-demand via workflow_dispatch, per the issue's own guidance
+# ("PR では軽め、定期/リリース前に本番相当").
+#
+# Runs perf/app.py (api.main.app with auth stubbed out -- see that file's
+# docstring for why) behind real HTTP, against a real Postgres service
+# container, and drives it with k6 (perf/k6/items-smoke.js). k6 exits
+# non-zero on threshold breach, which fails this job.
+on:
+  schedule:
+    - cron: '0 18 * * 0' # Sunday 03:00 JST
+  workflow_dispatch:
+    inputs:
+      vus:
+        description: 'Virtual users'
+        default: '10'
+      duration:
+        description: 'Test duration (k6 duration string, e.g. 30s, 2m)'
+        default: '30s'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  k6-smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend/python
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      API_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Alembic migrate
+        run: uv run alembic upgrade head
+      - name: Start perf app (auth stubbed, see perf/app.py)
+        run: |
+          uv run uvicorn perf.app:app --host 127.0.0.1 --port 8000 \
+            > /tmp/perf-app.log 2>&1 &
+          echo "PERF_APP_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8000/api/health > /dev/null && exit 0
+            sleep 0.5
+          done
+          echo "perf app did not become healthy in time" >&2
+          cat /tmp/perf-app.log >&2
+          exit 1
+      - name: Set up k6
+        uses: grafana/setup-k6-action@v1
+      - name: Run k6 smoke scenario
+        working-directory: .
+        env:
+          PERF_BASE_URL: http://127.0.0.1:8000
+          PERF_VUS: ${{ inputs.vus || '10' }}
+          PERF_DURATION: ${{ inputs.duration || '30s' }}
+        run: k6 run --summary-export=perf-summary.json perf/k6/items-smoke.js
+      - name: Upload k6 summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-summary
+          path: perf-summary.json
+          retention-days: 30
+      - name: Stop perf app
+        if: always()
+        run: kill "$PERF_APP_PID" 2>/dev/null || true
