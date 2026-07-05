@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import sys
-import unittest
+import unittest.mock
 from datetime import datetime
 from pathlib import Path
-from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -250,7 +249,7 @@ class GitHubClientPaginationTests(unittest.TestCase):
                 )
             return _FakeResponse({"jobs": [{"id": 2}]})
 
-        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
             client = dora_metrics.GitHubClient("o", "r", token=None)
             items = client._get_all("/repos/o/r/actions/runs/1/jobs")
 

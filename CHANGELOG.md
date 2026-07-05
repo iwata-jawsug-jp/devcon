@@ -7,6 +7,31 @@
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-07-05
+
+### Fixed
+
+- **公開リポジトリの GitHub Code Quality 指摘（maintainability, note）を解消**:
+  - `.github/scripts/tests/test_dora_metrics.py`: `unittest` を `import` と
+    `from unittest import mock` の両方でインポートしていた（`py/import-and-import-from`）ため、
+    `import unittest.mock` に統一。
+  - `services/backend/python/alembic/` の `revision`/`down_revision`/`branch_labels`/
+    `depends_on`（Alembic が実行時にモジュール属性として動的参照するため実際には必要）が
+    `py/unused-global-variable` として検出されていた。CodeQL のルール説明が明記する
+    `__all__` による意図的な公開の明示で解消。既存マイグレーション（`0001_create_items.py`）
+    と、今後生成されるマイグレーションに効くよう `script.py.mako` テンプレートにも追加。
+  - 残り1件（`alembic/env.py` の `models` 副作用インポート、`py/unused-import`）は
+    Alembic の autogenerate に必要なインポートで削除できないため、公開リポジトリ側で
+    false positive として dismiss 対応（コード変更なし）。
+- **README.md の Release バッジが動作しない問題**: 公開用リポジトリ（`iwata-jawsug-jp/devcon`）は
+  `publish-to-public.sh` の deploy key が git push 専用のため GitHub Release オブジェクトを作らず、
+  タグのみ更新される。そのため shields.io の `github/v/release` バッジ（Releases API 参照）は
+  「no releases found」と表示されていた。タグを参照する `github/v/tag` バッジに変更。
+
+### Added
+
+- **README.md に Security Policy バッジを追加**: `SECURITY.md`（#293）へリンクする静的バッジ。
+
 ## [0.2.5] - 2026-07-05
 
 ### Security
