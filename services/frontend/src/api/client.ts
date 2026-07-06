@@ -19,6 +19,23 @@ export interface RequestOptions extends RequestInit {
 }
 
 /**
+ * Thrown by `ApiClient#request` on a non-OK response. `body` is the parsed
+ * JSON error payload when the response had one (e.g. backend's
+ * `{ detail, request_id }` on a 500 -- see `exception_handlers.py`), so
+ * callers can branch on it instead of parsing `message` (#304).
+ */
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly statusText: string,
+    public readonly body?: unknown,
+  ) {
+    super(`API request failed: ${status} ${statusText}`);
+    this.name = 'ApiError';
+  }
+}
+
+/**
  * The single, typed entry point for talking to the backend API.
  *
  * Components MUST go through this client rather than calling `fetch` directly.
@@ -72,7 +89,8 @@ export class ApiClient {
     }
 
     if (!response.ok) {
-      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      const body = await response.json().catch(() => undefined);
+      throw new ApiError(response.status, response.statusText, body);
     }
     return (await response.json()) as T;
   }
@@ -85,9 +103,13 @@ export class ApiClient {
    * nothing to attach/refresh. This also keeps `getHealth()` from touching
    * `useAuthStore()`/Pinia at all, so existing callers (e.g. `HealthBadge`,
    * and vite-ssg's prerender of `/`) are unaffected by this task.
+   *
+   * `signal` forwards TanStack Query's cancellation signal (`queryFn({
+   * signal })`, see `queries.ts`) through to the underlying `fetch`, so an
+   * aborted query actually cancels the in-flight request (#304).
    */
-  getHealth(): Promise<HealthResponse> {
-    return this.request<HealthResponse>('/health', { skipAuth: true });
+  getHealth(options?: { signal?: AbortSignal }): Promise<HealthResponse> {
+    return this.request<HealthResponse>('/health', { skipAuth: true, signal: options?.signal });
   }
 }
 

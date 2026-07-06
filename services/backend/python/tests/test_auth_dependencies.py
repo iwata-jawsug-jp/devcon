@@ -51,7 +51,7 @@ def _sign_token(
     *,
     sub: str = "user-123",
     scope: str = "api/items.read api/items.write",
-    token_use: str = "access",
+    token_use: str = "access",  # noqa: S107 -- Cognito claim value, not a secret
     client_id: str = CLIENT_ID,
     issuer: str = ISSUER,
     exp_delta_seconds: int = 3600,
@@ -166,7 +166,7 @@ async def test_expired_token_raises_401() -> None:
 async def test_token_use_other_than_access_raises_401() -> None:
     private_key = _generate_key_pair()
     payload = _jwks_payload(private_key, KID)
-    token = _sign_token(private_key, KID, token_use="id")
+    token = _sign_token(private_key, KID, token_use="id")  # noqa: S106 -- Cognito claim, not a secret
 
     with pytest.raises(HTTPException) as exc_info:
         await _call_with_jwks(payload, token)

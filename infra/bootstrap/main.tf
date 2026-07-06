@@ -57,6 +57,29 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
+# Versioned state objects otherwise keep every noncurrent version forever
+# (#303). Current (live) state is never touched by this rule.
+resource "aws_s3_bucket_lifecycle_configuration" "state" {
+  bucket = aws_s3_bucket.state.id
+
+  rule {
+    id     = "expire-noncurrent-state-versions"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.state]
+}
+
 # Deny any request not made over TLS (i.e. plaintext HTTP).
 data "aws_iam_policy_document" "state_bucket" {
   statement {
@@ -246,15 +269,25 @@ resource "aws_iam_role" "ci_deploy" {
   description        = "Role assumed on merge to main to apply infra and deploy the app."
 }
 
-resource "aws_iam_role_policy" "ci_deploy_state" {
-  name   = "tfstate-access"
-  role   = aws_iam_role.ci_deploy.id
+resource "aws_iam_policy" "ci_deploy_state" {
+  name   = "${var.project}-deploy-tfstate-access"
   policy = data.aws_iam_policy_document.tfstate_access_deploy.json
 }
 
+resource "aws_iam_role_policy_attachment" "ci_deploy_state" {
+  role       = aws_iam_role.ci_deploy.name
+  policy_arn = aws_iam_policy.ci_deploy_state.arn
+}
+
 # Least-privilege scoped policies (#45), replacing a prior PowerUserAccess
-# attachment. Split by service group to stay under per-policy size limits and
-# to keep each block reviewable. Resource ARNs are scoped to this project's
+# attachment. Split by service group to keep each block reviewable, and
+# attached as customer-managed policies (aws_iam_policy +
+# aws_iam_role_policy_attachment) rather than inline (aws_iam_role_policy):
+# a role's INLINE policies share one combined 10,240-byte quota, which this
+# role hit once auth.tf/observability.tf coverage (#258) was added on top of
+# the original #45 split -- each managed policy instead gets its own 6,144
+# character quota, and a role can hold up to 10 of them. Resource ARNs are
+# scoped to this project's
 # naming (`${var.project}-*` / `/${var.project}/*`) everywhere AWS IAM
 # supports resource-level restriction for the action; a handful of
 # describe/list/create actions genuinely require Resource "*" because the
@@ -326,6 +359,15 @@ data "aws_iam_policy_document" "ci_deploy_network" {
       "ec2:ModifyVpcEndpoint",
       "ec2:DescribeManagedPrefixLists",
       "ec2:GetManagedPrefixListEntries",
+      # Read-only prefix-list lookup the AWS provider does while "flattening" a
+      # VPC endpoint (both gateway and interface) -- distinct from the
+      # DescribeManagedPrefixLists/GetManagedPrefixListEntries pair above.
+      # Missing this caused every aws_vpc_endpoint apply to fail (#258).
+      "ec2:DescribePrefixLists",
+      # Also part of interface-endpoint "flattening": reading the ENIs the
+      # endpoint attached, to populate its subnet/network-interface
+      # attributes on every plan/apply refresh, not just first create (#258).
+      "ec2:DescribeNetworkInterfaces",
       "ec2:CreateTags",
       "ec2:DeleteTags",
       "ec2:DescribeTags",
@@ -342,10 +384,14 @@ data "aws_iam_policy_document" "ci_deploy_network" {
   }
 }
 
-resource "aws_iam_role_policy" "ci_deploy_network" {
-  name   = "deploy-network"
-  role   = aws_iam_role.ci_deploy.id
+resource "aws_iam_policy" "ci_deploy_network" {
+  name   = "${var.project}-deploy-network"
   policy = data.aws_iam_policy_document.ci_deploy_network.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_deploy_network" {
+  role       = aws_iam_role.ci_deploy.name
+  policy_arn = aws_iam_policy.ci_deploy_network.arn
 }
 
 # Compute (api.tf): ECS cluster/service/task-definition + autoscaling, ECR
@@ -529,10 +575,14 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
   }
 }
 
-resource "aws_iam_role_policy" "ci_deploy_compute" {
-  name   = "deploy-compute"
-  role   = aws_iam_role.ci_deploy.id
+resource "aws_iam_policy" "ci_deploy_compute" {
+  name   = "${var.project}-deploy-compute"
   policy = data.aws_iam_policy_document.ci_deploy_compute.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_deploy_compute" {
+  role       = aws_iam_role.ci_deploy.name
+  policy_arn = aws_iam_policy.ci_deploy_compute.arn
 }
 
 # Storage + CDN (web.tf): the SPA's S3 bucket + CloudFront distribution.
@@ -552,6 +602,26 @@ data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
       "s3:PutBucketVersioning",
       "s3:GetBucketPublicAccessBlock",
       "s3:PutBucketPublicAccessBlock",
+      # The AWS provider's aws_s3_bucket resource reads a long list of
+      # per-bucket sub-configurations on every refresh, even for ones this
+      # project never sets explicitly -- discovered one at a time
+      # (Acl, then CORS, then Website) across three sandbox apply
+      # cycles (#258), so the remaining common ones are granted proactively
+      # here rather than one AccessDenied at a time. All read-only and
+      # already scoped to this project's bucket names below.
+      "s3:GetBucketAcl",
+      "s3:GetBucketCORS",
+      "s3:GetBucketWebsite",
+      "s3:GetBucketLogging",
+      "s3:GetBucketRequestPayment",
+      "s3:GetAccelerateConfiguration",
+      "s3:GetBucketObjectLockConfiguration",
+      "s3:GetReplicationConfiguration",
+      "s3:GetEncryptionConfiguration",
+      "s3:GetBucketOwnershipControls",
+      # aws_s3_bucket_lifecycle_configuration.web (#303).
+      "s3:GetLifecycleConfiguration",
+      "s3:PutLifecycleConfiguration",
       "s3:GetBucketTagging",
       "s3:PutBucketTagging",
       "s3:ListBucket",
@@ -604,10 +674,14 @@ data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
   }
 }
 
-resource "aws_iam_role_policy" "ci_deploy_storage_cdn" {
-  name   = "deploy-storage-cdn"
-  role   = aws_iam_role.ci_deploy.id
+resource "aws_iam_policy" "ci_deploy_storage_cdn" {
+  name   = "${var.project}-deploy-storage-cdn"
   policy = data.aws_iam_policy_document.ci_deploy_storage_cdn.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_deploy_storage_cdn" {
+  role       = aws_iam_role.ci_deploy.name
+  policy_arn = aws_iam_policy.ci_deploy_storage_cdn.arn
 }
 
 # Data + logs (db.tf, shared.tf): RDS instance/subnet group and the
@@ -656,8 +730,32 @@ data "aws_iam_policy_document" "ci_deploy_data" {
       "rds:CreateDBSubnetGroup",
       "rds:ModifyDBSubnetGroup",
       "rds:DeleteDBSubnetGroup",
+      # default_tags applies tags at creation time, which needs tagging
+      # permission on the subgrp: resource type too -- RdsProjectResources
+      # above only covers the db: resource type (#258).
+      "rds:AddTagsToResource",
+      "rds:RemoveTagsFromResource",
+      # rds:CreateDBInstance also gets evaluated against the subnet group it
+      # places the instance into, not just the db: resource it creates
+      # (RdsProjectResources above already covers the db: side) (#258).
+      "rds:CreateDBInstance",
     ]
     resources = ["arn:aws:rds:*:*:subgrp:${var.project}-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
+  statement {
+    # logs:DescribeLogGroups doesn't support the log-group ARN pattern used
+    # below -- AWS evaluates it against a `log-group::log-stream:` pseudo
+    # resource instead, so it needs its own Resource "*" statement (#258).
+    sid       = "LogsDescribe"
+    effect    = "Allow"
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["*"]
 
     condition {
       test     = "StringEquals"
@@ -671,7 +769,6 @@ data "aws_iam_policy_document" "ci_deploy_data" {
     actions = [
       "logs:CreateLogGroup",
       "logs:DeleteLogGroup",
-      "logs:DescribeLogGroups",
       "logs:PutRetentionPolicy",
       "logs:TagResource",
       "logs:UntagResource",
@@ -687,10 +784,140 @@ data "aws_iam_policy_document" "ci_deploy_data" {
   }
 }
 
-resource "aws_iam_role_policy" "ci_deploy_data" {
-  name   = "deploy-data"
-  role   = aws_iam_role.ci_deploy.id
+resource "aws_iam_policy" "ci_deploy_data" {
+  name   = "${var.project}-deploy-data"
   policy = data.aws_iam_policy_document.ci_deploy_data.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_deploy_data" {
+  role       = aws_iam_role.ci_deploy.name
+  policy_arn = aws_iam_policy.ci_deploy_data.arn
+}
+
+# Auth (auth.tf, #41): Cognito user pool + resource server + client + Hosted
+# UI domain. Unlike ECR/ECS/RDS above, none of these resource types have a
+# project-controlled name we can put in the ARN (the pool ID is an opaque
+# value AWS assigns on creation, so CreateUserPool -- and everything scoped
+# under a specific pool -- can't be resource-scoped the way e.g. ECR
+# repositories are). No condition key exists to narrow this further, so this
+# is Resource "*" like the other no-resource-level-support cases above (ELB,
+# Application Auto Scaling, CloudFront) (#258).
+data "aws_iam_policy_document" "ci_deploy_auth" {
+  statement {
+    sid    = "Cognito"
+    effect = "Allow"
+    actions = [
+      "cognito-idp:CreateUserPool",
+      "cognito-idp:DeleteUserPool",
+      "cognito-idp:DescribeUserPool",
+      "cognito-idp:UpdateUserPool",
+      # The AWS provider reads MFA config as part of managing
+      # aws_cognito_user_pool, even though this project never sets it (#258).
+      "cognito-idp:GetUserPoolMfaConfig",
+      "cognito-idp:TagResource",
+      "cognito-idp:UntagResource",
+      "cognito-idp:ListTagsForResource",
+      "cognito-idp:CreateResourceServer",
+      "cognito-idp:DeleteResourceServer",
+      "cognito-idp:DescribeResourceServer",
+      "cognito-idp:UpdateResourceServer",
+      "cognito-idp:CreateUserPoolClient",
+      "cognito-idp:DeleteUserPoolClient",
+      "cognito-idp:DescribeUserPoolClient",
+      "cognito-idp:UpdateUserPoolClient",
+      "cognito-idp:CreateUserPoolDomain",
+      "cognito-idp:DeleteUserPoolDomain",
+      "cognito-idp:DescribeUserPoolDomain",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
+}
+
+resource "aws_iam_policy" "ci_deploy_auth" {
+  name   = "${var.project}-deploy-auth"
+  policy = data.aws_iam_policy_document.ci_deploy_auth.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_deploy_auth" {
+  role       = aws_iam_role.ci_deploy.name
+  policy_arn = aws_iam_policy.ci_deploy_auth.arn
+}
+
+# Observability (observability.tf, #42): SNS alert topic + CloudWatch alarms
+# and dashboard. SNS topics and CloudWatch alarms are project-name-scoped;
+# CloudWatch dashboard ARNs have no region segment
+# (arn:aws:cloudwatch::<account>:dashboard/<name>), so that action is split
+# into its own statement without the regional condition (#258).
+data "aws_iam_policy_document" "ci_deploy_observability" {
+  statement {
+    sid    = "SnsProjectTopics"
+    effect = "Allow"
+    actions = [
+      "sns:CreateTopic",
+      "sns:DeleteTopic",
+      "sns:GetTopicAttributes",
+      "sns:SetTopicAttributes",
+      "sns:Subscribe",
+      "sns:Unsubscribe",
+      "sns:ListSubscriptionsByTopic",
+      "sns:TagResource",
+      "sns:UntagResource",
+      "sns:ListTagsForResource",
+    ]
+    resources = ["arn:aws:sns:*:*:${var.project}-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
+  statement {
+    sid    = "CloudWatchAlarms"
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricAlarm",
+      "cloudwatch:DeleteAlarms",
+      "cloudwatch:DescribeAlarms",
+      "cloudwatch:TagResource",
+      "cloudwatch:UntagResource",
+      "cloudwatch:ListTagsForResource",
+    ]
+    resources = ["arn:aws:cloudwatch:*:*:alarm:${var.project}-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
+  statement {
+    sid    = "CloudWatchDashboard"
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutDashboard",
+      "cloudwatch:GetDashboard",
+      "cloudwatch:DeleteDashboards",
+      "cloudwatch:ListDashboards",
+    ]
+    resources = ["arn:aws:cloudwatch::*:dashboard/${var.project}-*"]
+  }
+}
+
+resource "aws_iam_policy" "ci_deploy_observability" {
+  name   = "${var.project}-deploy-observability"
+  policy = data.aws_iam_policy_document.ci_deploy_observability.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_deploy_observability" {
+  role       = aws_iam_role.ci_deploy.name
+  policy_arn = aws_iam_policy.ci_deploy_observability.arn
 }
 
 # PowerUserAccess excludes IAM writes, but the app infra creates/manages its own
@@ -748,8 +975,12 @@ data "aws_iam_policy_document" "ci_deploy_iam" {
   }
 }
 
-resource "aws_iam_role_policy" "ci_deploy_iam" {
-  name   = "manage-project-iam"
-  role   = aws_iam_role.ci_deploy.id
+resource "aws_iam_policy" "ci_deploy_iam" {
+  name   = "${var.project}-manage-project-iam"
   policy = data.aws_iam_policy_document.ci_deploy_iam.json
+}
+
+resource "aws_iam_role_policy_attachment" "ci_deploy_iam" {
+  role       = aws_iam_role.ci_deploy.name
+  policy_arn = aws_iam_policy.ci_deploy_iam.arn
 }

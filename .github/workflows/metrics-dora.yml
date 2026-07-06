@@ -1,6 +1,9 @@
 name: DORA Metrics
 
-# Weekly deployment frequency / lead time for changes (see docs/adr/0006-...).
+# Deployment frequency / lead time for changes (see docs/adr/0006-...).
+# workflow_dispatch only -- this monorepo is a learning/demo project with no
+# real traffic, so a weekly schedule wouldn't accumulate meaningful data.
+# See docs/infrastructure.md for re-adding the schedule trigger on a real app.
 on:
   workflow_dispatch:
     inputs:

@@ -10,6 +10,6 @@ import { apiClient } from './client';
 export function useHealthQuery() {
   return useQuery({
     queryKey: ['health'],
-    queryFn: () => apiClient.getHealth(),
+    queryFn: ({ signal }) => apiClient.getHealth({ signal }),
   });
 }

@@ -33,14 +33,14 @@ import { createPinia, setActivePinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { defineComponent } from 'vue';
 import { mount } from '@vue/test-utils';
-import { ApiClient } from '../client';
+import { ApiClient, ApiError } from '../client';
 import { useAuthStore } from '../../stores/auth';
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse(body: unknown, status = 200, statusText?: string): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
-    statusText: status === 200 ? 'OK' : status === 401 ? 'Unauthorized' : 'Error',
+    statusText: statusText ?? (status === 200 ? 'OK' : status === 401 ? 'Unauthorized' : 'Error'),
     json: async () => body,
   } as Response;
 }
@@ -196,5 +196,35 @@ describe('ApiClient#request (private, via as-any cast)', () => {
     expect(getAccessToken).not.toHaveBeenCalled();
     const [, init] = fetchMock.mock.calls[0];
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+
+  it('throws an ApiError carrying status/statusText/body on a non-OK response', async () => {
+    const { client } = await setupClient();
+    const errorBody = { detail: 'Internal server error', request_id: 'req-123' };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(errorBody, 500, 'Internal Server Error'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const error = (await client
+      .request('/items', { skipAuth: true })
+      .catch((e: unknown) => e)) as ApiError;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(500);
+    expect(error.statusText).toBe('Internal Server Error');
+    expect(error.body).toEqual(errorBody);
+  });
+
+  it('forwards a caller-supplied AbortSignal to fetch', async () => {
+    const { client } = await setupClient();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await client.request('/health', { skipAuth: true, signal: controller.signal });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.signal).toBe(controller.signal);
   });
 });

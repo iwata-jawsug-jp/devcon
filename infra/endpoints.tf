@@ -62,10 +62,12 @@ locals {
 resource "aws_vpc_endpoint" "interface" {
   for_each = local.interface_endpoints
 
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.${data.aws_region.current.name}.${each.value}"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = aws_subnet.private[*].id
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${data.aws_region.current.name}.${each.value}"
+  vpc_endpoint_type = "Interface"
+  # var.vpce_single_az (dev/sandbox default): 1 ENI per endpoint instead of 2,
+  # halving the fixed monthly cost. prod opts into both AZs via its tfvars.
+  subnet_ids          = var.vpce_single_az ? [aws_subnet.private[0].id] : aws_subnet.private[*].id
   security_group_ids  = [aws_security_group.endpoints.id]
   private_dns_enabled = true
 

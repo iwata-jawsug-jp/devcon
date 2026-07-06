@@ -35,6 +35,11 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid.uuid4())
         token = request_id_ctx.set(request_id)
+        # Also stash it on request.state (backed by the ASGI scope dict, not this
+        # contextvar) so api.exception_handlers can still read it for exceptions
+        # that reach ServerErrorMiddleware -- which sits *outside* this
+        # middleware, after the `finally` below has already reset the contextvar.
+        request.state.request_id = request_id
         start = time.perf_counter()
         try:
             response = await call_next(request)

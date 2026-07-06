@@ -37,7 +37,7 @@ export interface paths {
         };
         /**
          * List Items
-         * @description Return all items. Requires an authenticated caller with read scope.
+         * @description Return a page of items (default 50, max 100). Requires read scope.
          */
         get: operations["list_items_api_items_get"];
         put?: never;
@@ -157,7 +157,10 @@ export interface operations {
     };
     list_items_api_items_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -171,6 +174,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Item"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

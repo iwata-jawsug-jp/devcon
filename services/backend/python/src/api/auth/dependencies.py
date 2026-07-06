@@ -62,7 +62,10 @@ async def get_current_user(credentials: BearerCredentialsDep) -> AuthenticatedUs
 
     # Not covered by jwt.decode's built-in validation (PyJWT has no concept
     # of client_id/token_use) -- checked manually per design.md.
-    if payload["token_use"] != "access" or payload["client_id"] != settings.cognito_client_id:
+    if (
+        payload["token_use"] != "access"  # noqa: S105 -- Cognito claim value, not a secret
+        or payload["client_id"] != settings.cognito_client_id
+    ):
         raise HTTPException(status_code=401)
 
     return AuthenticatedUser(sub=payload["sub"], scopes=payload.get("scope", "").split())

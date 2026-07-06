@@ -26,6 +26,21 @@ resource "aws_ecr_lifecycle_policy" "api" {
           countNumber = 14
         }
         action = { type = "expire" }
+      },
+      {
+        # Tags are the deploying commit SHA (cd-app.yml), not a fixed prefix, so
+        # match everything via tagPatternList. Without this, tagged images (the
+        # repo is IMMUTABLE, so every deploy pushes a new one) accumulate forever
+        # (#303).
+        rulePriority = 2
+        description  = "Keep only the last 30 tagged images"
+        selection = {
+          tagStatus      = "tagged"
+          tagPatternList = ["*"]
+          countType      = "imageCountMoreThan"
+          countNumber    = 30
+        }
+        action = { type = "expire" }
       }
     ]
   })
@@ -267,6 +282,13 @@ resource "aws_ecs_service" "api" {
     target_group_arn = aws_lb_target_group.api.arn
     container_name   = "api"
     container_port   = 8000
+  }
+
+  # Without this, a bad image just loops through failing health checks for
+  # ~40min before giving up, with no rollback (#302).
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
   }
 
   # The deploy pipeline registers new task-def revisions and adjusts the count;

@@ -15,9 +15,11 @@ class ItemRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def list_(self) -> Sequence[ItemModel]:
-        """Return all items."""
-        result = await self._session.execute(select(ItemModel))
+    async def list_(self, limit: int = 50, offset: int = 0) -> Sequence[ItemModel]:
+        """Return a page of items, ordered by id."""
+        result = await self._session.execute(
+            select(ItemModel).order_by(ItemModel.id).limit(limit).offset(offset)
+        )
         return result.scalars().all()
 
     async def get(self, item_id: int) -> ItemModel | None:

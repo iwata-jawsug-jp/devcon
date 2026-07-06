@@ -7,6 +7,10 @@ import { useHead } from '@unhead/vue';
 // Also carries the PWA manifest link's companions (theme-color, apple-touch-icon)
 // that vite-plugin-pwa doesn't inject on its own (#80).
 useHead({
+  // vite-ssg's SSR render (@unhead) defaults html[lang] to "en" unless set
+  // here explicitly -- index.html's own `lang="ja"` gets overwritten by it
+  // otherwise (#306).
+  htmlAttrs: { lang: 'ja' },
   titleTemplate: (title) => (title ? `${title} | devcon` : 'devcon'),
   meta: [{ name: 'theme-color', content: '#3d5fce' }],
   link: [{ rel: 'apple-touch-icon', href: '/apple-touch-icon.png' }],
@@ -15,7 +19,7 @@ useHead({
 
 <template>
   <header>
-    <h1>web</h1>
+    <h1>devcon</h1>
     <nav>
       <RouterLink to="/"> Home </RouterLink>
     </nav>

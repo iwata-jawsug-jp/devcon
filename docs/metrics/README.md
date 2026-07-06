@@ -1,9 +1,12 @@
 # DORA メトリクス（デプロイ頻度・変更リードタイム）
 
-`.github/workflows/metrics-dora.yml` が週次（毎週月曜 0:00 UTC）で自動集計し、このディレクトリに
-月次スナップショット（`YYYY-MM.md`）として履歴を残す。計測定義（デプロイイベント・リードタイム
-の判定ロジック）は [ADR-0006](../adr/0006-dora-deployment-frequency-and-lead-time-definitions.md)
-を参照。
+`.github/workflows/metrics-dora.yml` を手動実行（`workflow_dispatch`）すると集計し、このディレクトリに
+月次スナップショット（`YYYY-MM.md`）として履歴を残す。定期（`schedule`）実行は無効化している
+（この monorepo は学習・デモ目的で実トラフィックがなく、`cron` で定期実行しても意味のあるデータが
+貯まらないため。本番運用のアプリで再有効化する手順は
+[infrastructure.md](../infrastructure.md#定期実行ワークフローについてmetrics-dorayml--perfyml)参照）。
+計測定義（デプロイイベント・リードタイムの判定ロジック）は
+[ADR-0006](../adr/0006-dora-deployment-frequency-and-lead-time-definitions.md)を参照。
 
 `main` は直接pushを受け付けない（`guard` ステータスチェック必須のリポジトリルール）ため、
 スナップショットは `chore/dora-metrics-snapshot-<until>` ブランチへコミットのみ行う。このリポジ

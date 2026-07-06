@@ -20,21 +20,24 @@ describe('HealthBadge', () => {
   });
 
   it('renders the health status returned by the API', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        json: async () => ({ status: 'ok' }),
-      }),
-    );
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ status: 'ok' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     const wrapper = mountWithQueryClient();
     await flushPromises();
 
     expect(wrapper.text()).toContain('API: ok');
     expect(wrapper.get('.health-badge').attributes('data-status')).toBe('ok');
+    // useHealthQuery forwards TanStack Query's cancellation signal through
+    // apiClient.getHealth() to fetch (#304), so an aborted query actually
+    // cancels the in-flight request instead of just discarding its result.
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('shows an error state when the request fails', async () => {

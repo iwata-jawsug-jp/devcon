@@ -1,17 +1,17 @@
 name: Perf
 
 # Load/perf smoke test (Issue #43). Deliberately NOT run on every PR (would
-# slow down the inner dev loop and is noisy on shared runners) -- scheduled
-# weekly plus on-demand via workflow_dispatch, per the issue's own guidance
-# ("PR では軽め、定期/リリース前に本番相当").
+# slow down the inner dev loop and is noisy on shared runners) -- workflow_dispatch
+# only. This monorepo is a learning/demo project with no real traffic, so a
+# weekly schedule wouldn't track anything meaningful; see docs/app-development.md
+# for re-adding the schedule trigger on a real app (per issue #43's own guidance,
+# "PR では軽め、定期/リリース前に本番相当").
 #
 # Runs perf/app.py (api.main.app with auth stubbed out -- see that file's
 # docstring for why) behind real HTTP, against a real Postgres service
 # container, and drives it with k6 (perf/k6/items-smoke.js). k6 exits
 # non-zero on threshold breach, which fails this job.
 on:
-  schedule:
-    - cron: '0 18 * * 0' # Sunday 03:00 JST
   workflow_dispatch:
     inputs:
       vus:

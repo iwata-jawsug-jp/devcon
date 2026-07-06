@@ -80,14 +80,16 @@ jobs:
       - name: Log in to Amazon ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Build & push backend image
-        env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" services/backend/python
-          docker push "$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+        uses: docker/build-push-action@v6
+        with:
+          context: services/backend/python
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # 2) Register a new task-def revision with the built image, then run DB
   #    migrations as a one-off Fargate task on it. Gated BEFORE the service roll.

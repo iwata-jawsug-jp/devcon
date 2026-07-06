@@ -71,25 +71,47 @@ jobs:
           script: |
             const fs = require('fs');
             const plan = fs.readFileSync('infra/plan.txt', 'utf8');
+            // Sticky marker: update the same comment on repeat pushes instead of
+            // piling up a new one every time (#306).
+            const marker = '<!-- cd-infra-plan:' + process.env.TF_ENV + ' -->';
             const body = [
+              marker,
               '#### Terraform Plan (`' + process.env.TF_ENV + '`) 📖',
               '```hcl',
               plan.length > 60000 ? plan.slice(0, 60000) + '\n... (truncated)' : plan,
               '```',
             ].join('\n');
-            await github.rest.issues.createComment({
+            const { data: comments } = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body,
+              per_page: 100,
             });
+            const existing = comments.find((c) => c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                comment_id: existing.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body,
+              });
+            }
 
   apply:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     # Manual-only (workflow_dispatch) — this IS the gate. The `production`
     # environment records the deployment; required-reviewer gating would need a
-    # paid plan on a private repo.
+    # paid plan on a private repo. The `ref` check is the only real guard: the
+    # deploy role's OIDC trust also accepts `environment:production`, so without
+    # it a workflow_dispatch from ANY branch could assume the deploy role (#301).
     environment: production
     permissions:
       id-token: write # OIDC

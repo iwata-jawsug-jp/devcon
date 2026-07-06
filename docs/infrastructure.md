@@ -48,11 +48,18 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
     実体の state オブジェクトへの put/delete は許可しない（apply 専用）。
   - `*-ci-deploy` … main / `production` 用のデプロイ。**最小権限化済み**（#45）: 以前は
     `PowerUserAccess` だったが、`infra/*.tf` が実際に宣言するリソース種別（EC2 ネットワーク・
-    ECS・ECR・ELB・RDS・S3・CloudFront・CloudWatch Logs・Application Auto Scaling）ごとに
-    スコープした inline policy（`ci_deploy_network`/`ci_deploy_compute`/
-    `ci_deploy_storage_cdn`/`ci_deploy_data`、`bootstrap/main.tf`）に置き換えた。IAM 自体の
-    権限（ECS タスクロールの作成・PassRole）は元から `${var.project}-*` ロール名に
-    スコープ済み（`ci_deploy_iam`）。追加の絞り込み（#45）として、リージョン依存サービス
+    ECS・ECR・ELB・RDS・S3・CloudFront・CloudWatch Logs・Application Auto Scaling・
+    Cognito・SNS）ごとにスコープしたカスタマー管理ポリシー（`ci_deploy_network`/
+    `ci_deploy_compute`/`ci_deploy_storage_cdn`/`ci_deploy_data`/`ci_deploy_auth`/
+    `ci_deploy_observability`、`bootstrap/main.tf`）に置き換えた。**インラインポリシー
+    （`aws_iam_role_policy`）ではなくカスタマー管理ポリシー（`aws_iam_policy` +
+    `aws_iam_role_policy_attachment`）を使う**: ロールのインラインポリシーは全体で
+    10,240 バイトの合計上限を共有するため、auth.tf/observability.tf 分（#258）を
+    追加した時点でこの上限を超えて `terraform apply` が `LimitExceeded` で失敗した。
+    カスタマー管理ポリシーは1本ごとに 6,144 文字の枠を持つ（ロールには最大10本まで
+    アタッチ可）ため、この構造的な制約を避けられる。IAM 自体の権限（ECS タスクロールの
+    作成・PassRole）は元から `${var.project}-*` ロール名にスコープ済み（`ci_deploy_iam`）。
+    追加の絞り込み（#45）として、リージョン依存サービス
     （EC2/ECS/ECR/RDS/CloudWatch Logs/ELB/Application Auto Scaling）の各ステートメントに
     `aws:RequestedRegion` 条件（`var.aws_region` 限定）を付与し、`elasticloadbalancing:*`/
     `application-autoscaling:*`/`cloudfront:*` のアクション丸ごとワイルドカードは
@@ -66,6 +73,28 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
     分析から導出したため、初回 apply/デプロイで `AccessDenied` が出た場合は
     該当アクションを追加すること。
   - いずれも assume-role を OIDC の `sub`/`aud` 条件（org/repo）で制限
+
+> **`*-ci-deploy` は sandbox と prod で同一ロール（判断の記録、#153 finding #10/#306）**
+>
+> `deploy_subjects`（`bootstrap/main.tf`）は `ref:refs/heads/main` / `environment:production` に
+> 加えて `ref:refs/heads/sandbox/*` も信頼するため、`sandbox/*` ブランチへの push も同じ
+> `ci-deploy` ロールを引き受けられる。上記の最小権限化（#45）はリソース**種別**単位のスコープで
+> あり、`${var.project}-*` という名前パターンは環境（dev/sandbox/prod）を区別しない —
+> つまり IAM ポリシー自体は sandbox 用の呼び出しであっても理論上 prod 名のリソースを操作できる
+> 権限を持つ。実際の隔離は IAM ではなく次の 2 点に依存している:
+>
+> 1. sandbox-guard（sandbox.md）が `sandbox/*` → 非 `sandbox/*` への PR/マージを
+>    禁止し、sandbox 上のコードが正規レビューを経ずに main へ混入できないようにしている。
+> 2. `cd-infra-sandbox.yml` / `cd-app-sandbox.yml` が `TF_ENV=sandbox`（または同等のsandbox向け
+>    変数）を固定でハードコードしており、通常の実行経路では sandbox の state/tfvars しか
+>    触れない。
+>
+> **現状の判断（このリポジトリが単独運用者の push 権限のみを前提とする間）**: 上記2点を
+> 実質的な隔離境界として受け入れ、sandbox 専用の deploy ロールは新設しない。push 権限を
+> 持つこと自体が main への直接コミットや `workflow_dispatch` での prod apply とほぼ同じ
+> 信頼レベルを意味するため、ロール分離による追加の防御効果は限定的で、bootstrap 層の
+> 複雑化コストに見合わない。**複数コントリビューターが push 権限を持つ体制に変わった場合は
+> 再検討する**（sandbox 専用ロールを新設し、リソース ARN を環境名で区別する方向）。
 
 > **Terraform バージョン要件**: bootstrap 層は `>= 1.9`、アプリ層は `>= 1.11`
 > （S3 ネイティブロック `use_lockfile` のため）。ローカルで bootstrap / マイグレーションを
@@ -119,6 +148,12 @@ hcl を渡して初期化する。
 | `shared.tf`                                                                   | CloudWatch ロググループ、ECS タスク実行ロール / タスクロール（IAM）                                                                                                              |
 | `observability.tf`                                                            | CloudWatch アラーム（ALB 5xx/レイテンシ、ECS CPU/メモリ、RDS CPU/接続数/空き容量）+ 通知用 SNS トピック（#42）                                                                   |
 | `providers.tf` / `versions.tf` / `variables.tf` / `outputs.tf` / `backend.tf` | 共通定義                                                                                                                                                                         |
+
+`endpoints.tf` のインターフェースエンドポイント（ECR api/dkr・Logs・Secrets Manager、tracing
+有効時は xray も）は `var.vpce_single_az`（**dev/sandbox既定は`true`、prodは`false`**）で
+1 AZ / 2 AZ を切り替える。2 AZ は ENI 数が単純に倍になり、トラフィックに関係ない固定費
+（4エンドポイント換算で月額 約$80、#153 finding #11）が発生するため、可用性が要らない
+dev/sandbox は既定で 1 AZ にしてコストを半減させている。
 
 ### データベース（RDS for PostgreSQL）
 
@@ -243,7 +278,9 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 - **apply（手動）**: `workflow_dispatch` で手動実行する `terraform apply`（deploy ロール・
   `TF_ENV=prod`）。private repo ＋現プランでは GitHub Environment の required reviewers が
   使えないため、**main マージでは自動 apply せず**、手動実行そのものをゲートとする
-  （`production` 環境はデプロイ記録用）。
+  （`production` 環境はデプロイ記録用）。deploy ロールの OIDC 信頼条件は `environment:production`
+  も受理するため、`apply` job の `if` は `github.ref == 'refs/heads/main'` も必須にしている
+  （さもないと任意のブランチからの `workflow_dispatch` で prod へ apply できてしまう、#301）。
 
 #### 承認ゲートの恒久化（Enterprise / Team / Pro へ移行、または public 化した場合）
 
@@ -312,10 +349,37 @@ rule`）を返し設定できないので、上記のとおり apply を手動 `
 
 ### `metrics-dora.yml`（DORAメトリクス計測）
 
-`cd-app.yml` の実行結果と merge 済み PR から、デプロイ頻度・変更リードタイムを週次で自動集計
-（`schedule` + `workflow_dispatch`）し、job summary と [docs/metrics/](metrics/README.md) に
-記録する。計測定義は [ADR-0006](adr/0006-dora-deployment-frequency-and-lead-time-definitions.md)
-を参照（issue #237）。
+`cd-app.yml` の実行結果と merge 済み PR から、デプロイ頻度・変更リードタイムを集計
+（`workflow_dispatch` のみ、手動実行時に直近7日分を集計）し、job summary と
+[docs/metrics/](metrics/README.md) に記録する。計測定義は
+[ADR-0006](adr/0006-dora-deployment-frequency-and-lead-time-definitions.md)を参照（issue #237）。
+
+### 定期実行ワークフローについて（`metrics-dora.yml` / `perf.yml`）
+
+この2つのワークフローは元は `schedule`（cron）トリガーを持っていたが、現在は
+`workflow_dispatch` のみで手動実行に限定している。この monorepo は学習・デモ目的で実トラフィックが
+なく、`cron` で定期実行しても意味のあるデータが貯まらない（DORAメトリクスは実デプロイが、
+perfテストは実運用相当の負荷傾向がないと指標として機能しない）ため。
+
+**本番運用のアプリを開発する場合は、初期設定の一環として `schedule` トリガーを追加し直すこと**:
+
+- `metrics-dora.yml`: `on:` に以下を追加（毎週月曜 00:00 UTC に直近7日分を自動集計）。
+
+  ```yaml
+  schedule:
+    - cron: '0 0 * * 1'
+  ```
+
+- `perf.yml`（[app-development.md](app-development.md)参照）: `on:` に以下を追加
+  （毎週日曜 03:00 JST に実行。issue #43 の方針「PRでは軽め、定期/リリース前に本番相当」）。
+
+  ```yaml
+  schedule:
+    - cron: '0 18 * * 0'
+  ```
+
+再有効化時は、両ワークフローの冒頭コメントもこの前提（学習・デモ目的でdispatch限定にしている旨）
+を削除・更新すること。
 
 ### CI/CD のルール
 

@@ -85,11 +85,14 @@ export default defineConfig(({ mode }) => {
         reporter: ['text', 'html'],
         include: ['src/**/*.{ts,vue}'],
         exclude: ['src/api/schema.ts', 'src/main.ts', 'src/**/*.spec.ts'],
+        // Current actual coverage is ~85-96% across all four; these thresholds
+        // sit a little below that as a real regression gate (#306), not the
+        // near-no-op 35/35/45/55 floor that let coverage silently erode.
         thresholds: {
-          lines: 35,
-          statements: 35,
-          functions: 45,
-          branches: 55,
+          lines: 90,
+          statements: 90,
+          functions: 90,
+          branches: 80,
         },
       },
     },

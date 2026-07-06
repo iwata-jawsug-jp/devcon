@@ -7,6 +7,76 @@
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-07-06
+
+### Added
+
+- **複数フレームワーク比較デモの構成案**: 学習・比較目的で複数フロントエンドフレームワーク
+  実装を並べるための構成案を `docs/frontend-frameworks-demo.md` に追加。本番の
+  `services/frontend/`（Vue 3）は変更せず、`sandbox/ec-site-demo` と同じブランチ分離方式
+  （sandbox ブランチ内 `demos/frontend-frameworks/<framework>/`）を踏襲する方針を記録。
+
+### Changed
+
+- **モノレポ評価レポート（#153）の低優先度指摘を解消**（#306）:
+  - backend バージョンの三重不一致を解消（`__init__.py` を `pyproject.toml` に合わせた）
+  - `GET /api/items` に `limit`（既定 50・上限 100）/`offset` によるページネーションを追加
+  - ruff に `S`（bandit 相当）ルールを追加（Cognito の `token_use` クレーム値を誤検知した
+    3 件は `# noqa` + 理由コメントで対応）
+  - frontend のカバレッジ閾値を実測値に合わせて引き上げ（`35/35/45/55` → `90/90/90/80`）
+  - `index.html` の `lang="en"` と日本語コンテンツの不一致を `lang="ja"` に修正（vite-ssg の
+    SSR レンダリングが `htmlAttrs` 未指定だと上書きする問題を含む）
+  - プレースホルダ `<h1>web</h1>` を `devcon` に変更
+  - `ci.yml` に Playwright ブラウザバイナリのキャッシュ、`cd-app.yml`/`cd-app-sandbox.yml`
+    を buildx + GitHub Actions キャッシュに変更
+  - `cd-infra.yml` の plan コメントを隠しマーカーで検索し、既存コメントを更新するよう変更
+    （sticky 化）
+  - VPC エンドポイント（ECR api/dkr・Logs・Secrets Manager・xray）を dev/sandbox のみ
+    単一 AZ 化し、固定費を削減（`var.vpce_single_az`）
+  - sandbox/prod で deploy role を分離しない現状維持を決定し、実際の環境隔離が
+    sandbox-guard と `TF_ENV` 固定に依存している実態を `docs/infrastructure.md` に明記
+  - `.env.example` に不足していた component-based DB 設定・分散トレーシング関連の変数を追記
+- **`metrics-dora.yml`/`perf.yml` の `schedule`（cron）トリガーを削除し `workflow_dispatch` 限定に
+  変更**: この monorepo は学習・デモ目的で実トラフィックがなく、定期実行しても意味のあるデータが
+  貯まらないため。本番運用のアプリで再有効化する手順を `docs/infrastructure.md` に「アプリ開発時の
+  初期設定事項」として追記。
+
+
+### Security
+
+- **`cd-infra.yml` の prod apply が main 以外のブランチからの `workflow_dispatch` でも
+  実行できた問題を修正**（#301）: deploy ロールの OIDC 信頼条件が `environment:production`
+  の宣言だけで満たされてしまうため、job の `if` に `github.ref == 'refs/heads/main'` を
+  追加し、main 以外からの手動実行は skip されるようにした。
+- **items API の入力長が無制限で、認証済みユーザーによる DB ストレージ圧迫を防げない
+  問題を修正**（#305）: `name`（上限 200 文字）/`description`（上限 2000 文字）を追加。
+- **`ci_deploy` ロールの実機検証（#258, #45 follow-up）で判明した不足権限を順次追加**:
+  sandbox 環境での `terraform apply` 実機検証により、以下の権限不足が判明・修正した
+  （**検証は継続中で、本項目は今後の PR で更新される見込み**）。
+  - Cognito（#41）・SNS/CloudWatch アラーム・ダッシュボード（#42）がポリシーに
+    一切含まれていなかった
+  - VPC エンドポイント作成・RDS サブネットグループ操作関連の `ec2:DescribePrefixLists`/
+    `DescribeNetworkInterfaces`、`rds:AddTagsToResource` 等で `subgrp:` リソースへの
+    スコープが漏れていた
+  - インラインポリシーがロール全体で共有する 10,240 バイト上限を超過したため、8 本すべてを
+    カスタマー管理ポリシー（`aws_iam_policy` + `aws_iam_role_policy_attachment`）に変更
+  - S3 バケットの付随設定読み取り系（Acl/CORS/Website/Logging 等）が不足していた
+  - Cognito MFA 設定の読み取り、RDS `CreateDBInstance` の `subgrp:` リソースへの
+    スコープ漏れを追加
+
+### Fixed
+
+- **ECS `api` サービスがデプロイ失敗時に自動ロールバックしない問題を修正**（#302）:
+  `deployment_circuit_breaker`（`enable = true, rollback = true`）を追加。
+- **ECR のタグ付きイメージ・S3 の非現行バージョンが無期限に蓄積する問題を修正**（#303）:
+  lifecycle policy を追加（ECR は直近 30 世代、S3 state バケットは 90 日、web バケットは
+  30 日で expire）。state バケット側の変更は `infra/bootstrap/` 層のため、実 AWS への反映
+  には手動 `terraform apply` が必要。
+- **未捕捉の例外が FastAPI デフォルトの素の 500 を返し、`X-Request-ID` も欠落する問題を
+  修正**（#304）: 構造化 JSON レスポンス（`{"detail": ..., "request_id": ...}`）を返す
+  `exception_handler` を追加。frontend にも構造化エラー型 `ApiError` と、クエリキャンセル
+  時に実際の `fetch` を中断する `AbortSignal` 伝搬を追加。
+
 ## [0.2.6] - 2026-07-05
 
 ### Fixed

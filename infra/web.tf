@@ -23,6 +23,29 @@ resource "aws_s3_bucket_versioning" "web" {
   }
 }
 
+# Versioned SPA builds otherwise keep every noncurrent version forever (#303).
+# Built assets are reproducible from source, so a short retention is fine.
+resource "aws_s3_bucket_lifecycle_configuration" "web" {
+  bucket = aws_s3_bucket.web.id
+
+  rule {
+    id     = "expire-noncurrent-web-versions"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.web]
+}
+
 # CloudFront in front of the SPA (S3 via OAC) with an `/api/*` behavior to the ALB.
 
 resource "aws_cloudfront_origin_access_control" "web" {

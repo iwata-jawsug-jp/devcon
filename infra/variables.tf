@@ -45,6 +45,16 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
+# Each interface endpoint (endpoints.tf) normally spans both private subnets
+# (2 AZ) -- 4 endpoints x 2 AZ = 8 ENIs, a fixed ~$80/month regardless of
+# traffic (#153, #306). Dev/sandbox don't need the redundancy, so default to
+# a single AZ there; prod opts into the full 2 AZ via its tfvars.
+variable "vpce_single_az" {
+  description = "Deploy interface VPC endpoints to a single AZ instead of all private subnets."
+  type        = bool
+  default     = true
+}
+
 # --- Database (RDS PostgreSQL) ---
 
 variable "db_engine_version" {

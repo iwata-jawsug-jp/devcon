@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.dependencies import require_scope
@@ -29,9 +29,13 @@ RequireWriteScope = Depends(require_scope("api/items.write"))
 
 
 @router.get("", response_model=list[Item], dependencies=[RequireReadScope])
-async def list_items(repo: RepoDep) -> list[ItemModel]:
-    """Return all items. Requires an authenticated caller with read scope."""
-    return list(await repo.list_())
+async def list_items(
+    repo: RepoDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[ItemModel]:
+    """Return a page of items (default 50, max 100). Requires read scope."""
+    return list(await repo.list_(limit=limit, offset=offset))
 
 
 @router.get("/{item_id}", response_model=Item, dependencies=[RequireReadScope])

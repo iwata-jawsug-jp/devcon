@@ -1,13 +1,13 @@
 """Item schemas."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ItemBase(BaseModel):
     """Fields shared by item create and read models."""
 
-    name: str
-    description: str | None = None
+    name: str = Field(max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
 
 
 class ItemCreate(ItemBase):

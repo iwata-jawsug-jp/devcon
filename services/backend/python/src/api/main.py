@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from api import __version__
 from api.config import get_settings
+from api.exception_handlers import unhandled_exception_handler
 from api.logging_config import configure_logging
 from api.middleware import CorrelationIdMiddleware
 from api.routers import health, items
@@ -17,6 +18,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version=__version__)
     configure_tracing(app, settings)
     app.add_middleware(CorrelationIdMiddleware)
+    app.add_exception_handler(Exception, unhandled_exception_handler)
     app.include_router(health.router)
     app.include_router(items.router)
     return app
