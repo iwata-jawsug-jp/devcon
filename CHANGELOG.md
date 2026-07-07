@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-07-07
+
+### Added
+
+- **CI/CD のエリア別スイッチ**: リポジトリ変数 `BACKEND_ENABLED` / `FRONTEND_ENABLED` /
+  `INFRA_ENABLED` で、frontend / backend / infra ごとに CI・CD ワークフローの実行可否を
+  切り替えられるようにした（PR #343）。GitHub Actions の `on:` トリガーでは `vars` を
+  参照できないため、ジョブレベルの `if`（`vars.X != 'false'`）でゲートする方式。
+  **未設定はデフォルト有効**なので、変数を登録しない限り挙動は従来どおり（公開ミラー・
+  fork も不変）。`cd-infra.yml` の apply は手動 `workflow_dispatch` でもスイッチが効く。
+  設定手順・注意事項（スキップされたジョブは required status check として合格扱いに
+  なる等）は [docs/ci-cd-area-switches.md](docs/ci-cd-area-switches.md) を参照。
+
 ## [0.2.8] - 2026-07-07
 
 ### Fixed
@@ -583,7 +596,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.9...HEAD
+[0.2.9]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.5...v0.2.6

@@ -62,9 +62,11 @@ jobs:
           fi
 
   # 1) Build & push the api image to ECR.
+  # BACKEND_ENABLED / FRONTEND_ENABLED are the same per-area kill switches as in
+  # ci.yml: unset defaults to enabled; only an explicit 'false' skips the area.
   build:
     needs: preflight
-    if: needs.preflight.outputs.configured == 'true'
+    if: ${{ needs.preflight.outputs.configured == 'true' && vars.BACKEND_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -181,7 +183,7 @@ jobs:
 
   frontend:
     needs: preflight
-    if: needs.preflight.outputs.configured == 'true'
+    if: ${{ needs.preflight.outputs.configured == 'true' && vars.FRONTEND_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     environment: production
     permissions:

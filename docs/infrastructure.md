@@ -264,6 +264,32 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 | `cd-app.yml`   | main push / 手動 | アプリのビルド & デプロイ                               |
 | `publish.yml`  | Release 公開     | 公開リポジトリへのミラー（release.md）    |
 
+### エリア別スイッチ（リポジトリ変数）
+
+CI / CD をエリア単位で一時停止できるキルスイッチ。リポジトリ変数（Variables）を
+ジョブレベルの `if` で評価する（GitHub Actions の仕様で `on:` トリガーでは `vars` を
+参照できないため、無効時も実行レコードは「skipped」として残る）。
+
+| 変数               | 影響範囲                                                           |
+| ------------------ | ------------------------------------------------------------------ |
+| `BACKEND_ENABLED`  | `ci.yml` の backend / `cd-app.yml` の build → migrate → deploy-api |
+| `FRONTEND_ENABLED` | `ci.yml` の frontend / `cd-app.yml` の frontend                    |
+| `INFRA_ENABLED`    | `ci.yml` の infra / `cd-infra.yml` の plan・apply（手動含む）      |
+
+判定は `vars.X != 'false'` — **未設定ならデフォルト有効**で、明示的に `false` を
+登録したときだけ止まる（公開ミラーや fork では変数未設定のため現行動作のまま）。
+
+```bash
+gh variable set BACKEND_ENABLED --body "false"   # backend の CI/CD を停止
+gh variable delete BACKEND_ENABLED               # 復帰（または --body "true"）
+```
+
+> 注: `if` でスキップされたジョブは required status check として**合格扱い**になる。
+> スイッチ OFF の間はそのエリアの検証なしで PR がマージ可能になる点に注意。
+
+Web UI での設定・動作確認・注意事項の詳細は
+[ci-cd-area-switches.md](ci-cd-area-switches.md) を参照。
+
 ### `ci.yml`
 
 パスフィルタで、変更のあったサービスのジョブだけ実行する。

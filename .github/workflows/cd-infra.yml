@@ -27,8 +27,10 @@ env:
   TF_ENV: dev
 
 jobs:
+  # INFRA_ENABLED is the same per-area kill switch as in ci.yml: unset defaults
+  # to enabled; only an explicit 'false' skips plan AND apply (even manual runs).
   plan:
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' && vars.INFRA_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write # OIDC
@@ -105,7 +107,7 @@ jobs:
             }
 
   apply:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.INFRA_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     # Manual-only (workflow_dispatch) — this IS the gate. The `production`
     # environment records the deployment; required-reviewer gating would need a

@@ -7,6 +7,7 @@
 | [development-environment.md](development-environment.md)   | 開発環境（Dev Container）の使い方 — 起動・初回セットアップ・日々のワークフロー・永続化・トラブルシュート                                                                        |
 | [app-development.md](app-development.md)                   | アプリ開発 — バックエンド（FastAPI）/ フロントエンド（Vite + Vue 3）の構造・手順・規約・型生成                                                                                  |
 | [infrastructure.md](infrastructure.md)                     | インフラ・CI/CD — Terraform 2 層構成（bootstrap / アプリ層）と GitHub Actions・OIDC                                                                                             |
+| [ci-cd-area-switches.md](ci-cd-area-switches.md)           | CI/CD エリア別スイッチ — frontend / backend / infra ごとに実行可否をリポジトリ変数で切り替える設定手順                                                                          |
 | [issues.md](issues.md)                                     | Issue から実装するときのフロー — ブランチ・所見の記録・1 issue 1 PR・CI green の確認                                                                                            |
 | [sdd.md](sdd.md)                                           | 仕様駆動開発（SDD）ワークフロー — cc-sdd `/kiro-*` スキル・`.kiro/` 構成・spec→`docs/` 昇格・CLAUDE.md 保護                                                                     |
 | [requirements/](requirements/)                             | 確定要件の保管庫 — リリース済み機能の要件を `.kiro/specs/` から昇格して置く                                                                                                     |

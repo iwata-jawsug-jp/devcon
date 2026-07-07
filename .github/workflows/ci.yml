@@ -42,9 +42,12 @@ jobs:
               - '.github/scripts/**'
               - '.github/workflows/ci.yml'
 
+  # Per-area kill switches: repository variables BACKEND_ENABLED / FRONTEND_ENABLED /
+  # INFRA_ENABLED gate both CI and CD jobs for that area. Compared with `!= 'false'`
+  # so an unset variable (e.g. on the public mirror / forks) defaults to enabled.
   backend:
     needs: changes
-    if: ${{ needs.changes.outputs.backend == 'true' }}
+    if: ${{ needs.changes.outputs.backend == 'true' && vars.BACKEND_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -87,7 +90,7 @@ jobs:
 
   frontend:
     needs: changes
-    if: ${{ needs.changes.outputs.frontend == 'true' }}
+    if: ${{ needs.changes.outputs.frontend == 'true' && vars.FRONTEND_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -139,7 +142,7 @@ jobs:
 
   infra:
     needs: changes
-    if: ${{ needs.changes.outputs.infra == 'true' }}
+    if: ${{ needs.changes.outputs.infra == 'true' && vars.INFRA_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     defaults:
       run:
