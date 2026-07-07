@@ -7,6 +7,40 @@
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-07-07
+
+### Fixed
+
+- **`ci_deploy`ロールの権限不足・無効ステートメントを実機検証で洗い出して解消**（#258 /
+  #334 / #338）。sandbox 実機での apply→destroy フルライフサイクル検証により、静的分析
+  （PR #107）では検出できなかった以下を修正:
+  - RDS が呼び出し元の代わりに行う KMS 操作の権限が皆無で、暗号化 RDS インスタンス作成が
+    `KMSKeyNotAccessibleFault` で失敗していた。デフォルト AWS 管理キー（`alias/aws/rds`・
+    `alias/aws/secretsmanager`）への `kms:DescribeKey` と、rds キーへの `kms:CreateGrant` を
+    追加（#334）
+  - `manage_master_user_password = true` でのマスターシークレット作成に必要な
+    `secretsmanager:CreateSecret`/`TagResource`（`rds!*` スコープ）を追加（#334）
+  - `EcsTaskDefinitions` ステートメントが**実在しない条件キー** `ecs:task-definition-family`
+    により無言で無効化されており、`ecs:RegisterTaskDefinition` が AccessDenied になっていた。
+    task-definition ARN スコープへ修正し、`default_tags` が作成時に評価する
+    `ecs:TagResource` も追加（#338）
+  - `ecs:RunTask` が task-definition リソースタイプに対して評価されるのに cluster 等の ARN
+    にしか許可されておらず、一度もマッチし得ない無効グラントだった問題を task-definition
+    ARN スコープのステートメントへ移動（PR #339 レビューで発見）
+  - destroy 時に provider が `DeleteRole` の前に必ず呼ぶ `iam:ListInstanceProfilesForRole`
+    が不足しており、IAM ロール削除が失敗していた（PR #341）
+
+### Security
+
+- **`ci_deploy` の KMS/ECS 権限を CloudTrail 証跡ベースの最小構成にトリム**: どの実機 run
+  でも行使されなかった `kms:ListGrants`・`ecs:ListTaskDefinitions`・`ecs:UntagResource`・
+  `ecs:ListTagsForResource` を削除し、`kms:CreateGrant` に
+  `kms:GrantIsForAWSResource = true` 条件を付与（AWS サービス経由の grant 作成に限定）。
+
+> この一連の検証により `ci_deploy` ロールの apply→destroy フルライフサイクルが最小権限で
+> 実機検証済みとなり、#45 / #258 は完了。フォローアップとして、実在しない条件キーを CI で
+> 静的検出するゲートの追加を #340 で追跡する。
+
 ## [0.2.7] - 2026-07-06
 
 ### Added
@@ -549,7 +583,13 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.7...v0.2.8
+[0.2.7]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.6...v0.2.7
+[0.2.6]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.5...v0.2.6
+[0.2.5]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.1.4...v0.2.0

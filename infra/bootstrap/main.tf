@@ -460,7 +460,6 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
       "ecs:UpdateService",
       "ecs:DeleteService",
       "ecs:DescribeTasks",
-      "ecs:RunTask",
       "ecs:StopTask",
       "ecs:TagResource",
       "ecs:UntagResource",
@@ -479,24 +478,54 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     }
   }
   statement {
-    # Task-definition family actions don't support resource-level ARN scoping
-    # for Register/Deregister (only the resulting revision ARN exists after
-    # the call); the ecs:task-definition-family condition key restricts which
-    # family names the caller may register/describe against instead.
-    sid    = "EcsTaskDefinitions"
+    # Actions that IAM evaluates against the task-definition ARN. This
+    # statement previously used a nonexistent condition key
+    # (ecs:task-definition-family) with Resource "*"; a condition on a key
+    # that is never present in the request context can't match, so the whole
+    # Allow was inert and RegisterTaskDefinition was denied in the sandbox
+    # run (#338). RegisterTaskDefinition does support resource-level scoping
+    # (evaluated against the family's task-definition/<family>:* ARN), so
+    # scope by ARN instead.
+    # - TagResource: default_tags applies tags at creation, so
+    #   RegisterTaskDefinition also evaluates ecs:TagResource against the
+    #   task-definition ARN (CloudTrail-evidenced denial in #338; same
+    #   pattern as rds:AddTagsToResource on subgrp in #258). Untag/ListTags
+    #   are deliberately absent: the provider reads task-definition tags via
+    #   DescribeTaskDefinition(include=TAGS), and no run has exercised either.
+    # - RunTask: authorized against the task-definition ARN per the service
+    #   authorization reference (cluster is a condition key, not a resource),
+    #   so it lives here, not in EcsProjectResources -- there it could never
+    #   match. cd-app(-sandbox).yml's migrate job calls run-task under this
+    #   role (PR #339 review).
+    sid    = "EcsProjectTaskDefinitions"
     effect = "Allow"
     actions = [
       "ecs:RegisterTaskDefinition",
+      "ecs:TagResource",
+      "ecs:RunTask",
+    ]
+    resources = ["arn:aws:ecs:*:*:task-definition/${var.project}-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
+  statement {
+    # Deregister/DescribeTaskDefinition support no resource types in the ECS
+    # service authorization reference, so they need their own Resource "*"
+    # statement (same pattern as RdsDescribe/LogsDescribe). The previous
+    # statement's ecs:ListTaskDefinitions was dropped: the AWS provider reads
+    # task definitions via Describe only, and no run has exercised List (#338).
+    sid    = "EcsTaskDefinitionReadDeregister"
+    effect = "Allow"
+    actions = [
       "ecs:DeregisterTaskDefinition",
       "ecs:DescribeTaskDefinition",
-      "ecs:ListTaskDefinitions",
     ]
     resources = ["*"]
-    condition {
-      test     = "StringLike"
-      variable = "ecs:task-definition-family"
-      values   = ["${var.project}-*"]
-    }
+
     condition {
       test     = "StringEquals"
       variable = "aws:RequestedRegion"
@@ -684,11 +713,81 @@ resource "aws_iam_role_policy_attachment" "ci_deploy_storage_cdn" {
   policy_arn = aws_iam_policy.ci_deploy_storage_cdn.arn
 }
 
+# db.tf sets storage_encrypted = true without a kms_key_id, so RDS encrypts
+# with the account's default AWS-managed key (alias/aws/rds). Creating an
+# encrypted instance makes RDS create a grant on that key on the caller's
+# behalf, which needs kms:CreateGrant/DescribeKey -- without it, apply fails
+# with KMSKeyNotAccessibleFault even though the key itself is never
+# referenced in db.tf (#258).
+data "aws_kms_alias" "rds" {
+  name = "alias/aws/rds"
+}
+
+# db.tf also sets manage_master_user_password = true, so RDS stores the master
+# credentials in Secrets Manager encrypted with that service's default
+# AWS-managed key (alias/aws/secretsmanager). Only kms:DescribeKey is needed
+# on this key (the secret encryption itself happens service-side); CloudTrail
+# from the sandbox run showed exactly that call denied, still surfacing as
+# KMSKeyNotAccessibleFault (#334).
+data "aws_kms_alias" "secretsmanager" {
+  name = "alias/aws/secretsmanager"
+}
+
 # Data + logs (db.tf, shared.tf): RDS instance/subnet group and the
 # CloudWatch log group. RDS Describe*/List* actions require Resource "*";
 # the mutating actions are scoped to this project's DB identifier/subnet
 # group name.
 data "aws_iam_policy_document" "ci_deploy_data" {
+  statement {
+    # Trimmed to the CloudTrail-evidenced minimum (#334 / PR #337 review):
+    # DescribeKey is the only action RDS forwards for both default keys.
+    sid     = "RdsDefaultKmsKeyDescribe"
+    effect  = "Allow"
+    actions = ["kms:DescribeKey"]
+    resources = [
+      data.aws_kms_alias.rds.target_key_arn,
+      data.aws_kms_alias.secretsmanager.target_key_arn,
+    ]
+  }
+  statement {
+    # CreateGrant was only ever exercised on the rds key (via
+    # rds.amazonaws.com, for storage encryption); the GrantIsForAWSResource
+    # condition pins it to grants created through an AWS service, per the
+    # documented pattern for CreateGrant in identity policies. It gets its
+    # own statement because the condition key is absent from DescribeKey
+    # requests and would make the Bool test fail for them.
+    sid       = "RdsDefaultKmsKeyGrant"
+    effect    = "Allow"
+    actions   = ["kms:CreateGrant"]
+    resources = [data.aws_kms_alias.rds.target_key_arn]
+
+    condition {
+      test     = "Bool"
+      variable = "kms:GrantIsForAWSResource"
+      values   = ["true"]
+    }
+  }
+  statement {
+    # With manage_master_user_password = true, RDS creates and tags the
+    # master-credentials secret on the caller's behalf during
+    # CreateDBInstance; per the RDS/Secrets Manager integration docs the
+    # caller needs CreateSecret/TagResource (kms:DescribeKey is covered
+    # above). RDS-managed secrets are always named with the `rds!` prefix,
+    # not the project prefix, so scope to that (#334).
+    sid    = "RdsManagedMasterUserSecret"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:TagResource",
+    ]
+    resources = ["arn:aws:secretsmanager:*:*:secret:rds!*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
   statement {
     sid    = "RdsDescribe"
     effect = "Allow"
@@ -952,6 +1051,9 @@ data "aws_iam_policy_document" "ci_deploy_iam" {
       "iam:GetRolePolicy",
       "iam:ListRolePolicies",
       "iam:ListRoleTags",
+      # The provider checks for attached instance profiles before DeleteRole;
+      # without this the sandbox destroy failed at the two ECS roles (#258).
+      "iam:ListInstanceProfilesForRole",
     ]
     resources = ["arn:aws:iam::*:role/${var.project}-*"]
   }
