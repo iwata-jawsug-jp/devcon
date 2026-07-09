@@ -7,6 +7,42 @@
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-07-09
+
+### Changed
+
+- **frontend 依存パッケージの最新化**（#358 / PR #359）: ESLint 10 系へメジャー更新
+  （eslint 10.6.0 / @eslint/js 10.0.1 / eslint-plugin-vue 10.9.2 / globals 17.7.0。
+  flat config 移行済みのためコード修正なし）。`@types/node` はランタイム（CI /
+  Dev Container / engines すべて Node 24）に整合する `^24.13.3` を採用し、latest の
+  26 系は不採用。あわせて vitest 4.1.10 / vite 8.1.4 / prettier 3.9.5 に更新。
+- **dependabot PR 9 件を検証のうえ一括採用**（#360）: `sandbox/dependabot` ブランチに
+  結合して CI (sandbox) green を確認してからマージ。
+  - frontend: vue-tsc 2.2.12 → 3.3.7（TypeScript 5.9.3 との組合せで全ゲート検証済み）
+  - backend: uvicorn `>=0.51.0` / mypy 2.2.0
+  - infra: AWS provider 6.53.0 → 6.54.0（lock 2 面）
+  - GitHub Actions のメジャー更新: actions/cache v6・actions/setup-python v6・
+    setup-tflint v6・docker/setup-buildx-action v4・aws-actions/configure-aws-credentials
+    v6。主な破壊的変更はいずれも Node 24 ランタイム化（要 runner v2.327.1+、GitHub
+    ホストランナーでは影響なし）。認証クリティカルな configure-aws-credentials@v6 は
+    CD Infra (sandbox) で実 AWS への OIDC 認証成功を実機確認済み
+
+> **検証の結果、意図的に見送った更新**（#358 の検証記録参照）:
+>
+> - **TypeScript 7.0.2**: TS 7.0 は JS プログラマティック API を同梱せず、vue-tsc /
+>   typescript-eslint / openapi-typescript が起動不能。公式互換パッケージ
+>   `@typescript/typescript6` の alias 構成も Volar の tsc パッチ機構と非互換で Vue では
+>   使えないことを実測確認。`^5.5.0` を維持し、TS 7.1 の新 API → typescript-eslint 対応
+>   → vuejs/language-tools#5381（tsgo 対応）が揃ってから再検討。なお TS 6.0.3 + TS7 併存
+>   構成（`baseUrl` 削除 + overrides 込み）で全ゲート green になることは実証済みで、
+>   必要になれば移行可能。
+> - **@unhead/vue 3**: vite-ssg 28.3.0（最新）が v2 を通常依存として同梱するため、root
+>   だけ v3 に上げると二重インスタンス化し、**全ゲート green のまま** SSG 出力の
+>   `<head>`（titleTemplate / description / OG / theme-color）が静かに欠落することを
+>   実測確認。vite-ssg の unhead v3 対応まで見送り。@types/node 26 とともに dependabot
+>   へ `ignore this major version` を設定済み（解禁時はクローズ済み PR #354 / #357 で
+>   `unignore` する）。
+
 ## [0.2.9] - 2026-07-07
 
 ### Added
@@ -596,7 +632,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.6...v0.2.7

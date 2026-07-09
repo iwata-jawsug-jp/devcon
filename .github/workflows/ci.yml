@@ -127,7 +127,7 @@ jobs:
           echo "version=$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browser binaries
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
@@ -167,7 +167,7 @@ jobs:
       # Version pinned to match .devcontainer/Dockerfile's TFLINT_VERSION — the single
       # source for this repo's security/lint tool versions (#153, #272).
       - name: Set up TFLint
-        uses: terraform-linters/setup-tflint@v4
+        uses: terraform-linters/setup-tflint@v6
         with:
           tflint_version: 'v0.63.1'
       # Same command as `make tf-lint`: without --config, tflint would silently
@@ -187,7 +187,7 @@ jobs:
       # that action has no version input and hardcodes its own checkov release per action
       # tag (v12 currently bundles 3.3.6, not this repo's pinned CHECKOV_VERSION) — #153, #272.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.14'
       - name: Checkov
@@ -215,7 +215,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.14'
       - name: Ruff (lint + format check)
