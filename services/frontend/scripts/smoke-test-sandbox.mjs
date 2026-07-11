@@ -55,6 +55,19 @@ function log(...args) {
   console.log(new Date().toISOString(), ...args);
 }
 
+// A substring check here (`url.includes('amazoncognito.com')`) is an
+// incomplete host check -- CodeQL js/incomplete-url-substring-sanitization,
+// flagged by the public mirror's Code scanning: a URL like
+// `https://evil.example/amazoncognito.com` would pass it. Parse the URL and
+// check the actual hostname suffix instead.
+function isCognitoHostedUiUrl(url) {
+  try {
+    return new URL(url).hostname.endsWith('.amazoncognito.com');
+  } catch {
+    return false;
+  }
+}
+
 // Our SPA's /login and /callback routes do their real work (the redirect
 // to Cognito, and the code-exchange redirect back) inside a Vue
 // onMounted hook, which runs AFTER the browser's 'load' event a
@@ -117,7 +130,7 @@ async function main() {
   await page.goto(`${BASE_URL}/login`, { waitUntil: 'load' });
   await waitPastTransitionalRoutes(page);
 
-  if (!page.url().includes('amazoncognito.com')) {
+  if (!isCognitoHostedUiUrl(page.url())) {
     throw new Error(`expected a redirect to Cognito Hosted UI, landed on ${page.url()} instead`);
   }
   log('interactive login at', page.url());

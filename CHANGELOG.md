@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-11
+
+### Fixed
+
+- **公開リポジトリ（iwata-jawsug-jp/devcon）の Code scanning が検出した不完全なURLサニタイズ
+  を解消**（PR #381）: `services/frontend/scripts/smoke-test-sandbox.mjs` の Cognito Hosted UI
+  リダイレクト判定が `page.url().includes('amazoncognito.com')` という文字列部分一致
+  チェックで、`https://evil.example/amazoncognito.com` のようなURLも通してしまう不完全な
+  サニタイズだった（CodeQL `js/incomplete-url-substring-sanitization`）。
+  `new URL(url).hostname.endsWith('.amazoncognito.com')` によるホスト名検証に修正。
+
 ## [0.3.0] - 2026-07-11
 
 ### Added
