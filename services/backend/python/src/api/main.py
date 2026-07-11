@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 
 from api import __version__
-from api.config import get_settings
+from api.config import get_settings, warn_if_cognito_config_missing
 from api.exception_handlers import unhandled_exception_handler
 from api.logging_config import configure_logging
 from api.middleware import CorrelationIdMiddleware
@@ -15,6 +15,7 @@ def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
     configure_logging()
     settings = get_settings()
+    warn_if_cognito_config_missing(settings)
     app = FastAPI(title=settings.app_name, version=__version__)
     configure_tracing(app, settings)
     app.add_middleware(CorrelationIdMiddleware)

@@ -44,9 +44,20 @@ resource "aws_vpc_endpoint" "s3" {
   }
 }
 
-# Interface endpoints for ECR (api + dkr), CloudWatch Logs, and Secrets Manager.
-# `xray` is added only when tracing is enabled (ADR-0007) — the ADOT collector
-# sidecar needs it to reach the X-Ray API with no NAT gateway in this VPC.
+# Interface endpoints for ECR (api + dkr), CloudWatch Logs, Secrets Manager,
+# and Cognito IDP. `xray` is added only when tracing is enabled (ADR-0007) —
+# the ADOT collector sidecar needs it to reach the X-Ray API with no NAT
+# gateway in this VPC.
+#
+# cognito_idp: the backend's JwksVerifier (api/auth/jwks.py) fetches signing
+# keys from `https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known
+# /jwks.json` on every JWT it can't already verify from its in-memory cache.
+# Without this endpoint, that's a public-internet hostname with no route
+# from the private subnets (no NAT gateway here) -- the request just hangs
+# until some far-off socket timeout, so every authenticated request stalls
+# and eventually 504s. `private_dns_enabled = true` (below) makes that same
+# public hostname resolve to this endpoint's private IP instead, so no code
+# change is needed (issue #369).
 locals {
   interface_endpoints = merge(
     {
@@ -54,6 +65,7 @@ locals {
       ecr_dkr        = "ecr.dkr"
       logs           = "logs"
       secretsmanager = "secretsmanager"
+      cognito_idp    = "cognito-idp"
     },
     var.otel_traces_enabled ? { xray = "xray" } : {}
   )

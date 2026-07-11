@@ -30,6 +30,19 @@ const userPoolId = import.meta.env.VITE_COGNITO_USER_POOL_ID ?? '';
 const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID ?? '';
 
 /**
+ * An empty pool id / client id doesn't break the build or app startup — it
+ * only surfaces once a user actually tries to log in (#367, #369). Warn here
+ * so a missing-config deploy is visible in the browser console right away
+ * instead of only as an opaque auth failure later (#375).
+ */
+if (!userPoolId || !clientId) {
+  console.warn(
+    'Cognito is not configured (VITE_COGNITO_USER_POOL_ID/VITE_COGNITO_CLIENT_ID empty) ' +
+      '-- authentication will not work',
+  );
+}
+
+/**
  * Cognito Hosted UI domain prefix (`aws_cognito_user_pool_domain.hosted_ui`
  * in infra/auth.tf), e.g. "myapp-auth". Exposed here — not consumed by this
  * module — because `oidc-client-ts`'s `UserManager.signoutRedirect()`

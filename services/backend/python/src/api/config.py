@@ -1,9 +1,12 @@
 """Application configuration via pydantic-settings."""
 
+import logging
 from functools import lru_cache
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("api.startup")
 
 
 class Settings(BaseSettings):
@@ -60,6 +63,21 @@ class Settings(BaseSettings):
                 f"{self.cognito_user_pool_id}"
             )
         return self
+
+
+def warn_if_cognito_config_missing(settings: Settings) -> None:
+    """Warn (don't block startup) if Cognito isn't configured (#375).
+
+    An empty pool id / client id doesn't break startup or ``/api/health`` --
+    the app comes up looking healthy while nobody can actually log in (#367,
+    #369). Surface it in the startup logs so a missing-config deploy is
+    visible without waiting for a user to hit the auth flow.
+    """
+    if not settings.cognito_user_pool_id or not settings.cognito_client_id:
+        logger.warning(
+            "Cognito is not configured (cognito_user_pool_id/cognito_client_id "
+            "empty) -- authentication will not work"
+        )
 
 
 @lru_cache

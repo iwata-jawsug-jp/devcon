@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cognitoAuthority,
   cognitoHostedUiDomain,
@@ -8,6 +8,14 @@ import {
 describe('oidcConfig', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  // No .env is loaded in the test env, so every import of this module already
+  // hits the "missing config" warning (#375) -- silence it here so the
+  // pre-existing assertions below aren't testing console output by accident.
+  // The warning's own behavior is covered separately below.
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   it('builds the Cognito authority URL from region + pool id (same shape as the backend cognito_issuer)', () => {
@@ -53,5 +61,36 @@ describe('oidcConfig', () => {
     // concrete behavior that proves "memory only".
     expect(window.localStorage.getItem('oidc.user:test-authority:test-client')).toBeNull();
     expect(window.sessionStorage.getItem('oidc.user:test-authority:test-client')).toBeNull();
+  });
+});
+
+describe('oidcConfig missing-config warning (#375)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('warns when VITE_COGNITO_USER_POOL_ID / VITE_COGNITO_CLIENT_ID are empty', async () => {
+    vi.stubEnv('VITE_COGNITO_USER_POOL_ID', '');
+    vi.stubEnv('VITE_COGNITO_CLIENT_ID', '');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await import('../oidcConfig');
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Cognito'));
+  });
+
+  it('does not warn once both are configured', async () => {
+    vi.stubEnv('VITE_COGNITO_USER_POOL_ID', 'ap-northeast-1_example');
+    vi.stubEnv('VITE_COGNITO_CLIENT_ID', 'example-client-id');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await import('../oidcConfig');
+
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });

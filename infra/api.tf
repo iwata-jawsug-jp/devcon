@@ -119,6 +119,7 @@ resource "aws_lb_target_group" "api" {
 
   health_check {
     path                = "/api/health"
+    port                = "8000"
     matcher             = "200"
     interval            = 30
     healthy_threshold   = 2
@@ -196,6 +197,35 @@ locals {
   })
 }
 
+# When the caller doesn't pin an image (the common case: infra-only applies
+# don't know the deployed tag), look up what the api service is actually
+# running right now instead of falling back to a nonexistent ":bootstrap" tag
+# (#374 -- that placeholder made every infra-only apply register a task-def
+# revision ECS couldn't pull). The lookup shells out (data "external") rather
+# than using data "aws_ecs_task_definition" directly because a plain data
+# source errors the whole plan/apply when the service doesn't exist yet (true
+# first-ever apply, or a `dev`-env plan against never-applied state) -- the
+# script instead reports an empty image in that case, and we keep the old
+# ":bootstrap" placeholder as the final fallback for that first apply.
+data "external" "api_current_image" {
+  count = var.container_image == "" ? 1 : 0
+
+  program = [
+    "bash",
+    "${path.module}/scripts/current-api-image.sh",
+    "${local.name_prefix}-cluster",
+    "${local.name_prefix}-api",
+    var.aws_region,
+  ]
+}
+
+locals {
+  api_current_image = try(data.external.api_current_image[0].result.image, "")
+  api_image = var.container_image != "" ? var.container_image : (
+    local.api_current_image != "" ? local.api_current_image : "${aws_ecr_repository.api.repository_url}:bootstrap"
+  )
+}
+
 # Task definition. The image is a placeholder until cd-app registers a new
 # revision with the freshly built image:tag (see cd-app-sandbox.yml).
 resource "aws_ecs_task_definition" "api" {
@@ -215,7 +245,7 @@ resource "aws_ecs_task_definition" "api" {
     [
       {
         name      = "api"
-        image     = var.container_image != "" ? var.container_image : "${aws_ecr_repository.api.repository_url}:bootstrap"
+        image     = local.api_image
         essential = true
         portMappings = [
           { containerPort = 8000, protocol = "tcp" }
@@ -227,6 +257,9 @@ resource "aws_ecs_task_definition" "api" {
           { name = "API_DB_USER", value = var.db_username },
           { name = "API_ENVIRONMENT", value = var.environment },
           { name = "API_OTEL_TRACES_ENABLED", value = tostring(var.otel_traces_enabled) },
+          { name = "API_COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.users.id },
+          { name = "API_COGNITO_REGION", value = data.aws_region.current.name },
+          { name = "API_COGNITO_CLIENT_ID", value = aws_cognito_user_pool_client.web.id },
         ]
         secrets = [
           {

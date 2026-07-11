@@ -7,6 +7,45 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-11
+
+### Added
+
+- **issueテンプレート一式**（#362 / #363）: SDD入力用（`feature-sdd.md`）・バグ報告・雑務タスクの
+  3種、および検証issue用テンプレート（発見→記録→分割→検証→クローズのループを起票時点で強制）を
+  `.github/ISSUE_TEMPLATE/` に整備。開発用リポジトリで運用検証中の扱いのため、公開ミラー
+  （iwata-jawsug-jp/devcon）には含めない。
+- **デプロイ後の実ブラウザE2Eスモークテスト**（#373 / PR #377）: `cd-app-sandbox.yml` に
+  `smoke-test` ジョブを追加。Playwright（headless Chromium）で実際に Cognito Hosted UI
+  ログインを完走させ、認証付き `GET /api/items` が2xxを返すことを確認する「第4のゲート」。
+  CIロールがCognitoユーザー管理権限を持たないため、人が事前に1回だけ登録した固定テスト
+  ユーザーを再利用する方式。関連変数が未設定なら fail ではなく warning 付きでスキップする。
+- **Cognito設定が未注入のまま起動した場合の早期警告**（#375 / PR #379）: バックエンドは起動時に
+  `cognito_user_pool_id`/`cognito_client_id` が空なら `logger.warning`、フロントエンドは
+  `oidcConfig.ts` 読み込み時に `VITE_COGNITO_*` が空なら `console.warn`。いずれも起動/ビルド
+  自体は止めず、CloudWatch Logs/ブラウザコンソールで設定漏れを早期検知できるようにする。
+
+### Fixed
+
+- **order-management golden path 実機E2E検証（#364）で発見された、実デプロイ環境限定の認証
+  まわりの欠陥を一括解消**（#365 / #367 / #369）:
+  - CloudFront の CSP（`connect-src`）が `oidc-client-ts` の Cognito への cross-origin fetch
+    をブロックしていた（PR #366）
+  - `cd-app(-sandbox).yml` の frontend ビルドステップが `VITE_COGNITO_*` を一切注入しておらず、
+    authority URL が不正な形になっていた（PR #368）
+  - ALB ターゲットグループのヘルスチェックポートが `traffic-port`（未指定）のままだった
+    （PR #370。事象の切り分けとして先行対応、根本原因は別）
+  - プライベートサブネットに `cognito-idp` 用 VPC インターフェースエンドポイントが無く、
+    JWKS取得の経路が存在しないため認証付きリクエストが504になっていた（PR #371、真の
+    根本原因）
+  - ECS タスク定義に `API_COGNITO_*` 環境変数が一切注入されておらず、JWKS取得が直っても
+    トークン検証が常に失敗していた（PR #372）
+- **`container_image` 未指定時に存在しない `:bootstrap` タグへフォールバックし、インフラ専用の
+  `terraform apply` のたびに ECS デプロイが `CannotPullContainerError` で失敗する構造的な欠陥
+  を解消**（#374 / PR #378）。`data "external"` で現在実際にデプロイ済みのイメージタグを読み取り、
+  それを既定値にする方式に変更。sandbox実機で infra-only な apply が正常に image を引き継ぐこと
+  を検証済み。
+
 ## [0.2.10] - 2026-07-09
 
 ### Changed

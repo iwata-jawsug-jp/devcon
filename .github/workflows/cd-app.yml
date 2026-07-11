@@ -48,10 +48,14 @@ jobs:
           APP_SECURITY_GROUP_ID: ${{ vars.APP_SECURITY_GROUP_ID }}
           WEB_BUCKET: ${{ vars.WEB_BUCKET }}
           CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+          COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
+          COGNITO_CLIENT_ID: ${{ vars.COGNITO_CLIENT_ID }}
+          COGNITO_DOMAIN: ${{ vars.COGNITO_DOMAIN }}
         run: |
           missing=()
           for v in AWS_DEPLOY_ROLE_ARN ECR_REPOSITORY ECS_TASK_FAMILY ECS_CLUSTER ECS_SERVICE \
-                   PRIVATE_SUBNET_IDS APP_SECURITY_GROUP_ID WEB_BUCKET CLOUDFRONT_DISTRIBUTION_ID; do
+                   PRIVATE_SUBNET_IDS APP_SECURITY_GROUP_ID WEB_BUCKET CLOUDFRONT_DISTRIBUTION_ID \
+                   COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_DOMAIN; do
             [ -n "${!v}" ] || missing+=("$v")
           done
           if [ "${#missing[@]}" -eq 0 ]; then
@@ -203,6 +207,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Build
+        env:
+          VITE_COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_REGION: ${{ env.AWS_REGION }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.COGNITO_CLIENT_ID }}
+          VITE_COGNITO_DOMAIN: ${{ vars.COGNITO_DOMAIN }}
         run: npm run build
       - name: Configure AWS credentials (deploy role)
         uses: aws-actions/configure-aws-credentials@v6

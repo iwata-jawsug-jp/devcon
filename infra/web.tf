@@ -80,7 +80,15 @@ resource "aws_cloudfront_response_headers_policy" "web_security_headers" {
         "style-src 'self'",
         "img-src 'self' data:",
         "font-src 'self'",
-        "connect-src 'self'",
+        # 'self' alone breaks Cognito Hosted UI login (#365): oidc-client-ts
+        # fetches the OIDC discovery document from the Cognito issuer and
+        # POSTs to the Hosted UI domain's token endpoint during
+        # signinRedirectCallback, both cross-origin from this CloudFront
+        # domain. Neither was exercised by any pre-#365 test (local dev
+        # goes through Vite's proxy, and this response-headers policy only
+        # applies to the deployed CloudFront distribution), so the gap went
+        # undetected until a real-browser sandbox E2E run caught it.
+        "connect-src 'self' https://cognito-idp.${var.aws_region}.amazonaws.com https://${aws_cognito_user_pool_domain.hosted_ui.domain}.auth.${var.aws_region}.amazoncognito.com",
         "object-src 'none'",
         "base-uri 'none'",
         "frame-ancestors 'none'",
