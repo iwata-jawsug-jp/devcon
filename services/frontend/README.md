@@ -18,7 +18,7 @@ The dev server proxies `/api/*` to the backend at `http://localhost:8000`
 
 ```bash
 npm run dev         # start the Vite dev server
-npm run build       # vue-tsc --noEmit && vite build  -> dist/
+npm run build       # vue-tsc --noEmit && vite-ssg build  -> dist/ (every route prerendered)
 npm run preview     # preview the production build
 npm run typecheck   # vue-tsc --noEmit (type-check only)
 npm run lint        # eslint .

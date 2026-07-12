@@ -74,6 +74,8 @@ the frontend's types are generated from it (`make gen-types`) — never hand-wri
 - `docs/infrastructure.md` — Terraform 2-layer setup, CI/CD (`ci.yml` / `cd-infra.yml` /
   `cd-app.yml`), and the fresh-clone bootstrap order.
 - `docs/issues.md` — working from a GitHub issue (branch, record findings, one focused PR).
+- `docs/development-process.md` — end-to-end dev process (requirements → release), the branch
+  strategy, and when a change needs `sandbox/*` verification before merging to `main`.
 - `docs/development-environment.md` — Dev Container usage.
 - `docs/sandbox.md` — `sandbox/*` disposable real-AWS verification; a dead end, never merged into a non-sandbox branch.
 - `docs/frontend-frameworks-demo.md` — (planned) multi-framework frontend comparison demo on a

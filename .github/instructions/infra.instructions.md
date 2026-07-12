@@ -15,7 +15,9 @@ Details: `docs/infrastructure.md`, `infra/CLAUDE.md`.
   `*.example` templates only. Never commit secrets.
 - Don't run `terraform apply` / `destroy` or push images locally. App-infra
   changes are owned by `cd-infra.yml` (`apply` is gated behind manual
-  `workflow_dispatch`, not automatic on merge to main).
+  `workflow_dispatch`, not automatic on merge to main). `apply` also requires the
+  `INFRA_APPLY_ENABLED` repo variable set to `true` (defaults to disabled), a second key on
+  top of `workflow_dispatch` itself.
 - Auth is GitHub OIDC → an IAM role per job. Don't add an `AWS_ACCESS_KEY_ID`
   secret.
 - `bootstrap/` is the layer applied once with local state, not managed by

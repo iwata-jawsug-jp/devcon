@@ -70,3 +70,6 @@ services/frontend/.lighthouseci/
 
 # cc-sdd の導入時バックアップ（SDD 試験導入 #61）
 .cc-sdd.backup/
+
+# 一時作業ディレクトリ
+tmp/

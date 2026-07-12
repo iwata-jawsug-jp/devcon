@@ -15,6 +15,8 @@ Details: `docs/app-development.md`, `services/backend/python/CLAUDE.md`.
 - Every schema change is an Alembic migration (`make makemigration`); never edit
   the DB by hand. Keep ORM and Pydantic models separate (responses use
   `from_attributes=True`).
+- Tests default to an in-memory SQLite database (schema built directly from ORM metadata, no
+  Alembic) and run against Postgres in CI.
 - Keep type hints (mypy strict).
 - Read config from `API_`-prefixed env vars. Backend secrets stay server-side
   (SSM / Secrets Manager); never commit them.

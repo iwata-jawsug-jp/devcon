@@ -7,6 +7,42 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-12
+
+### Added
+
+- **`docs/development-process.md` を新設**: `docs/proposal/application-development-process-proposal.md`
+  で採用・実施済みだったアプリケーション開発プロセス（要件定義〜リリースの全体フロー・
+  sandbox 検証要否の判定表・ブランチ戦略）を、`docs/proposal/` は公開ミラー対象外
+  （読者に届かない）という理由で `docs/` 直下へ昇格。`infrastructure.md`/`sandbox.md`/
+  `issues.md` の相互参照リンクも新ドキュメントへ差し替えた。
+
+### Changed
+
+- **公開リポジトリの issue テンプレートを `bug-report.md` のみに変更**: 従来は
+  `config.yml`（`blank_issues_enabled`）のみを公開し、テンプレート本体は全て
+  除外していたため、公開リポジトリでは実質ブランクissueしか使えない状態だった。
+  `bug-report.md` の文面を英語化したうえで公開対象に切り替え、`config.yml` は除外に
+  戻した（`chore.md`/`feature-sdd.md`/`verification.md` は引き続き運用検証中のため
+  除外のまま）。
+
+### Fixed
+
+- **README/CLAUDE.md/Copilot instructions 間の不整合5件を修正**:
+  `services/frontend/README.md` の build スクリプト説明が vite-ssg 移行（#78）に
+  追従しておらず `vite build` のままだった／ルート `CLAUDE.md` の「More detail」に
+  `docs/development-process.md` が未掲載だった／`.github/copilot-instructions.md` に
+  「CI green はデプロイ動作を保証しない」第4のゲートのルールが丸ごと欠落していた／
+  `.github/instructions/infra.instructions.md` に `INFRA_APPLY_ENABLED` の記載漏れ／
+  `.github/instructions/backend.instructions.md` にテストDB（既定SQLite・CIはPostgres）
+  の記載漏れ。後者3件は `docs/ai-instructions.md` が定める docs/CLAUDE.md/Copilot の
+  3点セット同期からの逸脱だった。
+- **`docs/ai-instructions.md` に Copilot CLI のセッション再読込に関する制約を追記**:
+  「チャットは日本語で応答」ルールは文言一致で反映済みだったが Copilot CLI で効かない
+  事象があり、調査の結果 Copilot CLI はアクティブなセッション中は指示ファイルの変更を
+  再読込しない（新規セッション開始まで反映されない）という制約を確認した。個人用の
+  `$HOME/.copilot/copilot-instructions.md` の存在とあわせて「既知の制約」に記録。
+
 ## [0.3.2] - 2026-07-12
 
 ### Added
@@ -769,7 +805,8 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.10...v0.3.0

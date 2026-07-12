@@ -275,7 +275,7 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 
 「CI が green になるまで issue は完了ではない」（[issues.md](issues.md)）という規律は、
 これでドキュメント・AI エージェントの運用だけでなく GitHub 側でも強制される
-（application-development-process-proposal.md §3.1）。
+（[development-process.md](development-process.md)）。
 
 sandbox 隔離用の `sandbox-isolation`（`guard` 必須）は別ルールセットで、
 [sandbox.md](sandbox.md) を参照。

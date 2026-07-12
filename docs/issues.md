@@ -18,7 +18,7 @@ GitHub issue を実装するときの運用ルール。全体の規約は [`../C
   その issue にスコープし、無関係な発見は新しい issue に切り出す。
 - **実 AWS 環境でしか検証できない変更は、`main` へ入れる前に `sandbox/*` で検証する。**
   対象は次のいずれか（詳細な判定基準・理由は
-  application-development-process-proposal.md §2.1）:
+  [development-process.md](development-process.md#いつ-sandbox-検証が必須か)）:
   - `infra/**`（Terraform リソース変更）
   - `.github/workflows/cd-*.yml`（デプロイパイプライン変更）
   - `services/**` で DB マイグレーション・認証・環境変数注入を伴う変更
@@ -47,5 +47,6 @@ GitHub issue を実装するときの運用ルール。全体の規約は [`../C
 - [infrastructure.md](infrastructure.md) — CI/CD（`ci.yml` / `cd-infra.yml` / `cd-app.yml`）と
   ブートストラップ順序。CI で green を確認する際の正。
 - [sandbox.md](sandbox.md) — `sandbox/*` 隔離ブランチでの実 AWS 検証（PR/マージの行き止まり）。
-  開発プロセス全体・sandbox 検証要否判定表・ブランチ戦略の背景。
+- [development-process.md](development-process.md) —
+  開発プロセス全体・sandbox 検証要否判定表・ブランチ戦略。
 - [`../CLAUDE.md`](../CLAUDE.md) — アーキテクチャと規約の正。

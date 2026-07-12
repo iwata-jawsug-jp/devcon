@@ -4,7 +4,7 @@
 公開リポジトリに一切影響させずに、主に**アプリケーション開発**に使う —
 DB マイグレーションや新機能を、実 RDS / ECS など本物の AWS リソースに対して
 end-to-end で試す（`cd-app-sandbox` で build→migrate→deploy）。機能開発が終わるまで
-長期稼働する（application-development-process-proposal.md
+長期稼働する（[development-process.md](development-process.md)
 が定めるアプリケーション開発プロセスの一部）。
 
 ローカルの Dev Container（[development-environment.md](development-environment.md)）が

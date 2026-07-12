@@ -9,6 +9,7 @@
 | [infrastructure.md](infrastructure.md)                     | インフラ・CI/CD — Terraform 2 層構成（bootstrap / アプリ層）と GitHub Actions・OIDC                                                                                             |
 | [ci-cd-area-switches.md](ci-cd-area-switches.md)           | CI/CD エリア別スイッチ — frontend / backend / infra ごとに実行可否をリポジトリ変数で切り替える設定手順                                                                          |
 | [issues.md](issues.md)                                     | Issue から実装するときのフロー — ブランチ・所見の記録・1 issue 1 PR・CI green の確認                                                                                            |
+| [development-process.md](development-process.md)           | アプリケーション開発プロセス・ブランチ戦略 — 要件定義〜リリースの全体フロー、sandbox 検証要否の判定基準                                                                         |
 | [sdd.md](sdd.md)                                           | 仕様駆動開発（SDD）ワークフロー — cc-sdd `/kiro-*` スキル・`.kiro/` 構成・spec→`docs/` 昇格・CLAUDE.md 保護                                                                     |
 | [requirements/](requirements/)                             | 確定要件の保管庫 — リリース済み機能の要件を `.kiro/specs/` から昇格して置く                                                                                                     |
 | [design/](design/)                                         | 基本設計の図表方針＋確定設計の保管庫 — Mermaid を既定とし、AWS 構成図は `diagrams` / draw.io を補助に使う                                                                       |

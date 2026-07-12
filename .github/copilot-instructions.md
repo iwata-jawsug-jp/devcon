@@ -32,6 +32,12 @@ For details, see `docs/` and each `.github/instructions/*.instructions.md`.
 - "Green locally" must equal "green in CI." The Makefile targets mirror the CI
   commands (e.g. `make tf-lint` == CI's `tflint --recursive --config`, and
   `make ci-frontend` reproduces the CI frontend job).
+- **CI green proves the code is correct, not that a deploy actually works.** Config injection,
+  CSP, and VPC routing don't exist in local dev or CI. The 4th gate is a live-browser E2E smoke
+  test (`services/frontend/e2e/live-smoke/`) that drives a real Cognito Hosted UI login plus an
+  authenticated write against the just-deployed environment (`cd-app-sandbox.yml`/`cd-app.yml`'s
+  `smoke-test` job) — blocking, not advisory. On `main` it only runs once the
+  `LIVE_SMOKE_ENABLED` repo variable is set to `true` (defaults to disabled).
 
 ## Commands
 

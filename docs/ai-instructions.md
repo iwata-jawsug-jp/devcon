@@ -52,6 +52,14 @@
 ## 既知の制約
 
 - Copilot の指示適用は**非決定的**。`CLAUDE.md` と矛盾する指示は書かない。
+  - 実例: 「チャットは日本語で応答」ルール（`CLAUDE.md`/`copilot-instructions.md` 双方に
+    文言一致で記載済み）が Copilot CLI で効かないことがある。原因の一つとして、**Copilot CLI
+    はアクティブなセッション中に指示ファイルの変更を再読込しない**（公式ドキュメント: セッションを
+    終了し新しいセッションを開始するまで反映されない）。指示を直したのに効いていない場合は、
+    まずセッションを再起動してから再確認すること。
+  - Copilot CLI はリポジトリの `.github/copilot-instructions.md` / `.github/instructions/*.md` に
+    加えて `$HOME/.copilot/copilot-instructions.md`（個人用ローカル指示）も読む。パス別指示が
+    マッチする場合は複数ファイルの指示が併用される。矛盾時の選択は上記のとおり非決定的。
 - github.com の Chat は**パス別 instructions が未対応**（coding agent / code review では有効）。
   全面で確実に効かせたいルールは `.github/copilot-instructions.md` 側に置く。
 - 詳細を `docs/` に一本化してもドリフトはゼロにはならない。上記の「3 点セット PR」運用で抑える。
