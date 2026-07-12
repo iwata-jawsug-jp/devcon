@@ -77,7 +77,9 @@ resource "aws_cognito_user_pool_client" "web" {
 }
 
 # Hosted UI domain. Cognito-prefix domain (no ACM cert / custom domain needed).
+# Globally unique namespace across all AWS accounts -- see
+# local.global_name_prefix (main.tf) for why this isn't name_prefix alone.
 resource "aws_cognito_user_pool_domain" "hosted_ui" {
-  domain       = "${local.name_prefix}-auth"
+  domain       = "${local.global_name_prefix}-auth"
   user_pool_id = aws_cognito_user_pool.users.id
 }

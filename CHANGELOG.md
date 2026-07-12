@@ -7,6 +7,31 @@
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-07-12
+
+### Fixed
+
+第2消費者実証（itouhi/devcon-test、v0.3.3のfork）の sandbox デプロイで顕在化した3件の不具合を修正。
+
+- **S3バケット名・Cognito Hosted UIドメイン名をアカウントIDでグローバルに一意化**: `local.name_prefix`
+  をS3バケット名・Cognitoドメインにそのまま使っていたが、両者はAWSアカウントを跨いでグローバルに
+  一意な名前空間のため、`project`の既定値のままforkした複数の利用者・環境が同時にデプロイすると
+  衝突していた。`local.global_name_prefix`（`name_prefix` + account_id）を追加し、S3バケット名・
+  Cognitoドメインにのみ適用（アカウント内一意で十分なVPC/ALB/RDS等は`name_prefix`のまま）。
+  命名規約を`infra/CLAUDE.md`に明記（#436）。
+- **deployロールに`ec2:GetSecurityGroupsForVpc`を追加**: ゼロからのプロビジョニングでELBv2の
+  `CreateLoadBalancer`（`aws_lb.api`）がこのアクションの欠如によりAccessDeniedで失敗していた。
+  長寿命のsandbox環境ではALBが既に存在するため露見せず、ゼロから環境を立ち上げる経路でのみ
+  踏むIAM穴だった（#437。`infra/bootstrap/`はCI外・人力apply運用の層のため、実AWSへの反映は
+  別途人力での`terraform apply`が必要）。
+- **CloudFrontのエラーマスキング（403/404→200）を`/api/*`に適用しない構成に変更**: distribution
+  単位の`custom_error_response`（SPAのクライアントサイドルーティング救済策）が`/api/*`ビヘイビア
+  にも適用され、APIの正当な403/404がブラウザから「200 + SPAのHTML」に化けて観測不能になり、
+  E2Eからの権限系バグ検出を阻害していた。SPAルーティングのフォールバックを、リクエスト側
+  （viewer-request）で解決するCloudFront Functionに置き換え、`default_cache_behavior`（S3
+  オリジン）にのみ関連付けることで`/api/*`に一切影響しないようにした。live-smokeに、存在しない
+  `/api/*`パスが素の404で返ることを検証するケースを追加（#439）。
+
 ## [0.3.6] - 2026-07-12
 
 ### Added

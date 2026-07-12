@@ -7,7 +7,7 @@
 // green. This scenario exercises that exact path against a real deployed
 // environment with a real headless-Chromium Cognito Hosted UI login.
 //
-// Deliberately minimal (S1-S3, issue #376's design table): it is NOT a
+// Deliberately minimal (S1-S3, issue #376's design table, +S4 for #439): it is NOT a
 // business-scenario test -- its only job is "can anyone actually log in and
 // use this deployment at all", so it stays fast (~5 minutes) and has as few
 // moving parts as possible.
@@ -60,5 +60,21 @@ test('real Cognito login, an authenticated write, and cross-session consistency'
     } finally {
       await freshContext.close();
     }
+  });
+
+  await test.step('S4: a nonexistent /api/* path surfaces its real 404, not the SPA fallback (#439)', async () => {
+    // Before #439, CloudFront's distribution-wide custom_error_response
+    // (403/404 -> 200 + /index.html) applied to the /api/* behavior too, so
+    // this request would have come back 200 with the SPA's HTML instead of
+    // the API's actual 404 -- exactly the masking that hid a real authz
+    // regression behind a "200" in devcon-test#19/#20. A missing-scope 403
+    // isn't independently testable here yet: every scope this app defines
+    // (api/items.read, api/items.write) is already requested by the
+    // frontend's login flow (oidcConfig.ts), so the live-smoke token always
+    // holds both -- add a case here once a scope-gated resource exists that
+    // the login flow doesn't request every scope for.
+    const response = await page.request.get('/api/this-route-does-not-exist');
+    expect(response.status(), await response.text()).toBe(404);
+    expect(response.headers()['content-type'] ?? '').not.toContain('text/html');
   });
 });

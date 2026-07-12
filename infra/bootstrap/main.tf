@@ -345,6 +345,10 @@ data "aws_iam_policy_document" "ci_deploy_network" {
       "ec2:ReplaceRouteTableAssociation",
       "ec2:DescribeSecurityGroups",
       "ec2:DescribeSecurityGroupRules",
+      # Required by ELBv2's CreateLoadBalancer call (aws_lb.api, api.tf) --
+      # missing this caused AccessDenied on the first-ever ALB creation in a
+      # fresh environment (#437, devcon-test#15).
+      "ec2:GetSecurityGroupsForVpc",
       "ec2:CreateSecurityGroup",
       "ec2:DeleteSecurityGroup",
       "ec2:AuthorizeSecurityGroupIngress",
@@ -703,6 +707,14 @@ data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
       "cloudfront:CreateInvalidation",
       "cloudfront:GetInvalidation",
       "cloudfront:ListInvalidations",
+      # aws_cloudfront_function.spa_routing (web.tf, #439).
+      "cloudfront:CreateFunction",
+      "cloudfront:DescribeFunction",
+      "cloudfront:GetFunction",
+      "cloudfront:UpdateFunction",
+      "cloudfront:DeleteFunction",
+      "cloudfront:PublishFunction",
+      "cloudfront:ListFunctions",
     ]
     resources = ["*"]
   }

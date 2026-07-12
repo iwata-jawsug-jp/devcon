@@ -28,6 +28,12 @@ Remote state per env: `terraform init -backend-config=env/<env>.backend.hcl`; va
 
 - 2-space indent; run `terraform fmt` (`make tf-fmt`).
 - Tag resources via the provider's `default_tags` — don't hand-tag individual resources.
+- **Naming: `local.name_prefix` vs. `local.global_name_prefix` (main.tf).** Most resource names
+  only need to be unique within this AWS account/region, so use `local.name_prefix`
+  (`"${var.project}-${var.environment}"`). A few resource types (S3 bucket names, Cognito Hosted
+  UI domain prefixes) are namespaced **globally across all AWS accounts** — using `name_prefix`
+  alone collides across different forks/clones of this template that keep the default `project`
+  value (#436). Use `local.global_name_prefix` (`name_prefix` + the account id) for those.
 - State is remote (S3 + native locking). Never commit `*.tfstate`.
 - Config lives in `env/*.tfvars` / `*.backend.hcl` (git-ignored); commit `*.example`
   templates only. Never commit secrets.
