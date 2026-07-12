@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-07-12
+
+### Added
+
+- **IAM Identity Center を使わない一時クレデンシャル発行手順を追加**: `docs/aws-temporary-credentials.md`
+  を新設し、AWS Organizations 未導入のアカウント（個人アカウント等）向けの代替手法を 4 つ
+  収録した — IAM ユーザー + `get-session-token`（推奨）／IAM ユーザー + `assume-role`／
+  IAM Roles Anywhere／AWS CloudShell 経由でのコピー。長期シークレットの有無・有効期間・
+  セットアップの重さを比較表にまとめ、`README.md`「AWS SSO 初期設定」・`docs/README.md`
+  索引・`CLAUDE.md`「More detail」から相互参照を追加した。
+
 ## [0.3.4] - 2026-07-12
 
 ### Added
