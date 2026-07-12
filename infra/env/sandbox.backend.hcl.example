@@ -1,0 +1,9 @@
+# Copy to env/sandbox.backend.hcl (git-ignored) and fill in the bootstrap output.
+# Used by cd-infra-sandbox / local sandbox runs:
+#   terraform init -backend-config=env/sandbox.backend.hcl
+# Keep the key under sandbox/ so sandbox state never collides with dev/stg/prod.
+bucket       = "REPLACE-ME-tfstate"
+key          = "devcon/sandbox/terraform.tfstate"
+region       = "ap-northeast-1"
+use_lockfile = true
+encrypt      = true

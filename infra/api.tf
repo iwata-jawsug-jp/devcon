@@ -4,6 +4,11 @@
 resource "aws_ecr_repository" "api" {
   name                 = "${local.name_prefix}-api"
   image_tag_mutability = "IMMUTABLE"
+  # Images are rebuildable from source (never primary data), so allow
+  # `terraform destroy` to delete a non-empty repository. Without this,
+  # golden-path-verify's teardown fails with RepositoryNotEmptyException
+  # after every run that actually built an image.
+  force_delete = true
 
   image_scanning_configuration {
     scan_on_push = true

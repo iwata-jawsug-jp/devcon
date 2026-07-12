@@ -1,0 +1,94 @@
+name: CD Infra (sandbox)
+
+# Sandbox CD: verify the cd-infra apply path on sandbox/* branches without touching
+# the real main / production environment. Mirrors cd-infra.yml's apply job but
+# triggers on push to sandbox/**, applies the disposable `sandbox` env, and skips
+# the protected `production` gate. Excluded from the public mirror (see release.md).
+#
+# Prereqs (see docs/sandbox.md): bootstrap applied (deploy role trusts sandbox/*),
+# repo variable AWS_DEPLOY_ROLE_ARN set, and infra/env/sandbox.{backend.hcl,tfvars}
+# present on the sandbox branch (git-ignored; copy from the *.example templates).
+on:
+  push:
+    branches: [sandbox/**]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/cd-infra-sandbox.yml'
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: 'Type "destroy" to tear down the sandbox environment (apply is push-only, not available here)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-infra-sandbox-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-1
+  TF_ENV: sandbox
+
+jobs:
+  apply:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: '1.13.0'
+      - name: Terraform init
+        run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
+      - name: Terraform apply
+        run: |
+          terraform apply -no-color -input=false -auto-approve \
+            -var-file=env/${{ env.TF_ENV }}.tfvars
+
+  # Manual-only teardown. sandbox is documented as a disposable environment
+  # (docs/sandbox.md) but had no automated way to actually tear it down until
+  # now. Gated behind a typed confirmation (not just workflow_dispatch itself)
+  # since this destroys real, possibly in-progress application-development
+  # state (RDS data etc.) -- accidentally clicking "Run workflow" shouldn't be
+  # enough on its own.
+  destroy:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_destroy == 'destroy'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: '1.13.0'
+      - name: Terraform init
+        run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
+      - name: Terraform destroy
+        run: |
+          terraform destroy -no-color -input=false -auto-approve \
+            -var-file=env/${{ env.TF_ENV }}.tfvars

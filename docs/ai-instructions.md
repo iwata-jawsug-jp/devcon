@@ -70,4 +70,4 @@
 - [app-development.md](app-development.md) / [infrastructure.md](infrastructure.md) — ルール本文の詳細。
 - [issues.md](issues.md) — issue から実装するときのフロー（1 issue 1 PR・CI green 確認）。
 - [sdd.md](sdd.md) — 上流工程の SDD ワークフロー（`.kiro/` は実装規約ミラーと役割が別）。
-- 導入の経緯・方針比較は [proposal/copilot-rules-proposal.md](proposal/copilot-rules-proposal.md)。
+- 導入の経緯・方針比較は proposal/copilot-rules-proposal.md。

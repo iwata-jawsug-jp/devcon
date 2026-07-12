@@ -3,7 +3,7 @@
 基本設計フェーズ（`design.md` / ADR / `docs/` の設計記述）でアーキテクチャ図・フロー図・
 AWS 構成図を描くときのツール方針。図の形式を揃えることで、レビューしやすく差分を追える
 状態を保つ。Epic [#66](https://github.com/iwata-jawsug-jp/devcon/issues/66) / 提案書
-[§6・付録](../proposal/sdd-tooling-proposal.md) の方針に基づく。
+§6・付録 の方針に基づく。
 
 > このディレクトリ `docs/design/` は将来的に「確定した基本設計の保管庫」も兼ねる（`.kiro/specs/`
 > の作業成果物をリリース後にここへ昇格する運用は Epic #66 の #62 で確定予定）。本書はまず

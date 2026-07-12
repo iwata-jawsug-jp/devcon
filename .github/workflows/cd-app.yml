@@ -31,6 +31,15 @@ jobs:
   # 0) Deploys need repository variables that only exist once the infra layer has
   #    been applied and its outputs registered. Until then, skip (don't fail) so
   #    main stays green (#145).
+  #
+  #    No separate production infra exists yet (#392): cd-app-sandbox.yml's
+  #    resource-identifying variables are registered under a `SANDBOX_` prefix
+  #    specifically so they can't collide with this job's unprefixed names
+  #    (ECS_CLUSTER etc.) -- with none of those registered, this correctly
+  #    reports "not configured" and skips everything below instead of
+  #    accidentally deploying against sandbox's resources. Once real
+  #    production infra is provisioned, register its outputs under these
+  #    unprefixed names and this starts working without any workflow changes.
   preflight:
     runs-on: ubuntu-latest
     outputs:
@@ -225,3 +234,160 @@ jobs:
           aws cloudfront create-invalidation \
             --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
             --paths '/*'
+
+  # 5) Real-browser post-deploy smoke test, the "4th gate" (#373/#376,
+  #    ADR-0008), rolled out to main. See cd-app-sandbox.yml's smoke-test job
+  #    for the full rationale -- this mirrors it, plus files an issue
+  #    (labeled e2e-live) on failure instead of just failing quietly, since a
+  #    broken main deploy needs a human to notice ("record findings before
+  #    fixing", docs/issues.md).
+  #
+  #    Opt-in via LIVE_SMOKE_ENABLED, defaulting to DISABLED -- the opposite
+  #    polarity from BACKEND_ENABLED/FRONTEND_ENABLED (docs/ci-cd-area-switches.md),
+  #    which default to enabled. This job blocks a production deploy and
+  #    needs infra/bootstrap's ci_deploy_auth CognitoAdminUsers statement
+  #    applied first (human, out-of-band); enabling it before that's
+  #    confirmed would just fail every main deploy. Set the repository
+  #    variable to the string 'true' once ready.
+  smoke-test:
+    needs: [deploy-api, frontend]
+    if: ${{ vars.LIVE_SMOKE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write # OIDC, for the disposable Cognito user create/delete
+      issues: write # to file an issue on failure
+      contents: read
+    defaults:
+      run:
+        working-directory: services/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check smoke test config
+        id: check
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          CLOUDFRONT_DOMAIN_NAME: ${{ vars.CLOUDFRONT_DOMAIN_NAME }}
+          COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
+        run: |
+          missing=()
+          for v in AWS_DEPLOY_ROLE_ARN CLOUDFRONT_DOMAIN_NAME COGNITO_USER_POOL_ID; do
+            [ -n "${!v}" ] || missing+=("$v")
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping smoke test — repository variables not set: ${missing[*]}. See docs/infrastructure.md (#376)."
+          fi
+      - name: Configure AWS credentials (deploy role)
+        if: steps.check.outputs.configured == 'true'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Create a disposable Cognito test user
+        if: steps.check.outputs.configured == 'true'
+        id: user
+        env:
+          POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
+        run: |
+          set -euo pipefail
+          email="e2e-${{ github.run_id }}-${{ github.run_attempt }}@example.com"
+          # openssl's random bytes may not by chance contain every character
+          # class Cognito's default password policy requires; the fixed
+          # suffix guarantees upper/lower/digit/symbol regardless.
+          password="$(openssl rand -base64 24)Aa1!"
+          echo "::add-mask::$password"
+
+          aws cognito-idp admin-create-user \
+            --user-pool-id "$POOL_ID" --username "$email" \
+            --user-attributes Name=email,Value="$email" Name=email_verified,Value=true \
+            --message-action SUPPRESS
+          aws cognito-idp admin-set-user-password \
+            --user-pool-id "$POOL_ID" --username "$email" --password "$password" --permanent
+
+          echo "email=$email" >> "$GITHUB_OUTPUT"
+          echo "password=$password" >> "$GITHUB_OUTPUT"
+      - name: Set up Node
+        if: steps.check.outputs.configured == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/frontend/package-lock.json
+      - name: Install dependencies
+        if: steps.check.outputs.configured == 'true'
+        run: npm ci
+      - name: Install Playwright Chromium
+        if: steps.check.outputs.configured == 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Run live-smoke test
+        if: steps.check.outputs.configured == 'true'
+        id: smoke
+        continue-on-error: true
+        env:
+          SMOKE_BASE_URL: https://${{ vars.CLOUDFRONT_DOMAIN_NAME }}
+          SMOKE_TEST_EMAIL: ${{ steps.user.outputs.email }}
+          SMOKE_TEST_PASSWORD: ${{ steps.user.outputs.password }}
+          PLAYWRIGHT_JSON_OUTPUT_NAME: live-smoke-results.json
+        run: npx playwright test --project=live-smoke --reporter=list,json
+      - name: Find which step failed (S1/S2/S3)
+        if: always() && steps.smoke.outcome == 'failure'
+        id: parse
+        run: |
+          # Steps (test.step()) carry their own title+error when one of S2/S3
+          # fails; a failure before any step runs (e.g. the accessToken
+          # fixture's login itself, effectively "S1") has no step-level
+          # title to find, so fall back to attributing it to S1.
+          failed_step=$(jq -r '
+            ([.. | objects | select(has("error") and .error != null and has("title"))] | .[0].title) //
+            (if ([.. | objects | select(has("error") and .error != null)] | length) > 0
+              then "S1: login (accessToken fixture)" else empty end) //
+            "unknown step"
+          ' live-smoke-results.json 2>/dev/null || echo "unknown step")
+          [ -n "$failed_step" ] || failed_step="unknown step"
+          echo "failed_step=$failed_step" >> "$GITHUB_OUTPUT"
+      - name: Upload live-smoke artifacts (trace/screenshot/video)
+        if: always() && steps.check.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-smoke-report-${{ github.run_id }}
+          path: |
+            services/frontend/playwright-report/
+            services/frontend/test-results/
+            services/frontend/live-smoke-results.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: File an issue on failure
+        if: steps.smoke.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILED_STEP: ${{ steps.parse.outputs.failed_step }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "live-smoke gate failed on main ($(echo "${{ github.sha }}" | cut -c1-7))" \
+            --label "e2e-live" \
+            --body "$(cat <<BODY
+          post-deploy の live-smoke E2E ゲート（#376）が \`main\` デプロイ後に失敗しました。
+
+          - **Run**: $RUN_URL
+          - **Deploy SHA**: \`${{ github.sha }}\`
+          - **失敗したステップ**: $FAILED_STEP
+
+          trace/screenshot/video は Actions artifact（\`live-smoke-report-${{ github.run_id }}\`）に添付されています。docs/issues.md の運用に従い、直す前にこのissueへ原因を記録してください。
+          BODY
+          )"
+      - name: Delete the disposable Cognito test user
+        if: always() && steps.check.outputs.configured == 'true'
+        env:
+          POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
+          EMAIL: ${{ steps.user.outputs.email }}
+        run: |
+          aws cognito-idp admin-delete-user --user-pool-id "$POOL_ID" --username "$EMAIL" \
+            || echo "::warning::Failed to delete disposable test user $EMAIL — manual cleanup may be needed."
+      - name: Fail the job if the smoke test failed
+        if: steps.smoke.outcome == 'failure'
+        run: exit 1

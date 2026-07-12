@@ -36,7 +36,9 @@ Remote state per env: `terraform init -backend-config=env/<env>.backend.hcl`; va
 
 Don't run `terraform apply`/`destroy` or push images by hand — `cd-infra.yml` (`apply` gated
 behind manual `workflow_dispatch`, not automatic on merge to main — see `docs/infrastructure.md`
-for why) owns app-infra changes. Auth is GitHub OIDC → an IAM role per job; never add an
+for why) owns app-infra changes. `apply` also requires the `INFRA_APPLY_ENABLED` repo variable
+set to `true` (defaults to disabled — see `docs/ci-cd-area-switches.md`), a second key on top of
+`workflow_dispatch` itself. Auth is GitHub OIDC → an IAM role per job; never add an
 `AWS_ACCESS_KEY_ID` secret.
 
 See `docs/infrastructure.md` for `cd-infra.yml` / `cd-app.yml` detail.

@@ -2,7 +2,7 @@
 
 このリポジトリで、上流工程（業務整理 → 要件定義 → 基本設計）を成果物として残すための運用。
 ツールは **cc-sdd**（Kiro 互換の Spec-Driven Development）を `--claude-skills` 方式で導入している。
-導入の経緯・採否判断は [proposal/sdd-tooling-proposal.md](proposal/sdd-tooling-proposal.md) と
+導入の経緯・採否判断は proposal/sdd-tooling-proposal.md と
 [adr/0002-adopt-spec-driven-development-with-cc-sdd.md](adr/0002-adopt-spec-driven-development-with-cc-sdd.md)
 を参照。**どの変更に SDD を適用するか**の線引きは [`../CONTRIBUTING.md`](../CONTRIBUTING.md) を正とする。
 
@@ -163,4 +163,3 @@ cc-sdd の導入/更新（`npx cc-sdd@latest --claude-skills ...`）は、ルー
 - [issues.md](issues.md) — tasks.md から実装への接続（1 issue 1 PR・CI green）。
 - [design/README.md](design/README.md) — 基本設計の図表方針（Mermaid 基本）。
 - [adr/](adr/) — 意思決定の記録。SDD 採用は [adr/0002](adr/0002-adopt-spec-driven-development-with-cc-sdd.md)。
-- [proposal/sdd-tooling-proposal.md](proposal/sdd-tooling-proposal.md) — 導入提案書（背景・選択肢比較）。

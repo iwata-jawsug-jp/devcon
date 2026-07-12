@@ -7,6 +7,98 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-12
+
+### Added
+
+
+- **issue テンプレートの公開判断をファイル単位に変更**: `.github/ISSUE_TEMPLATE/`
+  全体を丸ごと除外していたが、ファイル単位の除外に変更。`bug-report.md`/`chore.md`/
+  `feature-sdd.md`/`verification.md`はいずれも運用検証中のため引き続き除外。
+  `config.yml`はテンプレート個別の内容に依存しない（`blank_issues_enabled`のみ）ため
+  公開対象。
+- **実機E2Eスモーク（第4のゲート）を `cd-app.yml`（main/本番）にも展開**（#376 PR③、PR #385）:
+  sandboxで実機検証済みの post-deploy smoke-test ジョブを、`deploy-api`/`frontend` 成功後の
+  ジョブとして `cd-app.yml` に追加。`cd-app-sandbox.yml` と同じ per-run 使い捨て Cognito
+  ユーザー方式だが、失敗時に run URL・デプロイ SHA・失敗ステップ（S1/S2/S3、Playwright JSON
+  reporter を `jq` で解析）を含む issue を `e2e-live` ラベルで自動起票する点が異なる
+  （「バグは直す前に issue 化」運用のワークフローへの埋め込み）。ジョブはリポジトリ変数
+  `LIVE_SMOKE_ENABLED` を `true` に設定するまで実行されない**デフォルト無効のオプトイン**
+  （`BACKEND_ENABLED`/`FRONTEND_ENABLED` 等のエリア別スイッチとは逆の極性）: 本番の Cognito
+  User Pool に対して実際に Admin ユーザー作成/削除を行う新しいブロッキングゲートのため、
+  `infra/bootstrap/` の `ci_deploy_auth`（Cognito 管理権限、人力適用）が反映され動作確認が
+  済むまでは、無条件で `main` デプロイをブロックしないようにするための安全策。
+- **`cd-infra.yml` の `apply` に `INFRA_APPLY_ENABLED` によるオプトインの二重ゲートを追加**:
+  `apply` は既に `workflow_dispatch` 限定・`main` ブランチ限定（#301）だったが、これに加えて
+  リポジトリ変数 `INFRA_APPLY_ENABLED` を `true` に設定しない限り実行されないようにした
+  （`workflow_dispatch` 権限と変数編集権限という別々の鍵が両方必要になる）。`LIVE_SMOKE_ENABLED`
+  と同じくデフォルト無効のオプトイン。`ci.yml` の infra 静的チェックと `cd-infra.yml` の
+  `plan` は AWS へ変更を加えないため対象外とし、既存の `INFRA_ENABLED`（デフォルト有効）の
+  ままにした。
+
+### Changed
+
+- **実機E2Eスモークを Playwright `live-smoke` プロジェクトへ昇格**（#376 PR①、PR #383）:
+  #373の生スクリプト（`chromium.launch()` を直接叩き、trace/screenshot/video等の診断機能を
+  持たない）を、既存の `npm run test:e2e` と同じ Playwright Test runner ベースの `live-smoke`
+  プロジェクトに置き換え。Cognito Hosted UI ログイン〜アクセストークン取得を `accessToken`
+  fixture 化（アプリが `InMemoryWebStorage` にしかトークンを保持しないため、OAuth2トークン
+  交換レスポンスを直接キャプチャ）。S1（ログイン）/S2（書き込みAPI）/S3（別セッションでの
+  整合性確認）を `test.step()` で構造化し、`trace: 'on'` / `screenshot: 'on'` / `video: 'on'`
+  を常時有効化。設計判断は [ADR-0008](docs/adr/0008-live-smoke-playwright-project-with-disposable-cognito-user.md)
+  に記録。
+
+- **`cd-infra-sandbox.yml` に `workflow_dispatch` 経由の teardown（destroy）を追加**:
+  `docs/sandbox.md` は sandbox を「使い捨ての隔離環境」と定義していたが、`apply` のみで
+  自動化された削除手段が無かった（ローカルで人力 `terraform destroy` する手順のみ
+  記載）。`confirm_destroy` 入力に文字列 `destroy` を入力したときだけ `destroy` ジョブが
+  走るオプトイン方式（誤操作防止。`apply` は引き続き push 限定で `workflow_dispatch` からは
+  実行されない）。OIDC 経由（長期キー不要）。`docs/sandbox.md` に手順を追記。
+- **sandbox デプロイの live-smoke 組み込みとテストユーザー使い捨て化**（#376 PR②、PR #384）:
+  固定の事前登録済みCognitoユーザー方式（#373）を、per-run 使い捨てユーザー
+  （`AdminCreateUser`/`AdminSetUserPassword` で作成しパスワードは非保存、`if: always()` で
+  `AdminDeleteUser`）へ置き換え、sandbox の `smoke-test` ジョブを `live-smoke` プロジェクト
+  実行に全面書き換え。`ci_deploy_auth` に `cognito-idp:Admin*`（対象は user pool ARN に限定）を
+  追加。置き換え済みの `services/frontend/scripts/smoke-test-sandbox.mjs` は削除。
+  `infra/bootstrap/` は CI 外・人力適用の層のため、実 AWS への反映には手動 `terraform apply`
+  が必要（未実施の間は sandbox の smoke-test ジョブが権限不足で失敗するか、警告付きスキップの
+  まま）。
+- **sandbox 関連リソースをゴールデンパスの一部として公開ミラー対象に変更**:
+  `ci-sandbox.yml` / `cd-infra-sandbox.yml` / `cd-app-sandbox.yml` / `sandbox-guard.yml` /
+  `docs/sandbox.md` / `infra/env/sandbox.*.example` を
+  `tools/script/publish-to-public.sh` の `EXCLUDES` から外した。sandbox（実AWSでの
+  使い捨て検証・アプリ開発フロー）は fork した人にも汎用的に有用と判断したため。
+  `golden-path-verify`（テンプレート自体を毎回ゼロから検証する自己検証専用ツール）とは役割が
+  異なり、開発用リポジトリ限定の扱いとして引き続き公開対象外。
+  2bの参照クリーンアップ処理から`sandbox`を対象外にし（`release`のみに縮小）、
+  今は死んでいた`CLAUDE.md`の`## Sandbox branches`セクション除去ロジック（該当見出しが
+  既に存在せず no-op だった）も削除した。`docs/release.md`・`docs/sandbox.md`・
+  `docs/infrastructure.md`・`docs/README.md`の「公開対象外」表記を修正。
+
+
+### Fixed
+
+- **`cd-app.yml`（main）が `cd-app-sandbox.yml` と同一のAWSリソースを共有し、
+  `migrate` ジョブが連続失敗していた問題を修正**（#392）: 両ワークフローが同名の
+  リポジトリ変数（`ECS_CLUSTER`/`WEB_BUCKET`等）を参照しており、本番用の別インフラが
+  存在しない状態でも `cd-app.yml` の `preflight` が「設定済み」と誤判定し、sandbox用の
+  リソースへデプロイを試みていた。`sandbox/order-management` ブランチのAlembic
+  マイグレーションが `main` の知らないリビジョンまで共有DBを進めてしまい、`migrate`
+  ジョブが `exit code 255` で連続失敗する実害が出ていた。`cd-app-sandbox.yml` のリソース
+  識別子の変数を `SANDBOX_` プレフィックス付きで登録・参照するよう変更し、`cd-app.yml`
+  側はプレフィックスなしの変数名を読んだまま据え置いた。本番用インフラが存在しない間は
+  `cd-app.yml` の `preflight` が正しく「未設定」を検知してスキップするようになる
+  （本番インフラを実際にプロビジョニングした際は、プレフィックスなしの変数名でその出力を
+  登録するだけでワークフロー変更なしに有効化される）。
+  > 当初は GitHub Environments（`environment: sandbox`）でのスコープ分離を実装したが
+  > （直後にマージ、`sandbox/order-management` へ反映した時点で発覚）、`environment:`
+  > を宣言したジョブは OIDC トークンの `sub` クレームが
+  > `repo:<org>/<repo>:ref:refs/heads/sandbox/*` から
+  > `repo:<org>/<repo>:environment:sandbox` に変わり、`infra/bootstrap` の deploy
+  > ロール信頼ポリシーがこの組み合わせを許可していないため `AssumeRoleWithWebIdentity`
+  > が失敗し、稼働中の sandbox デプロイを壊した。IAM 変更（人力の `terraform apply`）
+  > なしで直せるプレフィックス方式に即座に切り替えた。
+
 ## [0.3.1] - 2026-07-11
 
 ### Fixed
@@ -507,11 +599,6 @@
 
 ### Added
 
-- **SDD ツール導入提案書** `docs/proposal/sdd-tooling-proposal.md`（#67）: 実装フェーズの
-  ガードレールは整っている一方で空白だった**上流工程**（業務整理 → 要件定義 → 基本設計）に、
-  cc-sdd を中心とした **SDD（Spec-Driven Development）** ツールを段階的導入する提案。推奨案
-  （cc-sdd、合わなければ GitHub Spec Kit へ切替）・推奨ディレクトリ構成（`.kiro/` ↔ `docs/`）・
-  運用フロー・ロードマップ・留意点を整理。実現施策は Epic #66（子タスク #60–#65）として起票済み。
 
 ## [0.1.1] - 2026-06-29
 
@@ -682,7 +769,10 @@
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.10...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.10...v0.3.0
 [0.2.10]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.2.7...v0.2.8

@@ -347,4 +347,5 @@ CI（`ci.yml`）も同じゲートを通すため「ローカルで green == CI 
 
 - [infrastructure.md](infrastructure.md) — インフラ（Terraform 2 層）と CI/CD
 - [development-environment.md](development-environment.md) — Dev Container の使い方
+- [sandbox.md](sandbox.md) — 実 AWS（RDS/ECS 等）に対するアプリの end-to-end 検証（`sandbox/*`）
 - [`../CLAUDE.md`](../CLAUDE.md) — アーキテクチャと規約の正

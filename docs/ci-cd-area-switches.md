@@ -75,6 +75,52 @@ gh variable delete BACKEND_ENABLED
   `gh workflow disable <workflow>` / `gh workflow enable <workflow>` を使う。
   ただし状態がコード・設定として見えなくなる点に注意。
 
+## オプトイン方式のスイッチ（別方式・デフォルト無効）
+
+以下の2つは、上記のエリア別スイッチとは**極性が逆**の専用スイッチ。混同しないよう
+区別して扱うこと。
+
+| 項目           | エリア別スイッチ（本書冒頭）                              | オプトイン方式                                                   |
+| -------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| 判定           | `vars.X != 'false'`                                       | `vars.X == 'true'`                                               |
+| 未設定時の既定 | **有効**（オプトアウト）                                  | **無効**（オプトイン）                                           |
+| 有効化する値   | （何もしない＝既定で有効）                                | 文字列 `true` を明示的に設定                                     |
+| 対象           | `ci.yml` / `cd-app.yml` / `cd-infra.yml` のエリア別ジョブ | 下記の個別ジョブのみ（同ワークフローの他ジョブは通常どおり動く） |
+
+### `LIVE_SMOKE_ENABLED`（`cd-app.yml` の `smoke-test`）
+
+`smoke-test`（第4のゲート、#373/#376、ADR-0008）は本番デプロイをブロックする新しい
+ゲートで、`infra/bootstrap/` の `ci_deploy_auth` に追加した Cognito 管理権限
+（人力適用・#376）が反映されていないと実行するたびに失敗する。デフォルト有効にすると、
+この前提が整う前の `main` デプロイを無条件でブロックしてしまうため、デフォルト無効の
+オプトインにしている。
+
+```bash
+# 有効化（infra/bootstrap 適用・sandbox での動作確認後）
+gh variable set LIVE_SMOKE_ENABLED --body "true"
+
+# 無効化に戻す（変数を削除するだけでもよい — 未設定は無効）
+gh variable delete LIVE_SMOKE_ENABLED
+```
+
+### `INFRA_APPLY_ENABLED`（`cd-infra.yml` の `apply`）
+
+`apply` は既に `workflow_dispatch` 限定（`main` 以外からは実行不可、#301）だが、これに
+加えて `INFRA_APPLY_ENABLED` を `true` にしない限り実行されない**二重の鍵**にしている。
+`apply` は実際に本番インフラを変更する唯一のジョブで、`LIVE_SMOKE_ENABLED` の前提と
+なる Cognito 管理権限もここで反映される。`INFRA_ENABLED`（上記のエリア別スイッチ）は
+`ci.yml` の infra 静的チェックと `cd-infra.yml` の `plan` も含めて止めてしまうため、
+`apply` だけを対象にした別変数にしている（静的チェック・`plan` は AWS へ変更を加えない
+ため、既定どおり常時有効のままにする）。
+
+```bash
+# 有効化（apply を実行する回だけ、実行前に設定）
+gh variable set INFRA_APPLY_ENABLED --body "true"
+
+# 無効化に戻す（apply 後は速やかに戻すことを推奨）
+gh variable delete INFRA_APPLY_ENABLED
+```
+
 ## 関連ドキュメント
 
 - [infrastructure.md](infrastructure.md) — CI/CD 全体像とエリア別スイッチの設計

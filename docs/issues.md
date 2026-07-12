@@ -16,9 +16,22 @@ GitHub issue を実装するときの運用ルール。全体の規約は [`../C
   - 事象をまとめてあとで記録しない。コメントは短く事実ベースで（diff・実行 URL）。
 - **1 issue → 1 つの焦点を絞った PR。** PR 本文（とコミットメッセージ）に `Closes #N`。diff は
   その issue にスコープし、無関係な発見は新しい issue に切り出す。
+- **実 AWS 環境でしか検証できない変更は、`main` へ入れる前に `sandbox/*` で検証する。**
+  対象は次のいずれか（詳細な判定基準・理由は
+  application-development-process-proposal.md §2.1）:
+  - `infra/**`（Terraform リソース変更）
+  - `.github/workflows/cd-*.yml`（デプロイパイプライン変更）
+  - `services/**` で DB マイグレーション・認証・環境変数注入を伴う変更
+    検証したら、完了時コメントまたは PR 本文に「sandbox/xxx で検証済み: `<run URL>`」の形で
+    記録する（「着手時/原因ごと/完了時にコメント」の記録規律に載せる）。上記に該当しない
+    通常の機能追加・バグ修正・ドキュメント変更は、`ci.yml` の green で十分（[sandbox.md](sandbox.md) 参照）。
 - **CI が実際に green になるまで issue は完了ではない。** `gh pr checks <pr> --watch` で監視し、
   該当ジョブが _緑_ になるのを確認する。「トリガーされた」「走った」は成功ではない。失敗時は
-  `gh run view --job <id> --log-failed` でログを読んでから「直った」と言う。
+  `gh run view --job <id> --log-failed` でログを読んでから「直った」と言う。`main` には
+  `ci.yml` の必須チェックを強制する GitHub Ruleset（`main-ci-required`）が設定されており、
+  この規律は GitHub 側でも実際に強制される（[infrastructure.md](infrastructure.md#ブランチ保護github-rulesets)）。
+
+
 - **ローカル検証は CI と同じコマンドで。** ゆるいローカル変種ではなく workflow のステップを
   ミラーする。例: `make tf-lint` は CI と同じ `tflint --recursive --config`（`infra/bootstrap/`
   も走査）を回し、CI の frontend ジョブは `make ci-frontend` で一発再現できる。ゲートを変える
@@ -33,4 +46,6 @@ GitHub issue を実装するときの運用ルール。全体の規約は [`../C
 
 - [infrastructure.md](infrastructure.md) — CI/CD（`ci.yml` / `cd-infra.yml` / `cd-app.yml`）と
   ブートストラップ順序。CI で green を確認する際の正。
+- [sandbox.md](sandbox.md) — `sandbox/*` 隔離ブランチでの実 AWS 検証（PR/マージの行き止まり）。
+  開発プロセス全体・sandbox 検証要否判定表・ブランチ戦略の背景。
 - [`../CLAUDE.md`](../CLAUDE.md) — アーキテクチャと規約の正。

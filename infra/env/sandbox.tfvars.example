@@ -1,0 +1,25 @@
+# Copy to env/sandbox.tfvars (git-ignored) and adjust.
+# Sandbox is a disposable environment for exercising the cd-infra apply path
+# (apply -> verify -> teardown). Keep settings cheap and easy to destroy.
+project     = "devcon"
+environment = "sandbox"
+aws_region  = "ap-northeast-1"
+
+container_image = ""
+domain_name     = ""
+
+# --- Networking ---
+vpc_cidr       = "10.0.0.0/16"
+vpce_single_az = true
+
+# --- Database (RDS PostgreSQL) — cheap, disposable; teardown-friendly ---
+db_engine_version        = "16"
+db_instance_class        = "db.t4g.micro"
+db_allocated_storage     = 20
+db_max_allocated_storage = 100
+db_name                  = "app"
+db_username              = "app"
+db_backup_retention      = 0
+db_multi_az              = false
+db_deletion_protection   = false
+db_skip_final_snapshot   = true

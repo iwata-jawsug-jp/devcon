@@ -107,13 +107,22 @@ jobs:
             }
 
   apply:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.INFRA_ENABLED != 'false' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.INFRA_ENABLED != 'false' && vars.INFRA_APPLY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     # Manual-only (workflow_dispatch) — this IS the gate. The `production`
     # environment records the deployment; required-reviewer gating would need a
     # paid plan on a private repo. The `ref` check is the only real guard: the
     # deploy role's OIDC trust also accepts `environment:production`, so without
     # it a workflow_dispatch from ANY branch could assume the deploy role (#301).
+    #
+    # INFRA_APPLY_ENABLED is a second, narrower key on top of INFRA_ENABLED:
+    # opt-in (defaults to disabled), unlike INFRA_ENABLED's opt-out default
+    # (docs/ci-cd-area-switches.md). It only gates this `apply` job — ci.yml's
+    # infra lint job and this workflow's `plan` job keep running by default via
+    # INFRA_ENABLED, since they make no AWS changes. `apply` provisions real
+    # prod infra, including the IAM permissions cd-app.yml's smoke-test job
+    # depends on (LIVE_SMOKE_ENABLED), so a stray/rehearsed workflow_dispatch
+    # shouldn't apply until someone deliberately flips this too.
     environment: production
     permissions:
       id-token: write # OIDC

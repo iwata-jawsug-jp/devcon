@@ -657,6 +657,11 @@ data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
       "s3:GetObject",
       "s3:PutObject",
       "s3:DeleteObject",
+      # aws_s3_bucket.web's force_destroy (golden-path-verify teardown):
+      # the provider's force_destroy always calls ListObjectVersions to
+      # empty the bucket before deleting it, even when versioning is off.
+      "s3:ListBucketVersions",
+      "s3:DeleteObjectVersion",
     ]
     resources = [
       "arn:aws:s3:::${var.project}-*",
@@ -929,6 +934,33 @@ data "aws_iam_policy_document" "ci_deploy_auth" {
       "cognito-idp:DescribeUserPoolDomain",
     ]
     resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
+
+  # Per-run disposable test users for the live-browser E2E smoke gate (#376,
+  # ADR-0008): the smoke-test job creates a throwaway Cognito user, logs in
+  # as it, then deletes it -- no fixed pre-provisioned user to re-register by
+  # hand every time sandbox infra is rebuilt. Unlike the pool-management
+  # actions above, these DO support resource-level scoping to a userpool
+  # ARN; still Resource "*" for the pool-id segment specifically (this
+  # bootstrap layer is applied before the app layer creates the actual pool
+  # -- see auth.tf -- so no concrete pool ID exists here to reference), but
+  # narrowed to the cognito-idp userpool resource type, same pattern as the
+  # ECR/ECS/RDS statements above.
+  statement {
+    sid    = "CognitoAdminUsers"
+    effect = "Allow"
+    actions = [
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminSetUserPassword",
+      "cognito-idp:AdminDeleteUser",
+    ]
+    resources = ["arn:aws:cognito-idp:*:*:userpool/*"]
 
     condition {
       test     = "StringEquals"

@@ -9,7 +9,7 @@
 
 実装フェーズのガードレール（`CLAUDE.md` 群 / `.claude/settings.json` / `docs/`）は整っていたが、
 その上流工程（業務整理 → 要件定義 → 基本設計）にはテンプレートも専用手段も無く、要件が暗黙化・
-設計判断が属人化していた（[提案書](../proposal/sdd-tooling-proposal.md) §1）。2026 年の SDD
+設計判断が属人化していた（提案書 §1）。2026 年の SDD
 （Spec-Driven Development）の潮流に乗せ、devcontainer 標準搭載の Claude Code を活かすのが投資対効果が
 高い。提案書では案 A（cc-sdd）/ 案 B（GitHub Spec Kit）/ 案 C（Plan Mode のみ）/ 案 D（Kiro IDE）を
 比較し、段階的導入（まず cc-sdd を小機能 1 件で試験導入）を推奨していた。

@@ -10,8 +10,11 @@ variable "environment" {
   default     = "dev"
 
   validation {
-    condition     = contains(["dev", "stg", "prod", "sandbox"], var.environment)
-    error_message = "environment must be one of: dev, stg, prod, sandbox."
+    # "gp-verify", not "golden-path-verify": aws_lb/aws_lb_target_group names are
+    # capped at 32 chars, and "${var.project}-golden-path-verify-api" exceeds that
+    # (docs/proposal/template-verification-environment-proposal.md §3.2).
+    condition     = contains(["dev", "stg", "prod", "sandbox", "gp-verify"], var.environment)
+    error_message = "environment must be one of: dev, stg, prod, sandbox, gp-verify."
   }
 }
 

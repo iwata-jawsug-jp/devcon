@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-06-30
 - **Deciders:** itouhi
-- **Related:** #63, [Epic #66](https://github.com/iwata-jawsug-jp/devcon/issues/66), [docs/proposal/sdd-tooling-proposal.md](../proposal/sdd-tooling-proposal.md)
+- **Related:** #63, [Epic #66](https://github.com/iwata-jawsug-jp/devcon/issues/66), docs/proposal/sdd-tooling-proposal.md
 
 ## Context
 

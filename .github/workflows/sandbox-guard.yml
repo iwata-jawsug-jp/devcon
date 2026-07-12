@@ -1,0 +1,28 @@
+name: Sandbox branch guard
+
+# Enforce the sandbox isolation policy: branches under `sandbox/` are a dead end
+# and must NOT be merged (or PR'd) into non-sandbox branches. sandbox/* -> sandbox/*
+# is allowed. Make this a required status check (see docs/sandbox.md) so a failing
+# guard blocks the merge.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block sandbox/* -> non-sandbox merges
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          echo "head=$HEAD_REF base=$BASE_REF"
+          if [[ "$HEAD_REF" == sandbox/* && "$BASE_REF" != sandbox/* ]]; then
+            echo "::error::Branches under 'sandbox/' must not be merged into non-sandbox branches ($HEAD_REF -> $BASE_REF). sandbox/* is a dead end; see docs/sandbox.md."
+            exit 1
+          fi
+          echo "OK: not a sandbox/* -> non-sandbox merge."

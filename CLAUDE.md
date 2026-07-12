@@ -21,6 +21,17 @@ Guidance for Claude Code in this repo. Area-specific rules live in nested `CLAUD
   `infra/bootstrap/` too), and `make ci-frontend` reproduces the CI frontend job. When
   changing any gate, keep all three layers in sync. An issue isn't done until the CI jobs
   actually go _green_.
+- **CI green proves the code is correct, not that a deploy actually works.** Config injection
+  (env vars into the build / task definition), CSP, and VPC routing don't exist in local dev
+  or CI — a real deploy can still break auth/config in ways no unit/integration test (which
+  mocks auth) can catch (#365, #367, #369). The **4th gate** is a live-browser E2E smoke test
+  (`services/frontend/e2e/live-smoke/`, ADR-0008) that drives a real Cognito Hosted UI login
+  plus an authenticated write against the just-deployed environment
+  (`cd-app-sandbox.yml`/`cd-app.yml`'s `smoke-test` job, #373/#376) — blocking, not advisory.
+  On `main` a failure also auto-files an issue (`e2e-live` label) with the run URL, deploy SHA,
+  and failed step. On `main` the job only runs once the `LIVE_SMOKE_ENABLED` repo variable is
+  set to `true` (defaults to disabled — opposite polarity from the `*_ENABLED` area switches in
+  `docs/ci-cd-area-switches.md` — until the `infra/bootstrap` prerequisite is applied).
 - **No long-lived AWS keys; deploys happen in CI, not locally.** Auth is GitHub OIDC → an IAM
   role per job (read-only _plan_ for PRs, _deploy_ for main). Never add an `AWS_ACCESS_KEY_ID`
   secret; don't run `terraform apply`/`destroy` or push images by hand.
@@ -64,6 +75,7 @@ the frontend's types are generated from it (`make gen-types`) — never hand-wri
   `cd-app.yml`), and the fresh-clone bootstrap order.
 - `docs/issues.md` — working from a GitHub issue (branch, record findings, one focused PR).
 - `docs/development-environment.md` — Dev Container usage.
+- `docs/sandbox.md` — `sandbox/*` disposable real-AWS verification; a dead end, never merged into a non-sandbox branch.
 - `docs/frontend-frameworks-demo.md` — (planned) multi-framework frontend comparison demo on a
   dedicated sandbox branch, `services/frontend/` (production Vue) untouched.
 - `docs/ai-instructions.md` — keeping these rules in sync with the Copilot

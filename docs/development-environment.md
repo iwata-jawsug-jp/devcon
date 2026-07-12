@@ -213,3 +213,4 @@ Terraform / tflint / trivy / checkov / uv のバージョンは `.devcontainer/D
 
 - [`README.md`](../README.md) — 構成・各種初期設定（Git / Claude Code / AWS SSO）の詳細
 - [`CLAUDE.md`](../CLAUDE.md) — Claude Code 向けのリポジトリガイドと規約
+- [sandbox.md](sandbox.md) — クラウド上での使い捨て検証・開発（`sandbox/*` 隔離ブランチ）
