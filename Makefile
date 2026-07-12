@@ -6,7 +6,7 @@ BOOTSTRAP_DIR := infra/bootstrap
 BACKEND_DIR   := services/backend/python
 FRONTEND_DIR  := services/frontend
 
-.PHONY: help setup hooks dev gen-types gen-design-tokens fmt lint test security perf-test ci-frontend \
+.PHONY: help setup hooks check-setup dev gen-types gen-design-tokens fmt lint test security perf-test ci-frontend \
         db-up db-down migrate makemigration \
         tf-init tf-fmt tf-validate tf-plan tf-lint \
         backend-setup backend-dev backend-test backend-lint \
@@ -23,6 +23,9 @@ setup: backend-setup frontend-setup hooks ## Install all toolchains + git hooks
 hooks: ## Install pre-commit git hooks
 	pip install --quiet pre-commit || python3 -m pip install --quiet pre-commit
 	pre-commit install
+
+check-setup: ## Check dev environment initial setup (tools, logins, make setup)
+	./tools/script/check-devenv-setup.sh
 
 ## ---- Run locally ----
 dev: db-up ## Run backend (:8000) and frontend (:5173) together (starts the db first)

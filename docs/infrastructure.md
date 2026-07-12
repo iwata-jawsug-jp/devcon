@@ -100,6 +100,22 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
 > （S3 ネイティブロック `use_lockfile` のため）。ローカルで bootstrap / マイグレーションを
 > 触る場合は **1.11 以上**を入れておけば両層で通る（CI/CD の workflow は `1.13.0` に統一）。
 
+> **新規 AWS アカウント/リージョンでの前提条件**: `bootstrap/main.tf` は `ci_deploy` の
+> IAM ポリシーを最小権限に絞るため、アカウントの AWS 管理 KMS キーのデフォルトエイリアス
+> （`alias/aws/rds` / `alias/aws/secretsmanager`）を `data "aws_kms_alias"` で参照する。
+> これらのエイリアスは、そのアカウント/リージョンで該当サービス（RDS のデフォルトキー
+> 暗号化 / Secrets Manager のデフォルトキーでのシークレット作成）を一度も使っていないと
+> AWS 側で遅延生成されず存在しない。未使用の新規アカウントで `terraform apply` すると
+> `Error: reading KMS Alias (alias/aws/secretsmanager): empty result` のように失敗する。
+> 発生したら、対象アカウントの認証情報で一度だけ次を実行してキーを温めてから
+> `apply` をやり直す（`alias/aws/rds` 側で同様のエラーが出た場合は、同じ要領で
+> 暗号化した RDS インスタンスを一つ作成/削除すればよい）:
+>
+> ```bash
+> aws secretsmanager create-secret --name kms-bootstrap-warmup --secret-string x
+> aws secretsmanager delete-secret --secret-id kms-bootstrap-warmup --force-delete-without-recovery
+> ```
+
 ```bash
 cd infra/bootstrap
 terraform init                 # ローカル state（backend ブロックなし）

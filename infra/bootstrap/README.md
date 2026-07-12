@@ -19,6 +19,20 @@ the app-infra layer, which depends on the resources created here.
 
 ## Apply once (local state)
 
+> **Brand-new AWS account/region prerequisite**: `main.tf` reads the account's
+> default AWS-managed KMS keys via `data "aws_kms_alias"` (`alias/aws/rds`,
+> `alias/aws/secretsmanager`) to scope the `ci_deploy` IAM policy. Those aliases
+> are created lazily by AWS the first time each service is actually used with
+> its default key — in an account/region that has never created an RDS
+> instance or a Secrets Manager secret, the alias doesn't exist yet and
+> `terraform apply` fails with `Error: reading KMS Alias ...: empty result`.
+> If you hit that, warm up the missing key once before re-running `apply`:
+>
+> ```bash
+> aws secretsmanager create-secret --name kms-bootstrap-warmup --secret-string x
+> aws secretsmanager delete-secret --secret-id kms-bootstrap-warmup --force-delete-without-recovery
+> ```
+
 ```bash
 cd infra/bootstrap
 

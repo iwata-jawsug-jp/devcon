@@ -7,6 +7,27 @@
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-07-12
+
+### Added
+
+- **新規 AWS アカウント/リージョンでの `infra/bootstrap` 初回 apply 時に `alias/aws/rds` /
+  `alias/aws/secretsmanager` が未生成で失敗するケースの対処法を追記**: これらの AWS 管理
+  KMS キーのデフォルトエイリアスは該当サービスを一度も使っていないアカウントでは遅延生成
+  されず存在しないため、`terraform apply` が `Error: reading KMS Alias ...: empty result`
+  で失敗する。ダミーシークレットの作成/削除でキーを温める手順を
+  `infra/bootstrap/README.md` と `docs/infrastructure.md` に記録。
+- **`docs/development-environment.md` に `gh auth login` の初回対話フローを追記**: 新規
+  開発環境セットアップ時に `gh auth status` が未ログイン状態を返すのは想定挙動だが、そこから
+  ログインを完了させるまでの流れ（対話プロンプト例・完了確認方法）がドキュメントに無かった
+  ため追記。
+- **開発環境の初期セットアップ項目を一括確認する `tools/script/check-devenv-setup.sh` を追加**:
+  コンテナ同梱ツール・`make setup`（backend/frontend 依存 + pre-commit フック）・
+  gh/Claude Code/AWS SSO の各ログイン・（任意で）自分の AWS にデプロイする場合のリポジトリ
+  変数登録状況を一括確認できる。`make check-setup` から実行可能。`ssh -T git@github.com` が
+  認証成功時も exit 1 を返す GitHub 側の仕様により、`pipefail` 下で `ssh | grep` に直結すると
+  誤って NG 判定になる不具合を実機検証で発見し修正済み。
+
 ## [0.3.3] - 2026-07-12
 
 ### Added
