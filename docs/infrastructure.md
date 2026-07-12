@@ -293,6 +293,29 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 これでドキュメント・AI エージェントの運用だけでなく GitHub 側でも強制される
 （[development-process.md](development-process.md)）。
 
+`gh` で作成する例（admin 権限が必要）:
+
+```bash
+gh api -X POST repos/<org>/<repo>/rulesets \
+  -f name='main-ci-required' -f target='branch' -f enforcement='active' \
+  -F 'conditions[ref_name][include][]=~DEFAULT_BRANCH' \
+  -F 'rules[][type]=required_status_checks' \
+  -F 'rules[][parameters][required_status_checks][][context]=changes' \
+  -F 'rules[][parameters][required_status_checks][][context]=backend' \
+  -F 'rules[][parameters][required_status_checks][][context]=frontend' \
+  -F 'rules[][parameters][required_status_checks][][context]=infra' \
+  -F 'rules[][parameters][required_status_checks][][context]=scripts'
+```
+
+設定できない環境では、**Settings → Rules → Rulesets → New ruleset** で名前を
+`main-ci-required`（`make check-setup` が参照する名前と一致させる）とし、対象を **デフォルト
+ブランチ**（`~DEFAULT_BRANCH`）にしたうえで `Require status checks to pass` に `changes` /
+`backend` / `frontend` / `infra` / `scripts`（`ci.yml` の5ジョブ）を追加する。
+
+![main-ci-required ルールセット: 名前・Enforcement status・対象ブランチ（Default）](images/main-ci-required_rulesets_image_01.png)
+
+![main-ci-required ルールセット: Require status checks to pass で5ジョブを必須チェックに追加](images/main-ci-required_rulesets_image_02.png)
+
 sandbox 隔離用の `sandbox-isolation`（`guard` 必須）は別ルールセットで、
 [sandbox.md](sandbox.md) を参照。
 

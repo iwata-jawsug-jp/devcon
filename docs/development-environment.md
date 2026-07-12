@@ -89,9 +89,13 @@ $ gh auth login
 表示される（`~/.config/gh` はボリューム永続化のため、Rebuild Container
 後も再ログイン不要）。
 
-上記（同梱ツール・`make setup`・各ログイン）が一通り完了しているかは
-`make check-setup`（`tools/script/check-devenv-setup.sh`）で一括確認できる。
-未完了の項目は `[NG]` とその対処コマンドが表示される。
+上記（同梱ツール・`make setup`・各ログイン）に加え、リポジトリ側で設定が必要な GitHub
+Rulesets（[infrastructure.md「ブランチ保護」](infrastructure.md#ブランチ保護github-rulesets)・
+[sandbox.md「GitHub ルールセット」](sandbox.md#github-ルールセットsandbox-guard-を必須化)）が
+一通り完了しているかは `make check-setup`（`tools/script/check-devenv-setup.sh`）で一括確認
+できる。未完了の項目は `[NG]` とその対処コマンドが表示される。
+
+![make check-setup の実行例（全項目 [OK]、PASS: 26 / FAIL: 0）](images/make_check-setup_image01.png)
 
 ---
 

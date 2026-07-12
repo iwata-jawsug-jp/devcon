@@ -3,8 +3,10 @@
 # 開発環境の初期設定チェックスクリプト
 #
 # docs/development-environment.md §3 と README.md「本格セットアップ」に列挙された
-# 初回セットアップ項目（コンテナ同梱ツール / make setup / 各サービスへのログイン）が
-# 完了しているかを一括確認する。CI では使わない — ローカル/devcontainer 専用。
+# 初回セットアップ項目（コンテナ同梱ツール / make setup / 各サービスへのログイン）に加え、
+# docs/infrastructure.md・docs/sandbox.md が求めるリポジトリ側の GitHub Rulesets
+# （main-ci-required / sandbox-isolation 等）が完了しているかを一括確認する。
+# CI では使わない — ローカル/devcontainer 専用。
 #
 # Usage: ./tools/script/check-devenv-setup.sh
 #
@@ -125,6 +127,63 @@ if gh auth status >/dev/null 2>&1; then
   done
 else
   info "gh 未ログインのためスキップ"
+fi
+
+# ---- 8. GitHub Rulesets（ブランチ保護）----
+# main-ci-required / sandbox-isolation は docs/infrastructure.md「ブランチ保護（GitHub
+# Rulesets）」・docs/sandbox.md「GitHub ルールセット」の記載を正として検証する
+# （存在するだけでなく enforcement=active・target=branch・対象ブランチ・必須チェックまで見る）。
+section "GitHub Rulesets（ブランチ保護）"
+
+# check_ruleset <name> <期待する対象ブランチ (ref_name include)> <期待する必須チェック(空白区切り)> <doc参照先> <ok時の説明>
+check_ruleset() {
+  local name="$1" expected_ref="$2" expected_contexts="$3" doc_hint="$4" label="$5"
+
+  if ! grep -qx "$name" <<<"$ruleset_names"; then
+    ng "$name ルールセットが無い" "$doc_hint を参照して作成"
+    return
+  fi
+
+  local rs_id enforcement target ref_includes contexts problems=""
+  rs_id="$(gh api "repos/$repo_slug/rulesets" --jq ".[] | select(.name==\"$name\") | .id" 2>/dev/null)"
+  enforcement="$(gh api "repos/$repo_slug/rulesets/$rs_id" --jq '.enforcement' 2>/dev/null)"
+  target="$(gh api "repos/$repo_slug/rulesets/$rs_id" --jq '.target' 2>/dev/null)"
+  ref_includes="$(gh api "repos/$repo_slug/rulesets/$rs_id" --jq '.conditions.ref_name.include[]' 2>/dev/null)"
+  contexts="$(gh api "repos/$repo_slug/rulesets/$rs_id" \
+    --jq '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context' 2>/dev/null)"
+
+  [[ "$enforcement" == "active" ]] || problems="$problems enforcement=${enforcement:-取得失敗}（要 active）"
+  [[ "$target" == "branch" ]] || problems="$problems target=${target:-取得失敗}（要 branch）"
+  grep -qx "$expected_ref" <<<"$ref_includes" || problems="$problems 対象ブランチに $expected_ref が無い"
+
+  local missing=""
+  for c in $expected_contexts; do
+    grep -qx "$c" <<<"$contexts" || missing="$missing $c"
+  done
+  [[ -z "$missing" ]] || problems="$problems 必須チェック不足:$missing"
+
+  if [[ -z "$problems" ]]; then
+    ok "$name（$label）設定済み"
+  else
+    ng "$name の設定に問題あり:$problems" "$doc_hint を参照して修正"
+  fi
+}
+
+repo_slug="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
+if [[ -z "$repo_slug" ]]; then
+  info "リポジトリを特定できないためスキップ（gh repo view 失敗）"
+elif ! gh api "repos/$repo_slug/rulesets" >/dev/null 2>&1; then
+  info "rulesets の取得に失敗（gh 未ログイン、または admin/maintain 権限が必要）— スキップ"
+else
+  ruleset_names="$(gh api "repos/$repo_slug/rulesets" --jq '.[].name' 2>/dev/null)"
+
+  check_ruleset "main-ci-required" "~DEFAULT_BRANCH" "changes backend frontend infra scripts" \
+    "docs/infrastructure.md『ブランチ保護（GitHub Rulesets）』" "main の必須ステータスチェック"
+
+  # guard は pull_request イベントでのみ起動するため、対象は ~ALL ではなく
+  # ~DEFAULT_BRANCH（main へのマージ時のみ強制）が正しい設定（docs/sandbox.md 参照）。
+  check_ruleset "sandbox-isolation" "~DEFAULT_BRANCH" "guard" \
+    "docs/sandbox.md『GitHub ルールセット』" "sandbox-guard 必須化"
 fi
 
 # ---- サマリ ----

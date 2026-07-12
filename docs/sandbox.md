@@ -187,14 +187,26 @@ git push origin --delete sandbox/main                 # sandbox 枝を削除
 ```bash
 gh api -X POST repos/<org>/<repo>/rulesets \
   -f name='sandbox-isolation' -f target='branch' -f enforcement='active' \
-  -F 'conditions[ref_name][include][]=~ALL' \
+  -F 'conditions[ref_name][include][]=~DEFAULT_BRANCH' \
   -F 'rules[][type]=required_status_checks' \
   -F 'rules[][parameters][required_status_checks][][context]=guard'
 ```
 
-設定できない環境では、**Settings → Rules → Rulesets → New ruleset** で
-`Require status checks to pass` に `guard`（sandbox-guard の job 名）を追加し、対象を
-全ブランチ（`~ALL`）にする。
+設定できない環境では、**Settings → Rules → Rulesets → New ruleset** で名前を
+`sandbox-isolation`（`make check-setup` が参照する名前と一致させる）とし、対象を **デフォルト
+ブランチ**（`~DEFAULT_BRANCH`）にしたうえで `Require status checks to pass` に `guard`
+（sandbox-guard の job 名）を追加する。
+
+> 対象を全ブランチ（`~ALL`）にはしないこと。`sandbox-guard.yml` の `guard` ジョブは
+> `pull_request` イベントでのみ起動するため、対象を `~ALL` にすると新規ブランチの
+> **push 時点**（まだ PR も無く `guard` が一度も走っていない）で必須ステータスチェックを
+> 満たせず、リポジトリ全体で新規ブランチの push がブロックされる（実際に発生した障害）。
+> `~DEFAULT_BRANCH` であれば `main` へのマージ時（PR 経由）にのみ強制されるため、この問題は
+> 起きない。
+
+![sandbox-isolation ルールセット: 名前・Enforcement status・対象ブランチ（Default）](images/sandbox-isolation_rulesets_image_01.png)
+
+![sandbox-isolation ルールセット: Require status checks to pass で guard を必須チェックに追加](images/sandbox-isolation_rulesets_image_02.png)
 
 ### 恒久保持ブランチの削除保護
 

@@ -7,6 +7,35 @@
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-07-12
+
+### Added
+
+- **`make check-setup` が GitHub Rulesets（ブランチ保護）も検証するように**: 開発環境の
+  初期セットアップ確認スクリプト `tools/script/check-devenv-setup.sh` に、リポジトリ側で
+  設定が必要な `main-ci-required` / `sandbox-isolation` ルールセットの確認を追加した。
+  当初は存在チェックのみだったが、`enforcement`（active か）・`target`（branch か）・
+  対象ブランチ（`ref_name.include`）・必須ステータスチェックの4点まで検証する
+  `check_ruleset` 関数に発展させた。この強化により、`sandbox-isolation` の対象ブランチが
+  `docs/sandbox.md` の記載（当初 `~ALL`）と実際の設定が食い違っていることを実機で検出した。
+- **`docs/infrastructure.md` / `docs/sandbox.md` にルールセット作成手順とスクリーンショットを
+  追加**: `main-ci-required` / `sandbox-isolation` それぞれについて `gh api` での作成例と
+  GitHub UI（Settings → Rules → Rulesets → New ruleset）での手順を明文化し、対応する
+  設定画面のスクリーンショットを添えた。
+- **`docs/development-environment.md` に `make check-setup` の実行例スクリーンショットを追加**。
+
+### Fixed
+
+- **`sandbox-isolation` ルールセットの対象ブランチを `~ALL` から `~DEFAULT_BRANCH` に修正**:
+  `sandbox-guard.yml` の `guard` ジョブは `pull_request` イベントでのみ起動するため、
+  対象を `~ALL`（全ブランチ）にすると、まだ PR の無い新規ブランチの **push 時点**で
+  `guard` が一度も走っておらず必須ステータスチェックを満たせない。実際にこの変更を
+  適用した結果、**リポジトリ全体で新規ブランチの push がブロックされる障害**が発生した
+  ため、`~DEFAULT_BRANCH`（`main` へのマージ時のみ強制）に戻し、`~ALL` を避けるべき理由を
+  `docs/sandbox.md` に明記した。`docs/sandbox.md` の GitHub UI 経由でのルールセット作成
+  手順にも、`gh api` 例と同じ `sandbox-isolation` という名前を明示的に指定する記載が
+  抜けていたため追記した（`make check-setup` が参照する名前と一致させるため）。
+
 ## [0.3.5] - 2026-07-12
 
 ### Added
