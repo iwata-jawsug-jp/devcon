@@ -8,10 +8,10 @@ FRONTEND_DIR  := services/frontend
 
 .PHONY: help setup hooks check-setup dev gen-types gen-design-tokens fmt lint test security perf-test ci-frontend \
         db-up db-down migrate makemigration \
-        tf-init tf-fmt tf-validate tf-plan tf-lint \
+        tf-init tf-fmt tf-validate tf-plan tf-lint check-iam-policies \
         backend-setup backend-dev backend-test backend-lint \
         frontend-setup frontend-dev frontend-build frontend-lint frontend-test frontend-test-e2e \
-        metrics-dora-lint metrics-dora-test
+        metrics-dora-lint metrics-dora-test check-oauth-scopes
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -62,7 +62,7 @@ fmt: tf-fmt ## Format everything
 	cd $(BACKEND_DIR) && uv run ruff format .
 	cd $(FRONTEND_DIR) && npm run format
 
-lint: tf-lint backend-lint frontend-lint metrics-dora-lint ## Lint everything
+lint: tf-lint backend-lint frontend-lint metrics-dora-lint check-oauth-scopes ## Lint everything
 
 test: backend-test frontend-test metrics-dora-test ## Run all unit tests (backend pytest + frontend vitest + metrics unittest)
 
@@ -120,6 +120,10 @@ tf-lint: ## tflint --recursive over infra (same command as CI)
 	cd $(INFRA_DIR) && tflint --init --config=$(CURDIR)/.tflint.hcl \
 		&& tflint --recursive --config=$(CURDIR)/.tflint.hcl
 
+check-iam-policies: ## Validate infra/bootstrap's current IAM policies via accessanalyzer (#340; needs local AWS credentials, not part of `make lint`/`make security` -- see docs/infrastructure.md)
+	cd $(BOOTSTRAP_DIR) && terraform show -json terraform.tfstate > /tmp/bootstrap-iam-plan.json
+	python3 .github/scripts/check_iam_policies.py /tmp/bootstrap-iam-plan.json
+
 ## ---- Backend (services/backend/python, FastAPI) ----
 backend-setup: ## uv sync (install deps)
 	cd $(BACKEND_DIR) && uv sync
@@ -164,3 +168,6 @@ metrics-dora-lint: ## ruff check + format --check over .github/scripts
 
 metrics-dora-test: ## Run the DORA metrics script's unit tests
 	cd .github/scripts && python3 -m unittest discover -s tests -t . -v
+
+check-oauth-scopes: ## Cross-check infra/auth.tf resource-server scopes against oidcConfig.ts's login scope list (#438)
+	python3 .github/scripts/check_oauth_scopes.py

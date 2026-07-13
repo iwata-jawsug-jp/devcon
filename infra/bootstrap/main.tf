@@ -194,6 +194,30 @@ resource "aws_iam_role_policy_attachment" "ci_plan_readonly" {
   policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
+# IAM Access Analyzer's ValidatePolicy (#340) statically checks a rendered IAM
+# policy document for structural issues (e.g. condition keys that don't exist
+# for the paired action -- the exact bug class in #338) without attaching or
+# using the policy. It doesn't target any resource ARN -- the policy document
+# is passed as a request argument -- so Resource "*" is the only valid scope,
+# and the call is read-only with no side effects. Granted explicitly rather
+# than relying on ReadOnlyAccess covering it implicitly (#45's least-privilege
+# posture: prefer an explicit, documented grant over an assumption about what
+# a broad AWS-managed policy happens to include).
+data "aws_iam_policy_document" "ci_plan_access_analyzer" {
+  statement {
+    sid       = "ValidateIamPolicies"
+    effect    = "Allow"
+    actions   = ["access-analyzer:ValidatePolicy"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_plan_access_analyzer" {
+  name   = "access-analyzer-validate-policy"
+  role   = aws_iam_role.ci_plan.id
+  policy = data.aws_iam_policy_document.ci_plan_access_analyzer.json
+}
+
 # Plan (PRs) only ever runs against the `dev` key (cd-infra.yml hardcodes
 # TF_ENV=dev for the plan job; prod/sandbox are only ever touched via the
 # DEPLOY role). Scope ci_plan's state access to that one key so a PR-triggered
@@ -307,6 +331,20 @@ resource "aws_iam_role_policy_attachment" "ci_deploy_state" {
 # `iam:PassRole` was split into its own statement carrying an
 # `iam:PassedToService` condition (`ecs-tasks.amazonaws.com` only).
 
+# Single source for the `aws:RequestedRegion` condition repeated across the
+# statements below (#285) -- previously 18 independent copies of the same
+# 4-line block, which risked a region-scoping gap slipping in silently if
+# only some copies were updated (e.g. adding a second region, or renaming the
+# variable). Expanded into each statement via a `dynamic "condition"` block
+# below instead of being copy-pasted.
+locals {
+  region_condition = {
+    test     = "StringEquals"
+    variable = "aws:RequestedRegion"
+    values   = [var.aws_region]
+  }
+}
+
 # Networking (network.tf, endpoints.tf): VPC, subnets, IGW, route tables,
 # security groups + rules, VPC endpoints. EC2 doesn't support resource-level
 # ARN restriction for most of these actions (its managed policies like
@@ -380,10 +418,13 @@ data "aws_iam_policy_document" "ci_deploy_network" {
 
     # EC2 networking is entirely regional; nothing here legitimately targets a
     # region other than where this project's infra lives (#45).
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
 }
@@ -411,10 +452,13 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     actions   = ["ecr:GetAuthorizationToken"]
     resources = ["*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -445,10 +489,13 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     ]
     resources = ["arn:aws:ecr:*:*:repository/${var.project}-*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -475,10 +522,13 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
       "arn:aws:ecs:*:*:task/${var.project}-*/*",
     ]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -510,10 +560,13 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     ]
     resources = ["arn:aws:ecs:*:*:task-definition/${var.project}-*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -530,10 +583,13 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     ]
     resources = ["*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   # ELB has no resource-level ARN support for load balancer / target group /
@@ -574,10 +630,13 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     ]
     resources = ["*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   # Application Auto Scaling has no resource-level ARN support either --
@@ -600,10 +659,13 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     ]
     resources = ["*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
 }
@@ -799,10 +861,13 @@ data "aws_iam_policy_document" "ci_deploy_data" {
     ]
     resources = ["arn:aws:secretsmanager:*:*:secret:rds!*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -815,10 +880,13 @@ data "aws_iam_policy_document" "ci_deploy_data" {
     ]
     resources = ["*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -833,10 +901,13 @@ data "aws_iam_policy_document" "ci_deploy_data" {
     ]
     resources = ["arn:aws:rds:*:*:db:${var.project}-*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -858,10 +929,13 @@ data "aws_iam_policy_document" "ci_deploy_data" {
     ]
     resources = ["arn:aws:rds:*:*:subgrp:${var.project}-*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -873,10 +947,13 @@ data "aws_iam_policy_document" "ci_deploy_data" {
     actions   = ["logs:DescribeLogGroups"]
     resources = ["*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -892,10 +969,13 @@ data "aws_iam_policy_document" "ci_deploy_data" {
     ]
     resources = ["arn:aws:logs:*:*:log-group:/${var.project}/*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
 }
@@ -947,10 +1027,13 @@ data "aws_iam_policy_document" "ci_deploy_auth" {
     ]
     resources = ["*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
 
@@ -974,10 +1057,13 @@ data "aws_iam_policy_document" "ci_deploy_auth" {
     ]
     resources = ["arn:aws:cognito-idp:*:*:userpool/*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
 }
@@ -1015,10 +1101,13 @@ data "aws_iam_policy_document" "ci_deploy_observability" {
     ]
     resources = ["arn:aws:sns:*:*:${var.project}-*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {
@@ -1034,10 +1123,13 @@ data "aws_iam_policy_document" "ci_deploy_observability" {
     ]
     resources = ["arn:aws:cloudwatch:*:*:alarm:${var.project}-*"]
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
     }
   }
   statement {

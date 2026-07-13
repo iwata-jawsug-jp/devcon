@@ -70,3 +70,12 @@ repos:
         # .claude/skills/ and .kiro/settings/templates/ are cc-sdd upstream artifacts
         # (docs/sdd.md) — leave them unformatted to keep diffs vs upstream small (#127).
         exclude: ^(services/frontend/dist/|services/frontend/src/api/schema\.ts|services/frontend/playwright-report/|.*\.terraform/|\.claude/skills/|\.kiro/settings/templates/)
+      # Catches a scope added to the Cognito resource server (or the frontend's login
+      # scope list) without updating the other side — only reproduces at a real Cognito
+      # login otherwise (#438). Only runs when either file actually changes.
+      - id: check-oauth-scopes
+        name: check-oauth-scopes (auth.tf vs oidcConfig.ts)
+        entry: python3 .github/scripts/check_oauth_scopes.py
+        language: system
+        files: ^(infra/auth\.tf|services/frontend/src/auth/oidcConfig\.ts)$
+        pass_filenames: false

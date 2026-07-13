@@ -7,6 +7,48 @@
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-07-13
+
+### Added
+
+- **認可scope追加時の3点セットをSDD運用に定型化**: 第2消費者実証（itouhi/devcon-test）で、
+  フロントのOIDCログインscope要求リストへの追加がタスク分解から漏れた実例（devcon-test#20）を
+  受け、`infra/auth.tf`のresource server・バックエンドの`require_scope`・フロントの
+  `oidcConfig.ts`scope定数の3点セットを`.kiro/steering/tech.md`に明記した。加えて、両者の
+  食い違いを静的に検出する`.github/scripts/check_oauth_scopes.py`を追加し、
+  pre-commit/`make lint`/CIの3層に配線した（#438）。
+- **IAMポリシーの実在しない条件キーを検出する静的ゲートを追加**: `terraform validate`/
+  tflint/checkovの全ゲートを素通りする「条件キーの誤字によるステートメントの無言の無効化」
+  （#338）を、`aws accessanalyzer validate-policy`で検出する
+  `.github/scripts/check_iam_policies.py`を追加した。app層は`cd-infra.yml`のplanジョブで
+  自動検証し、`infra/bootstrap/`（CI外・人力apply運用）は`make check-iam-policies`で
+  別途検証する2層構成とした（ADR-0009、#340）。
+- **週次エフェメラルサイクルワークフローを追加**: `cd-sandbox-cycle.yml`がsandbox環境の
+  `apply → deploy → live-smoke → teardown`を1回の`workflow_dispatch`実行で完走させ、
+  長寿命のsandbox環境では原理的に再現しない「ゼロからのプロビジョニング特有の欠陥」
+  （#436/#437と同クラス）を定期的に検出できるようにした。`TF_ENV=sandbox`が単一の共有state
+  であるため、`schedule`トリガーは意図的に未設定（#376 PR④）。
+- **`check-devenv-setup.sh`がClaude Code / GitHub Copilot CLIのどちらか一方で通るように対応**:
+  これまで`claude`必須だったAIコーディングエージェントCLIのチェックを、`claude`/`copilot`
+  いずれかの実装で良いように変更した（#117関連）。
+
+### Changed
+
+- **X-Rayトレース確認手順をdocsに追記**: ADR-0007で実装済みの分散トレーシングについて、
+  AWSコンソールでのトレース確認手順（Service map・Traces検索・構造化ログの`trace_id`との
+  相関）を明文化した。Grafana等の追加ダッシュボード（OBS-02）は、現状のX-Rayコンソール
+  標準機能で完了条件を満たせているため対象外と判断した（#410）。
+- **CI運用定着タスク（CI-01/CI-02）の判断を記録**: CI実行時間トレンドの可視化は実測で
+  明確なボトルネックが無いため現時点で見送り、pre-commitフックの定着状況は確認済みで
+  あることを記録した（#409）。
+
+### Fixed
+
+- **bootstrap deployロールのregion条件（18箇所の重複）を`dynamic "condition"`ブロックへ
+  集約**: 同一の`aws:RequestedRegion`条件が18ステートメントにコピペされており、将来の
+  変更漏れによるリージョン制約の意図しない解除リスクがあった。`local.region_condition`
+  から単一定義で展開する形にリファクタした（#285）。
+
 ## [0.3.7] - 2026-07-12
 
 ### Fixed

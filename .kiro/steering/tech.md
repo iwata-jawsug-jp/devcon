@@ -64,6 +64,17 @@ Dev Container（Terraform / AWS CLI / Python / Node / Claude Code）。`make hoo
   `VITE_` プレフィックスの非機密のみ（ブラウザに出る）。バックエンド秘密は SSM / Secrets Manager。
 - **state**: S3 ネイティブロック（`use_lockfile`）。詳細は `docs/`（正）・`docs/adr/` を参照。
 
+### 認可 scope 追加時のチェックリスト（3点セット）
+
+新しい OAuth scope（例: `api/orders.read`）を追加する機能は、design.md / tasks.md のタスク分解に
+必ず次の3点を含める。1つでも欠けると、実 Cognito ログインでのみ再現する 403（トークンに scope が
+含まれない）という形で顕在化し、CI では検出できない（#438 背景: itouhi/devcon-test#20）。
+
+1. `infra/auth.tf` — resource server の `scope` ブロックと `allowed_oauth_scopes` に追加
+2. バックエンド — 該当エンドポイントに `require_scope("api/xxx.yyy")` を追加
+3. **フロントエンド** — `services/frontend/src/auth/oidcConfig.ts` の scope 定数（ログイン時に
+   要求する scope 一覧）に追加。ここが最も漏れやすい。
+
 ---
 
 _Document standards and patterns, not every dependency_

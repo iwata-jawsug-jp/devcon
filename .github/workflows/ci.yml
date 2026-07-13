@@ -41,6 +41,10 @@ jobs:
             scripts:
               - '.github/scripts/**'
               - '.github/workflows/ci.yml'
+              # check_oauth_scopes.py (#438) cross-checks these two files against each
+              # other, so the job must also trigger when only one of them changes.
+              - 'infra/auth.tf'
+              - 'services/frontend/src/auth/oidcConfig.ts'
 
   # Per-area kill switches: repository variables BACKEND_ENABLED / FRONTEND_ENABLED /
   # INFRA_ENABLED gate both CI and CD jobs for that area. Compared with `!= 'false'`
@@ -222,3 +226,5 @@ jobs:
         run: make metrics-dora-lint
       - name: Unit tests (stdlib-only, no deps to install)
         run: make metrics-dora-test
+      - name: OAuth scope check (auth.tf vs oidcConfig.ts)
+        run: make check-oauth-scopes

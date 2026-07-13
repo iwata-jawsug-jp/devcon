@@ -8,6 +8,10 @@
 # （main-ci-required / sandbox-isolation 等）が完了しているかを一括確認する。
 # CI では使わない — ローカル/devcontainer 専用。
 #
+# AIコーディングエージェントCLIはClaude Code（claude）/ GitHub Copilot CLI（copilot）の
+# どちらか一方が実装されていれば良い（#117: 併用/切り替えの採否は未確定）。現状
+# docs/development-environment.md / README.md は Claude Code のみを前提に書かれている。
+#
 # Usage: ./tools/script/check-devenv-setup.sh
 #
 set -uo pipefail
@@ -24,13 +28,43 @@ info() { echo "  [--] $1"; }
 
 # ---- 1. コンテナ同梱ツール ----
 section "コンテナ同梱ツール"
-for cmd in terraform tflint trivy checkov aws node python3 uv rg gh docker claude; do
+for cmd in terraform tflint trivy checkov aws node python3 uv rg gh docker; do
   if command -v "$cmd" >/dev/null 2>&1; then
     ok "$cmd ($(command -v "$cmd"))"
   else
     ng "$cmd が見つからない" "Dev Containers: Rebuild Container を実行"
   fi
 done
+
+# AIコーディングエージェントCLI: Claude Code（claude）/ GitHub Copilot CLI（copilot）の
+# どちらか一方が使えれば良い（#117: 併用/切り替えの採否は未確定のため両対応にする。現状
+# docs/development-environment.md は Claude Code のみを前提に書かれている点に注意）。
+# `copilot` は VS Code の GitHub Copilot Chat 拡張が globalStorage 配下に同名の起動シムを
+# 置くことがあり、`command -v` だけでは実体（npm の `@github/copilot`）と区別できない —
+# 実際に `--version` を試し、未インストール時の応答文言が返ってこないかで判定する。
+has_claude=false
+command -v claude >/dev/null 2>&1 && has_claude=true
+
+has_copilot=false
+if command -v copilot >/dev/null 2>&1; then
+  copilot_probe="$(timeout 5 copilot --version </dev/null 2>&1 || true)"
+  if ! grep -qi "cannot find github copilot cli" <<<"$copilot_probe"; then
+    has_copilot=true
+  fi
+fi
+
+if $has_claude || $has_copilot; then
+  detected=()
+  $has_claude && detected+=("Claude Code ($(command -v claude))")
+  $has_copilot && detected+=("GitHub Copilot CLI ($(command -v copilot))")
+  # `IFS=', '`（2文字）で ${detected[*]} を展開しても joinに使われるのは先頭の1文字のみ
+  # （bashの既知の挙動）なので、区切り文字は printf で明示的に組み立てる。
+  detected_str="$(printf '%s, ' "${detected[@]}")"
+  ok "AIコーディングエージェントCLI: ${detected_str%, }"
+else
+  ng "Claude Code（claude）/ GitHub Copilot CLI（copilot）のいずれも見つからない" \
+    "Dev Containers: Rebuild Container を実行、または docs/development-environment.md を参照"
+fi
 
 # ---- 2. 依存関係 / pre-commit hooks（make setup）----
 section "依存関係・pre-commit hooks（make setup）"
@@ -96,13 +130,30 @@ else
   ng "GitHub CLI 未ログイン" "gh auth login"
 fi
 
-# ---- 5. Claude Code ----
-section "Claude Code"
-claude_config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-if [[ -s "$claude_config_dir/.credentials.json" ]]; then
-  ok "認証情報あり ($claude_config_dir/.credentials.json)"
-else
-  ng "Claude Code 未ログイン" "claude を起動してブラウザ認証を完了する"
+# ---- 5. AIコーディングエージェント（ログイン状態）----
+section "AIコーディングエージェント（ログイン状態）"
+if $has_claude; then
+  claude_config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  if [[ -s "$claude_config_dir/.credentials.json" ]]; then
+    ok "Claude Code: 認証情報あり ($claude_config_dir/.credentials.json)"
+  else
+    ng "Claude Code: 未ログイン" "claude を起動してブラウザ認証を完了する"
+  fi
+fi
+if $has_copilot; then
+  # 認証解決順（GitHub公式ドキュメント）: COPILOT_GITHUB_TOKEN → GH_TOKEN → GITHUB_TOKEN →
+  # システムキーチェーン（無ければ ~/.copilot/config.json への平文フォールバック）→
+  # 最後に `gh auth token` へフォールバック。最後の gh 経由は「4. GitHub CLI」で確認済みなので、
+  # ここでは環境変数・設定ファイルを先に見て、無ければ gh の結果を流用する。
+  if [[ -n "${COPILOT_GITHUB_TOKEN:-}${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
+    ok "GitHub Copilot CLI: 環境変数によるトークン認証あり"
+  elif [[ -s "$HOME/.copilot/config.json" ]]; then
+    ok "GitHub Copilot CLI: 認証情報あり (~/.copilot/config.json)"
+  elif gh auth status >/dev/null 2>&1; then
+    ok "GitHub Copilot CLI: 専用の認証情報は無いが、gh 経由のフォールバック認証が有効（gh auth token）"
+  else
+    ng "GitHub Copilot CLI: 未ログイン" "copilot を起動して /login を実行するか、先に gh auth login を済ませる"
+  fi
 fi
 
 # ---- 6. AWS SSO ----

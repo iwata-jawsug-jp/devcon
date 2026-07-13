@@ -145,6 +145,37 @@ gh variable set CLOUDFRONT_DOMAIN_NAME --body "$(terraform -chdir=infra output -
 同じ「fail ではなく warning 付き skip」設計で）自動的にスキップされる — deploy/frontend 自体を
 ブロックしない。
 
+## 週次エフェメラルサイクル（#376 PR④）
+
+`cd-sandbox-cycle.yml` は `apply → deploy → live-smoke → teardown` を1回の実行で完走させる
+ワークフロー。上記の手動フロー（sandbox 枝を作る・push する・teardown する）を1ボタンで
+再現し、**ゼロからのプロビジョニング特有の欠陥**（#436・#437 のように、長寿命の sandbox
+環境では原理的に再現しない欠陥クラス）を定期的に検出するためのもの。
+
+- **現状 `workflow_dispatch` のみ**（`schedule` トリガーは未設定）。理由は2つ:
+  1. `metrics-dora.yml`/`perf.yml` と同じ判断（このリポジトリは学習・デモ目的で、無人の
+     定期実行を正当化するほどの利用実績がまだない）。
+  2. **`TF_ENV=sandbox` は単一の共有 state**。無人で週次 teardown が走ると、誰かが
+     手動検証のために sandbox を使っている最中に**予告なく破棄してしまうリスク**がある。
+     `schedule` を足すのは、少なくとも一度手動実行して所要時間・コストを把握し、かつ
+     その時点で他に sandbox を使っていないことを確認できてから。
+- **実行前に必ず、他に sandbox を使っていないか確認すること。** このワークフローは
+  実行時点の sandbox 環境をまるごと apply → 差し替え → 破棄する。
+- 判定は **alerting**（live-smoke 失敗時に `e2e-live` ラベルで issue 自動起票、ワークフロー
+  自体は fail させない）。teardown は smoke-test の成否に関わらず実行される
+  （`workflow_dispatch` の `skip_teardown: true` で調査用に環境を残せる、`if: always()`
+  の teardown ジョブに `always() && inputs.skip_teardown != true` で反映）。
+- `cd-infra-sandbox.yml`/`cd-app-sandbox.yml` の該当ジョブをステップ単位で複製する形で
+  実装している（reusable workflow 化はしていない）— `ci-sandbox.yml` が `ci.yml` を複製
+  している既存の drift（#153 指摘7）と同じトレードオフを、意図的に踏襲したもの。#295
+  （reusable workflow 化）で解消する想定。
+
+```bash
+gh workflow run cd-sandbox-cycle.yml --ref main
+# 環境を調査用に残したい場合:
+gh workflow run cd-sandbox-cycle.yml --ref main -f skip_teardown=true
+```
+
 ## teardown（後始末）
 
 **推奨: `cd-infra-sandbox.yml` を `workflow_dispatch` で実行**（OIDC 経由、長期キー不要）。

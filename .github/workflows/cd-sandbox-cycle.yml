@@ -1,0 +1,341 @@
+name: CD Sandbox Cycle (weekly ephemeral)
+
+# PR④ of #376: apply -> deploy -> live-smoke -> teardown in one workflow run,
+# to verify sandbox can be built from scratch on a recurring basis without a
+# human remembering to run docs/sandbox.md by hand. This is the mechanical
+# version of "a third party can stand up the environment from docs alone"
+# (#299) and specifically targets provisioning-only defects (#436/#437-class:
+# only reproduce on a from-scratch apply, invisible on a long-lived
+# environment) plus docs/sandbox.md procedure drift.
+#
+# workflow_dispatch only, deliberately no `schedule` trigger yet -- same
+# convention as metrics-dora.yml/perf.yml (docs/infrastructure.md "定期実行
+# ワークフローについて"), plus a sandbox-specific reason: `TF_ENV=sandbox` is
+# a single shared state key (docs/sandbox.md), so an unattended weekly
+# teardown could destroy someone's in-progress manual sandbox verification
+# without warning. Add `schedule` only once this has been run successfully by
+# hand at least once, its duration/cost is understood, and nothing else is
+# relying on a long-lived sandbox at the time.
+#
+# Duplicates steps from cd-infra-sandbox.yml / cd-app-sandbox.yml rather than
+# calling them as reusable workflows -- the same drift trade-off ci-sandbox.yml
+# already accepts vs. ci.yml (#153 finding 7), deliberately left for #295
+# (reusable workflow-ification) rather than solved here.
+#
+# Judgment on fail = alerting (auto-file an `e2e-live` issue), not blocking:
+# same Count -> Block staged rollout as WAF (#279). Promote once false-positive
+# rate has been observed for a while.
+on:
+  workflow_dispatch:
+    inputs:
+      skip_teardown:
+        description: 'Skip the final destroy step (leave the sandbox environment up for investigation)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-sandbox-cycle
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-1
+  TF_ENV: sandbox
+
+jobs:
+  # 1) Provision sandbox infra from scratch (same steps as cd-infra-sandbox.yml's
+  #    `apply` job).
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: '1.13.0'
+      - name: Terraform init
+        run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
+      - name: Terraform apply
+        run: |
+          terraform apply -no-color -input=false -auto-approve \
+            -var-file=env/${{ env.TF_ENV }}.tfvars
+
+  # 2) Build & deploy the app against the freshly-applied sandbox infra (same
+  #    steps as cd-app-sandbox.yml's `build` + `deploy` jobs).
+  deploy-api:
+    needs: apply
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Build & push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/backend/python
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ vars.SANDBOX_ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Register new task definition revision with the built image
+        id: reg
+        env:
+          FAMILY: ${{ vars.SANDBOX_ECS_TASK_FAMILY }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ vars.SANDBOX_ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          image="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition' > taskdef.json
+          jq --arg IMG "$image" '
+            .containerDefinitions[0].image = $IMG
+            | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+          ' taskdef.json > newdef.json
+          rev=$(aws ecs register-task-definition --cli-input-json file://newdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "revision=$rev" >> "$GITHUB_OUTPUT"
+          echo "registered: $rev"
+      - name: Run Alembic migrations (one-off Fargate task)
+        env:
+          CLUSTER: ${{ vars.SANDBOX_ECS_CLUSTER }}
+          REV: ${{ steps.reg.outputs.revision }}
+          SUBNETS: ${{ vars.SANDBOX_PRIVATE_SUBNET_IDS }}
+          SG: ${{ vars.SANDBOX_APP_SECURITY_GROUP_ID }}
+        run: |
+          set -euo pipefail
+          task_arn=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$REV" \
+            --launch-type FARGATE --count 1 \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"api","command":["uv","run","--no-sync","alembic","upgrade","head"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migration task: $task_arn"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
+          code=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migration exit code: $code"
+          test "$code" = "0"
+      - name: Roll the ECS service to the new revision
+        env:
+          CLUSTER: ${{ vars.SANDBOX_ECS_CLUSTER }}
+          SERVICE: ${{ vars.SANDBOX_ECS_SERVICE }}
+          REV: ${{ steps.reg.outputs.revision }}
+        run: |
+          set -euo pipefail
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$REV" --desired-count 1 >/dev/null
+          aws ecs wait services-stable --cluster "$CLUSTER" --service "$SERVICE"
+          echo "service rolled to $REV"
+
+  frontend:
+    needs: apply
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: services/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        env:
+          VITE_COGNITO_USER_POOL_ID: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_REGION: ${{ env.AWS_REGION }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.SANDBOX_COGNITO_CLIENT_ID }}
+          VITE_COGNITO_DOMAIN: ${{ vars.SANDBOX_COGNITO_DOMAIN }}
+        run: npm run build
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Sync dist/ to S3
+        run: aws s3 sync dist/ "s3://${{ vars.SANDBOX_WEB_BUCKET }}/" --delete
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.SANDBOX_CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths '/*'
+
+  # 3) Real-browser live-smoke against the just-provisioned-from-scratch
+  #    environment (same steps as cd-app-sandbox.yml's `smoke-test` job, plus
+  #    cd-app.yml's fail -> auto-file-issue step since this cycle has no PR to
+  #    comment on). continue-on-error so teardown still runs on smoke failure.
+  smoke-test:
+    needs: [deploy-api, frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC, for the disposable Cognito user create/delete
+      issues: write # to file an issue on failure
+      contents: read
+    defaults:
+      run:
+        working-directory: services/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Create a disposable Cognito test user
+        id: user
+        env:
+          POOL_ID: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
+        run: |
+          set -euo pipefail
+          email="e2e-${{ github.run_id }}-${{ github.run_attempt }}@example.com"
+          password="$(openssl rand -base64 24)Aa1!"
+          echo "::add-mask::$password"
+
+          aws cognito-idp admin-create-user \
+            --user-pool-id "$POOL_ID" --username "$email" \
+            --user-attributes Name=email,Value="$email" Name=email_verified,Value=true \
+            --message-action SUPPRESS
+          aws cognito-idp admin-set-user-password \
+            --user-pool-id "$POOL_ID" --username "$email" --password "$password" --permanent
+
+          echo "email=$email" >> "$GITHUB_OUTPUT"
+          echo "password=$password" >> "$GITHUB_OUTPUT"
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run live-smoke test
+        id: smoke
+        continue-on-error: true
+        env:
+          SMOKE_BASE_URL: https://${{ vars.SANDBOX_CLOUDFRONT_DOMAIN_NAME }}
+          SMOKE_TEST_EMAIL: ${{ steps.user.outputs.email }}
+          SMOKE_TEST_PASSWORD: ${{ steps.user.outputs.password }}
+          PLAYWRIGHT_JSON_OUTPUT_NAME: live-smoke-results.json
+        run: npx playwright test --project=live-smoke --reporter=list,json
+      - name: Find which step failed (S1/S2/S3)
+        if: always() && steps.smoke.outcome == 'failure'
+        id: parse
+        run: |
+          failed_step=$(jq -r '
+            ([.. | objects | select(has("error") and .error != null and has("title"))] | .[0].title) //
+            (if ([.. | objects | select(has("error") and .error != null)] | length) > 0
+              then "S1: login (accessToken fixture)" else empty end) //
+            "unknown step"
+          ' live-smoke-results.json 2>/dev/null || echo "unknown step")
+          [ -n "$failed_step" ] || failed_step="unknown step"
+          echo "failed_step=$failed_step" >> "$GITHUB_OUTPUT"
+      - name: Upload live-smoke artifacts (trace/screenshot/video)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-cycle-live-smoke-report-${{ github.run_id }}
+          path: |
+            services/frontend/playwright-report/
+            services/frontend/test-results/
+            services/frontend/live-smoke-results.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: File an issue on failure
+        if: steps.smoke.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILED_STEP: ${{ steps.parse.outputs.failed_step }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Weekly sandbox cycle: live-smoke failed after a from-scratch apply" \
+            --label "e2e-live" \
+            --body "$(cat <<BODY
+          週次エフェメラルサイクル（#376 PR④）で、ゼロからの sandbox プロビジョニング後の
+          live-smoke が失敗しました。post-deploy スモーク（cd-app-sandbox.yml/cd-app.yml）
+          では検出できない「ゼロからのプロビジョニング特有の欠陥」（#436/#437 と同クラス）の
+          可能性があります。
+
+          - **Run**: $RUN_URL
+          - **失敗したステップ**: $FAILED_STEP
+
+          trace/screenshot/video は Actions artifact に添付されています。docs/issues.md の
+          運用に従い、直す前にこのissueへ原因を記録してください。
+          BODY
+          )"
+      - name: Delete the disposable Cognito test user
+        if: always()
+        env:
+          POOL_ID: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
+          EMAIL: ${{ steps.user.outputs.email }}
+        run: |
+          aws cognito-idp admin-delete-user --user-pool-id "$POOL_ID" --username "$EMAIL" \
+            || echo "::warning::Failed to delete disposable test user $EMAIL — manual cleanup may be needed."
+
+  # 4) Tear down everything this run created, so the cycle actually stays
+  #    ephemeral (docs/sandbox.md: sandbox is meant to be disposable). Runs
+  #    regardless of smoke-test outcome (alerting, not blocking, per the
+  #    Count -> Block note above) unless the human explicitly asked to keep
+  #    the environment up for investigation.
+  teardown:
+    needs: smoke-test
+    if: always() && inputs.skip_teardown != true
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: '1.13.0'
+      - name: Terraform init
+        run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
+      - name: Terraform destroy
+        run: |
+          terraform destroy -no-color -input=false -auto-approve \
+            -var-file=env/${{ env.TF_ENV }}.tfvars
