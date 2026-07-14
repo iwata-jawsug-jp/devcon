@@ -7,6 +7,35 @@
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-07-14
+
+### Added
+
+- **スキャフォールドCLI（copier）を導入**: `copier copy gh:iwata-jawsug-jp/devcon <生成先>`
+  一発で、プロジェクト名・GitHub org/repo・AWSリージョンを指定した「命名済み」の新規プロジェクトを
+  生成できるようにした（#294）。ツール選定は cookiecutter・GitHub template repo と比較し
+  `copier update` による下流追従を決め手に採用（ADR-0010）。テンプレートは本リポジトリ自身とし、
+  専用リポジトリへは切り出さない（ADR-0011 — 第2消費者実証 `itouhi/devcon-test` が既に
+  devcon 自身の fork として動いている実績、`tools/script/publish-to-public.sh` の
+  除外リスト＋文字列置換という前例を踏まえた判断）。テンプレート化の機構は当初 Jinja 直書き方式
+  を検討したが、in-place テンプレートの前提（devcon 自身が常に動く状態を保つ）と矛盾する
+  ため、`publish-to-public.sh` と同じ「コピー後に sed で置換する」方式（copier の `_tasks`）に
+  修正した。生成物は `make scaffold-verify`（`ci.yml` の `scaffold` ジョブ）で継続的に検証する。
+- **CI を reusable workflow 化**: `ci.yml` と `ci-sandbox.yml` の per-area 品質ゲート
+  （backend/frontend/infra/scripts/scaffold）を `reusable-*.yml`（`workflow_call`）へ抽出し、
+  両ワークフロー間の drift（#153 指摘7 — 実際に diff を取ると `ci-sandbox.yml` は DESIGN.md
+  lint・バンドル予算・Lighthouse CI・E2E・`scripts`/`scaffold` ジョブが丸ごと欠落していた）を
+  構造的に解消した（#295、ADR-0012）。`.github/CODEOWNERS` の雛形も追加した。
+
+### Fixed
+
+- **`workflow_call` の status check 名の不整合**: reusable workflow 化に伴い check 名が
+  `<呼び出し側ジョブ名> / <内側ジョブ名>` に変わることを実地検証で確認し、`main-ci-required`
+  ルールセットを追従させた。さらに、呼び出しジョブを `if:` で丸ごとスキップする設計のままだと
+  スキップ時のみ check 名がサフィックス無しの別名になり、該当エリアを変更しない大多数の PR が
+  マージ不能になる問題を発見・修正した（呼び出しは常に行い、スキップ可否は `should_run` 入力で
+  内側のジョブに渡す方式に変更）。
+
 ## [0.3.8] - 2026-07-13
 
 ### Added

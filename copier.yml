@@ -1,0 +1,84 @@
+# copier テンプレート設定。
+#
+# ADR-0010（copier 採用）・ADR-0011（本リポジトリを in-place でテンプレート化）・
+# docs/scaffold-cli.md（ハードコード箇所の洗い出し・変数設計・テンプレート化の機構）を参照。
+#
+# チェックイン済みファイルに `{{ project_name }}` 等の Jinja マーカーを直書きしない。
+# ADR-0011 の「本リポジトリ自身が常に動くテンプレートであり続ける」という前提上、
+# devcontainer.json の "name" や README の見出しに生の Jinja 構文が入ると、
+# devcon 自身を普通に開いたときにそれがそのまま表示されてしまい壊れる。
+# 代わりに `tools/script/publish-to-public.sh` と同じ「コピー後に sed で文字列置換する」
+# 方式を _tasks で行う。チェックイン済みファイルは一切変更しない。
+
+_exclude:
+  # リリース配管そのもの（公開ミラー専用。生成されたプロジェクトには不要）
+  - .github/workflows/publish.yml
+  - tools/script/publish-to-public.sh
+  - docs/release.md
+  # 開発用リポジトリの内部運用ドキュメント（採否判断前の検討メモ）
+  - docs/proposal
+  # 本テンプレート自身の作業ノート・意思決定履歴（ADR運用の型は adr/template.md で引き継ぐ）
+  - docs/scaffold-cli.md
+  - docs/adr/0001-record-architecture-decisions.md
+  - docs/adr/0002-adopt-spec-driven-development-with-cc-sdd.md
+  - docs/adr/0003-keep-monorepo-through-domain-and-authn-expansion.md
+  - docs/adr/0004-rename-services-by-role-and-nest-backend-by-language.md
+  - docs/adr/0005-adopt-docker-in-docker-with-privileged-for-devcontainer.md
+  - docs/adr/0006-dora-deployment-frequency-and-lead-time-definitions.md
+  - docs/adr/0007-opentelemetry-adot-sidecar-for-distributed-tracing.md
+  - docs/adr/0008-live-smoke-playwright-project-with-disposable-cognito-user.md
+  - docs/adr/0009-iam-access-analyzer-static-policy-validation.md
+  - docs/adr/0010-adopt-copier-for-scaffold-cli.md
+  - docs/adr/0011-scaffold-template-in-place.md
+  - CHANGELOG.md
+  # 開発用リポジトリの自己検証専用（docs/proposal/template-verification-environment-proposal.md）
+  - .github/workflows/cd-infra-verify.yml
+  - .github/workflows/cd-app-verify.yml
+  - infra/env/golden-path-verify.tfvars.example
+  - infra/env/golden-path-verify.backend.hcl.example
+
+project_name:
+  type: str
+  help: >-
+    プロジェクト名（S3バケット名・ECRリポジトリ名・Cognitoドメインの一部として使われるため、
+    小文字英数字とハイフンのみ、3〜63文字）
+  validator: >-
+    {% if not (project_name | regex_search('^[a-z][a-z0-9-]{1,61}[a-z0-9]$')) %}
+    project_name は小文字で始まり、小文字英数字とハイフンのみ、3〜63文字にしてください
+    {% endif %}
+
+github_org:
+  type: str
+  help: 'GitHub organization または user 名（infra/bootstrap の OIDC 信頼ポリシーに使う）'
+  validator: >-
+    {% if not (github_org | regex_search('^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$')) %}
+    github_org は有効な GitHub organization/user 名にしてください
+    {% endif %}
+
+github_repo:
+  type: str
+  help: 'GitHub リポジトリ名（省略時は project_name と同じ）'
+  default: '{{ project_name }}'
+
+aws_region:
+  type: str
+  help: 'デプロイ先の AWS リージョン'
+  default: 'ap-northeast-1'
+  validator: >-
+    {% if not (aws_region | regex_search('^[a-z]{2}-[a-z]+-\d$')) %}
+    aws_region は ap-northeast-1 のような AWS リージョン形式にしてください
+    {% endif %}
+
+# publish-to-public.sh の EXCLUDES 適用後の置換ロジック（SRC_REPO_PATH → DEV_NAME の順）と
+# 同じ順序: より具体的な文字列（org/repo パス）を先に置換してから、単独のプロジェクト名を
+# 置換する。テキストファイルのみ対象（grep -Iq でバイナリを除外）。
+_tasks:
+  - >-
+    find . -path ./.git -prune -o -type f -print0 | xargs -0 grep -Il . 2>/dev/null | while IFS=
+    read -r f; do
+    sed -i
+    -e 's#iwata-jawsug-jp/devcon#{{ github_org }}/{{ github_repo }}#g'
+    -e 's#itouhi#{{ github_org }}#g'
+    -e 's#devcon#{{ project_name }}#g'
+    -e 's#ap-northeast-1#{{ aws_region }}#g'
+    "$f"; done

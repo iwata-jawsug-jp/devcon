@@ -1,0 +1,89 @@
+name: reusable-infra
+
+# ADR-0012 / #295: ci.yml と ci-sandbox.yml が共有する infra 品質ゲート。単一ソースにすることで
+# 両ワークフロー間の drift（#153 指摘7 — ci-sandbox.yml は tflint/trivy のバージョン pin が無く、
+# checkov も bridgecrewio/checkov-action の未pin版を使っていた）を構造的に防ぐ。
+
+on:
+  workflow_call:
+    inputs:
+      should_run:
+        description: >-
+          Whether to actually execute this gate (vs. report a skipped check).
+          Keeping the job always invoked (rather than gating with `if:` on the
+          caller side) keeps the status-check context name stable regardless
+          of skip state — see ADR-0012.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: inputs.should_run
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: '1.13.0'
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+      - name: Terraform init (no backend)
+        run: terraform init -backend=false
+      - name: Terraform validate
+        run: terraform validate
+      - name: Validate bootstrap layer
+        working-directory: infra/bootstrap
+        run: |
+          terraform init -backend=false
+          terraform validate
+      # Version pinned to match .devcontainer/Dockerfile's TFLINT_VERSION — the single
+      # source for this repo's security/lint tool versions (#153, #272).
+      - name: Set up TFLint
+        uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: 'v0.63.1'
+      # Same command as `make tf-lint`: without --config, tflint would silently
+      # ignore the repo-root .tflint.hcl (and its AWS ruleset).
+      - name: TFLint
+        run: |
+          tflint --init --config="$GITHUB_WORKSPACE/.tflint.hcl"
+          tflint --recursive --config="$GITHUB_WORKSPACE/.tflint.hcl"
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # avoid rate limits on `tflint --init` plugin download
+      # Checkov is informational (soft_fail) in all three gates (pre-commit / make / CI) —
+      # remaining findings (WAF, Multi-AZ RDS, KMS CMKs, custom-domain HTTPS, access
+      # logging, ...) are deliberate cost/scope trade-offs for this dev-tier stack.
+      # See issue #111.
+      #
+      # Run directly (same as `make security`) instead of bridgecrewio/checkov-action:
+      # that action has no version input and hardcodes its own checkov release per action
+      # tag (v12 currently bundles 3.3.6, not this repo's pinned CHECKOV_VERSION) — #153, #272.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Checkov
+        run: |
+          pip install --quiet checkov==3.3.2
+          checkov -d infra --quiet --compact --soft-fail
+      # Trivy is BLOCKING (exit-code 1) in all three gates (pre-commit / make / CI);
+      # accepted findings are ignored explicitly in .trivyignore with reasons (#150).
+      # `version` pinned to match .devcontainer/Dockerfile's TRIVY_VERSION (#153, #272) —
+      # the action's own default (e.g. v0.70.0 as of trivy-action v0.36.0) drifts over time.
+      - name: Trivy config scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          trivyignores: .trivyignore
+          version: 'v0.71.2'

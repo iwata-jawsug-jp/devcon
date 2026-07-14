@@ -1,0 +1,25 @@
+# CODEOWNERS（#295）
+#
+# 変更の種類ごとにレビュー必須者を指定する。GitHub の仕様上、後に書いたルールほど優先される
+# ため、デフォルト（全ファイル）を先頭に、より具体的なパスを後ろに置く。
+#
+# copier でこのリポジトリから生成したプロジェクト（ADR-0011）では、`itouhi` の部分は
+# `tools/script/verify-scaffold.sh` と同じ置換ロジック（copier.yml の `_tasks`）で生成時に
+# `github_org` へ自動置換される。生成後、実際のレビュー体制に合わせて手動で調整すること
+# （個人開発の間は全ファイルが同一オーナーで実質的に意味を持たないが、複数人運用に移行した
+# 際にすぐ機能する状態を保つのが目的）。
+#
+# 有効化するには、リポジトリ設定でブランチ保護に "Require review from Code Owners" を
+# 追加する（このファイルを置くだけでは強制されない）。
+
+# デフォルトオーナー
+* @itouhi
+
+# インフラ（Terraform state・IAM 権限に影響するため特に慎重なレビューが必要）
+/infra/ @itouhi
+
+# CI/CD ワークフロー（reusable workflow の変更は他プロジェクトにも波及する、ADR-0012）
+/.github/workflows/ @itouhi
+
+# アーキテクチャ上の意思決定記録
+/docs/adr/ @itouhi

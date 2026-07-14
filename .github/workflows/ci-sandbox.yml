@@ -1,9 +1,13 @@
 name: CI (sandbox)
 
-# Sandbox CI: mirror of ci.yml's per-service gates, run on push to sandbox/**
-# unconditionally (no path filter, to avoid new-branch diff edge cases). Lets you
-# validate changes on a sandbox branch before exercising the sandbox CD apply.
-# Excluded from the public mirror (see release.md).
+# Sandbox CI: mirror of ci.yml's per-service gates, run on push to sandbox/** unconditionally
+# (no path filter, to avoid new-branch diff edge cases). Lets you validate changes on a sandbox
+# branch before exercising the sandbox CD apply. Excluded from the public mirror (see release.md).
+#
+# Shares the same reusable-*.yml job definitions as ci.yml (ADR-0012 / #295) so the two
+# workflows can no longer drift the way they had (#153 finding 7). Deliberately does NOT call
+# reusable-changes.yml — this file's whole point is to run every area unconditionally, so it
+# calls each reusable-<area>.yml directly instead of gating on path-filter output.
 on:
   push:
     branches: [sandbox/**]
@@ -17,118 +21,16 @@ concurrency:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/backend/python
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: app
-          POSTGRES_DB: app
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U app -d app"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      API_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
-      TEST_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-      - name: Ruff
-        run: uv run ruff check .
-      - name: Mypy
-        run: uv run mypy .
-      - name: Alembic migrate (validate migration on Postgres)
-        run: uv run alembic upgrade head
-      - name: Pytest
-        run: uv run pytest
+    uses: ./.github/workflows/reusable-backend.yml
 
   frontend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/frontend
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: services/frontend/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: ESLint
-        run: npm run lint
-      - name: Type-check (vue-tsc)
-        run: npx vue-tsc --noEmit
-      - name: Unit tests (vitest)
-        run: npx vitest run
-      - name: Build
-        run: npm run build
+    uses: ./.github/workflows/reusable-frontend.yml
 
   infra:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infra
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_version: '1.13.0'
-      - name: Terraform fmt
-        run: terraform fmt -check -recursive
-      - name: Terraform init (no backend)
-        run: terraform init -backend=false
-      - name: Terraform validate
-        run: terraform validate
-      - name: Validate bootstrap layer
-        working-directory: infra/bootstrap
-        run: |
-          terraform init -backend=false
-          terraform validate
-      - name: Set up TFLint
-        uses: terraform-linters/setup-tflint@v6
-      # Same command as `make tf-lint`: without --config, tflint would silently
-      # ignore the repo-root .tflint.hcl (and its AWS ruleset).
-      - name: TFLint
-        run: |
-          tflint --init --config="$GITHUB_WORKSPACE/.tflint.hcl"
-          tflint --recursive --config="$GITHUB_WORKSPACE/.tflint.hcl"
-        env:
-          GITHUB_TOKEN: ${{ github.token }} # avoid rate limits on `tflint --init` plugin download
-      # Checkov is informational (soft_fail) in all three gates (pre-commit / make / CI) —
-      # remaining findings (WAF, Multi-AZ RDS, KMS CMKs, custom-domain HTTPS, access
-      # logging, ...) are deliberate cost/scope trade-offs for this dev-tier stack.
-      # See issue #111.
-      - name: Checkov
-        uses: bridgecrewio/checkov-action@v12
-        with:
-          directory: infra
-          framework: terraform
-          quiet: true
-          soft_fail: true
-      # Trivy is BLOCKING (exit-code 1) in all three gates (pre-commit / make / CI);
-      # accepted findings are ignored explicitly in .trivyignore with reasons (#150).
-      - name: Trivy config scan
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: config
-          scan-ref: infra
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-          trivyignores: .trivyignore
+    uses: ./.github/workflows/reusable-infra.yml
+
+  scripts:
+    uses: ./.github/workflows/reusable-scripts.yml
+
+  scaffold:
+    uses: ./.github/workflows/reusable-scaffold.yml

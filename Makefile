@@ -11,7 +11,7 @@ FRONTEND_DIR  := services/frontend
         tf-init tf-fmt tf-validate tf-plan tf-lint check-iam-policies \
         backend-setup backend-dev backend-test backend-lint \
         frontend-setup frontend-dev frontend-build frontend-lint frontend-test frontend-test-e2e \
-        metrics-dora-lint metrics-dora-test check-oauth-scopes
+        metrics-dora-lint metrics-dora-test check-oauth-scopes scaffold-verify
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -171,3 +171,6 @@ metrics-dora-test: ## Run the DORA metrics script's unit tests
 
 check-oauth-scopes: ## Cross-check infra/auth.tf resource-server scopes against oidcConfig.ts's login scope list (#438)
 	python3 .github/scripts/check_oauth_scopes.py
+
+scaffold-verify: ## Generate a project from copier.yml and verify it isn't broken (#294; needs copier on PATH)
+	./tools/script/verify-scaffold.sh

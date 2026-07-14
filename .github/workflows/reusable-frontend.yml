@@ -1,0 +1,73 @@
+name: reusable-frontend
+
+# ADR-0012 / #295: ci.yml と ci-sandbox.yml が共有する frontend 品質ゲート。単一ソースにすることで
+# 両ワークフロー間の drift（#153 指摘7 — ci-sandbox.yml は DESIGN.md lint / bundle budget /
+# Lighthouse CI / E2E が丸ごと欠落していた）を構造的に防ぐ。
+
+on:
+  workflow_call:
+    inputs:
+      should_run:
+        description: >-
+          Whether to actually execute this gate (vs. report a skipped check).
+          Keeping the job always invoked (rather than gating with `if:` on the
+          caller side) keeps the status-check context name stable regardless
+          of skip state — see ADR-0012.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: inputs.should_run
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: ESLint
+        run: npm run lint
+      - name: Type-check (vue-tsc)
+        run: npx vue-tsc --noEmit
+      - name: DESIGN.md lint (design tokens)
+        run: npm run design:lint
+      - name: Unit tests (vitest, with coverage gate)
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Bundle size budget
+        run: npm run check:bundle-budget
+      - name: Lighthouse CI (perf/a11y budget)
+        run: npx lhci autorun
+        env:
+          LHCI_BUILD_CONTEXT__CURRENT_HASH: ${{ github.sha }}
+      - name: Get installed Playwright version
+        id: playwright-version
+        run: |
+          echo "version=$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browser binaries
+        id: playwright-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright OS dependencies only (browsers cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - name: E2E (Playwright, incl. a11y checks)
+        run: npm run test:e2e

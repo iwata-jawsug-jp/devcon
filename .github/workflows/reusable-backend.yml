@@ -1,0 +1,63 @@
+name: reusable-backend
+
+# ADR-0012 / #295: ci.yml と ci-sandbox.yml が共有する backend 品質ゲート。単一ソースにすることで
+# 両ワークフロー間の drift（#153 指摘7）を構造的に防ぐ。
+
+on:
+  workflow_call:
+    inputs:
+      should_run:
+        description: >-
+          Whether to actually execute this gate (vs. report a skipped check).
+          Keeping the job always invoked (rather than gating with `if:` on the
+          caller side) keeps the status-check context name stable at
+          "backend / check" regardless of skip state — see ADR-0012.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: inputs.should_run
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend/python
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      API_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
+      TEST_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Ruff
+        run: uv run ruff check .
+      # `.` here must cover the same files as pyproject.toml's [tool.mypy] `files` list
+      # (make backend-lint runs bare `mypy`, which uses that config) — #153, #269.
+      - name: Mypy
+        run: uv run mypy .
+      - name: Alembic migrate (validate migration on Postgres)
+        run: uv run alembic upgrade head
+      - name: Pytest
+        run: uv run pytest

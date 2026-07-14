@@ -1,6 +1,17 @@
 name: CI
 
-# Mirrors the Makefile / pre-commit gates so "green locally" == "green in CI".
+# Mirrors the Makefile / pre-commit gates so "green locally" == "green in CI". Per-area gate
+# logic lives in reusable-*.yml (workflow_call, ADR-0012 / #295) so this file, ci-sandbox.yml,
+# and downstream consumers all share a single source instead of copy-drifting (#153 finding 7).
+#
+# NOTE: calling a job via `uses:` changes its status-check context name to
+# "<this job's name> / check" (verified empirically — see ADR-0012). Each area job below is
+# ALWAYS invoked (no `if:` on the caller side); the skip decision is passed in as the
+# `should_run` input instead, so the reported check name stays "<area> / check" whether the
+# job actually runs or is skipped internally. Gating with `if:` here would instead make GitHub
+# report the bare "<area>" (no " / check" suffix) when skipped — a different context string
+# that the main-ci-required ruleset would never see, permanently blocking merges for any PR
+# where that area is legitimately skipped (discovered the hard way while rolling this out).
 on:
   pull_request:
   push:
@@ -17,214 +28,40 @@ concurrency:
 jobs:
   # Detect which areas changed so per-service jobs only run when relevant.
   changes:
-    runs-on: ubuntu-latest
-    outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      infra: ${{ steps.filter.outputs.infra }}
-      scripts: ${{ steps.filter.outputs.scripts }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dorny/paths-filter@v4
-        id: filter
-        with:
-          filters: |
-            backend:
-              - 'services/backend/python/**'
-              - '.github/workflows/ci.yml'
-            frontend:
-              - 'services/frontend/**'
-              - '.github/workflows/ci.yml'
-            infra:
-              - 'infra/**'
-              - '.github/workflows/ci.yml'
-            scripts:
-              - '.github/scripts/**'
-              - '.github/workflows/ci.yml'
-              # check_oauth_scopes.py (#438) cross-checks these two files against each
-              # other, so the job must also trigger when only one of them changes.
-              - 'infra/auth.tf'
-              - 'services/frontend/src/auth/oidcConfig.ts'
+    uses: ./.github/workflows/reusable-changes.yml
 
   # Per-area kill switches: repository variables BACKEND_ENABLED / FRONTEND_ENABLED /
   # INFRA_ENABLED gate both CI and CD jobs for that area. Compared with `!= 'false'`
   # so an unset variable (e.g. on the public mirror / forks) defaults to enabled.
   backend:
     needs: changes
-    if: ${{ needs.changes.outputs.backend == 'true' && vars.BACKEND_ENABLED != 'false' }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/backend/python
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: app
-          POSTGRES_DB: app
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U app -d app"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      API_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
-      TEST_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-      - name: Ruff
-        run: uv run ruff check .
-      # `.` here must cover the same files as pyproject.toml's [tool.mypy] `files` list
-      # (make backend-lint runs bare `mypy`, which uses that config) — #153, #269.
-      - name: Mypy
-        run: uv run mypy .
-      - name: Alembic migrate (validate migration on Postgres)
-        run: uv run alembic upgrade head
-      - name: Pytest
-        run: uv run pytest
+    uses: ./.github/workflows/reusable-backend.yml
+    with:
+      should_run: ${{ needs.changes.outputs.backend == 'true' && vars.BACKEND_ENABLED != 'false' }}
 
   frontend:
     needs: changes
-    if: ${{ needs.changes.outputs.frontend == 'true' && vars.FRONTEND_ENABLED != 'false' }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/frontend
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: services/frontend/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: ESLint
-        run: npm run lint
-      - name: Type-check (vue-tsc)
-        run: npx vue-tsc --noEmit
-      - name: DESIGN.md lint (design tokens)
-        run: npm run design:lint
-      - name: Unit tests (vitest, with coverage gate)
-        run: npm test
-      - name: Build
-        run: npm run build
-      - name: Bundle size budget
-        run: npm run check:bundle-budget
-      - name: Lighthouse CI (perf/a11y budget)
-        run: npx lhci autorun
-        env:
-          LHCI_BUILD_CONTEXT__CURRENT_HASH: ${{ github.sha }}
-      - name: Get installed Playwright version
-        id: playwright-version
-        run: |
-          echo "version=$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browser binaries
-        id: playwright-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
-      - name: Install Playwright OS dependencies only (browsers cache hit)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
-      - name: E2E (Playwright, incl. a11y checks)
-        run: npm run test:e2e
+    uses: ./.github/workflows/reusable-frontend.yml
+    with:
+      should_run: ${{ needs.changes.outputs.frontend == 'true' && vars.FRONTEND_ENABLED != 'false' }}
 
   infra:
     needs: changes
-    if: ${{ needs.changes.outputs.infra == 'true' && vars.INFRA_ENABLED != 'false' }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infra
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_version: '1.13.0'
-      - name: Terraform fmt
-        run: terraform fmt -check -recursive
-      - name: Terraform init (no backend)
-        run: terraform init -backend=false
-      - name: Terraform validate
-        run: terraform validate
-      - name: Validate bootstrap layer
-        working-directory: infra/bootstrap
-        run: |
-          terraform init -backend=false
-          terraform validate
-      # Version pinned to match .devcontainer/Dockerfile's TFLINT_VERSION — the single
-      # source for this repo's security/lint tool versions (#153, #272).
-      - name: Set up TFLint
-        uses: terraform-linters/setup-tflint@v6
-        with:
-          tflint_version: 'v0.63.1'
-      # Same command as `make tf-lint`: without --config, tflint would silently
-      # ignore the repo-root .tflint.hcl (and its AWS ruleset).
-      - name: TFLint
-        run: |
-          tflint --init --config="$GITHUB_WORKSPACE/.tflint.hcl"
-          tflint --recursive --config="$GITHUB_WORKSPACE/.tflint.hcl"
-        env:
-          GITHUB_TOKEN: ${{ github.token }} # avoid rate limits on `tflint --init` plugin download
-      # Checkov is informational (soft_fail) in all three gates (pre-commit / make / CI) —
-      # remaining findings (WAF, Multi-AZ RDS, KMS CMKs, custom-domain HTTPS, access
-      # logging, ...) are deliberate cost/scope trade-offs for this dev-tier stack.
-      # See issue #111.
-      #
-      # Run directly (same as `make security`) instead of bridgecrewio/checkov-action:
-      # that action has no version input and hardcodes its own checkov release per action
-      # tag (v12 currently bundles 3.3.6, not this repo's pinned CHECKOV_VERSION) — #153, #272.
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.14'
-      - name: Checkov
-        run: |
-          pip install --quiet checkov==3.3.2
-          checkov -d infra --quiet --compact --soft-fail
-      # Trivy is BLOCKING (exit-code 1) in all three gates (pre-commit / make / CI);
-      # accepted findings are ignored explicitly in .trivyignore with reasons (#150).
-      # `version` pinned to match .devcontainer/Dockerfile's TRIVY_VERSION (#153, #272) —
-      # the action's own default (e.g. v0.70.0 as of trivy-action v0.36.0) drifts over time.
-      - name: Trivy config scan
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: config
-          scan-ref: infra
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-          trivyignores: .trivyignore
-          version: 'v0.71.2'
+    uses: ./.github/workflows/reusable-infra.yml
+    with:
+      should_run: ${{ needs.changes.outputs.infra == 'true' && vars.INFRA_ENABLED != 'false' }}
 
   scripts:
     needs: changes
-    if: ${{ needs.changes.outputs.scripts == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.14'
-      - name: Ruff (lint + format check)
-        run: make metrics-dora-lint
-      - name: Unit tests (stdlib-only, no deps to install)
-        run: make metrics-dora-test
-      - name: OAuth scope check (auth.tf vs oidcConfig.ts)
-        run: make check-oauth-scopes
+    uses: ./.github/workflows/reusable-scripts.yml
+    with:
+      should_run: ${{ needs.changes.outputs.scripts == 'true' }}
+
+  # #294: copier.yml から実際に生成し、生成物が壊れていないことを検証する（置換漏れ・
+  # terraform validate・backend lint・frontend lint/test）。エリアスイッチの対象外
+  # （docs/ci-cd-area-switches.md の「対象外」節。scripts ジョブと同じ扱い）。
+  scaffold:
+    needs: changes
+    uses: ./.github/workflows/reusable-scaffold.yml
+    with:
+      should_run: ${{ needs.changes.outputs.scaffold == 'true' }}

@@ -1,0 +1,48 @@
+name: reusable-scaffold
+
+# ADR-0012 / #295: ci.yml と ci-sandbox.yml が共有する scaffold 品質ゲート（#294）。copier.yml から
+# 実際に生成し、生成物が壊れていないことを検証する。
+
+on:
+  workflow_call:
+    inputs:
+      should_run:
+        description: >-
+          Whether to actually execute this gate (vs. report a skipped check).
+          Keeping the job always invoked (rather than gating with `if:` on the
+          caller side) keeps the status-check context name stable regardless
+          of skip state — see ADR-0012.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: inputs.should_run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/frontend/package-lock.json
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: '1.13.0'
+      # Version pinned to match .devcontainer/Dockerfile's COPIER_VERSION (single source, #109).
+      - name: Install copier
+        run: |
+          uv tool install "copier==9.17.0"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Verify scaffold generation
+        run: make scaffold-verify

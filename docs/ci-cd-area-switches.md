@@ -21,8 +21,8 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 | `FRONTEND_ENABLED` | `ci.yml` の frontend / `cd-app.yml` の frontend                         |
 | `INFRA_ENABLED`    | `ci.yml` の infra / `cd-infra.yml` の plan・apply（手動 dispatch 含む） |
 
-対象外: `ci.yml` の `scripts` ジョブ（どのエリアにも属さない）、sandbox 系
-ワークフロー（`ci-sandbox.yml` / `cd-app-sandbox.yml` / `cd-infra-sandbox.yml`）。
+対象外: `ci.yml` の `scripts` ジョブ・`scaffold` ジョブ（#294。どのエリアにも属さない）、
+sandbox 系ワークフロー（`ci-sandbox.yml` / `cd-app-sandbox.yml` / `cd-infra-sandbox.yml`）。
 
 ## 前提
 

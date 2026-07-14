@@ -328,10 +328,19 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 ### ブランチ保護（GitHub Rulesets）
 
 `main`（`~DEFAULT_BRANCH`）に `main-ci-required` ルールセットを設定している
-（`required_status_checks`: `changes`/`backend`/`frontend`/`infra`/`scripts`、`ci.yml` の
-5ジョブすべて）。エリア別スイッチで skip されたジョブは「合格」扱いなので、該当エリアの
-変更が無い PR は引き続き skip でマージできる。変更があるのに赤い PR はマージボタンが
-物理的に押せなくなる。
+（`required_status_checks`: `changes / check`・`backend / check`・`frontend / check`・
+`infra / check`・`scripts / check`、`ci.yml` の5ジョブすべて）。エリア別スイッチで skip
+されたジョブは「合格」扱いなので、該当エリアの変更が無い PR は引き続き skip でマージできる。
+変更があるのに赤い PR はマージボタンが物理的に押せなくなる。
+
+> **チェック名に `/ check` が付く理由（#295, ADR-0012）:** `ci.yml` の各ジョブは
+> `workflow_call` で `reusable-<area>.yml` を呼び出す構成になっている
+> （[ADR-0012](adr/0012-reusable-workflow-in-repo-tag-versioned.md)）。呼び出し側ジョブが
+> 内部で `uses:` する構成では、GitHub のステータスチェック名が必ず `<呼び出し側ジョブ名> /
+<reusable workflow 内のジョブ名>` になる（実地検証済み）。各 `reusable-*.yml` の唯一の
+> ジョブを `check` という名前に統一しているため、結果として `changes / check` のような
+> 名前になる。**素の `changes` ではなく `changes / check` を required status check として
+> 登録すること。**
 
 「CI が green になるまで issue は完了ではない」（[issues.md](issues.md)）という規律は、
 これでドキュメント・AI エージェントの運用だけでなく GitHub 側でも強制される
@@ -344,21 +353,41 @@ gh api -X POST repos/<org>/<repo>/rulesets \
   -f name='main-ci-required' -f target='branch' -f enforcement='active' \
   -F 'conditions[ref_name][include][]=~DEFAULT_BRANCH' \
   -F 'rules[][type]=required_status_checks' \
-  -F 'rules[][parameters][required_status_checks][][context]=changes' \
-  -F 'rules[][parameters][required_status_checks][][context]=backend' \
-  -F 'rules[][parameters][required_status_checks][][context]=frontend' \
-  -F 'rules[][parameters][required_status_checks][][context]=infra' \
-  -F 'rules[][parameters][required_status_checks][][context]=scripts'
+  -F 'rules[][parameters][required_status_checks][][context]=changes / check' \
+  -F 'rules[][parameters][required_status_checks][][context]=backend / check' \
+  -F 'rules[][parameters][required_status_checks][][context]=frontend / check' \
+  -F 'rules[][parameters][required_status_checks][][context]=infra / check' \
+  -F 'rules[][parameters][required_status_checks][][context]=scripts / check'
+```
+
+既存のルールセットを更新する場合（`main-ci-required` は既に存在するはずなので、通常は
+`POST .../rulesets` ではなく `PUT .../rulesets/<id>` で必須チェックを差し替える）:
+
+```bash
+rs_id=$(gh api repos/<org>/<repo>/rulesets --jq '.[] | select(.name=="main-ci-required") | .id')
+gh api -X PUT "repos/<org>/<repo>/rulesets/$rs_id" \
+  -f name='main-ci-required' -f target='branch' -f enforcement='active' \
+  -F 'conditions[ref_name][include][]=~DEFAULT_BRANCH' \
+  -F 'rules[][type]=required_status_checks' \
+  -F 'rules[][parameters][required_status_checks][][context]=changes / check' \
+  -F 'rules[][parameters][required_status_checks][][context]=backend / check' \
+  -F 'rules[][parameters][required_status_checks][][context]=frontend / check' \
+  -F 'rules[][parameters][required_status_checks][][context]=infra / check' \
+  -F 'rules[][parameters][required_status_checks][][context]=scripts / check'
 ```
 
 設定できない環境では、**Settings → Rules → Rulesets → New ruleset** で名前を
 `main-ci-required`（`make check-setup` が参照する名前と一致させる）とし、対象を **デフォルト
-ブランチ**（`~DEFAULT_BRANCH`）にしたうえで `Require status checks to pass` に `changes` /
-`backend` / `frontend` / `infra` / `scripts`（`ci.yml` の5ジョブ）を追加する。
+ブランチ**（`~DEFAULT_BRANCH`）にしたうえで `Require status checks to pass` に `changes / check` /
+`backend / check` / `frontend / check` / `infra / check` / `scripts / check`（`ci.yml` の
+5ジョブ）を追加する。
 
 ![main-ci-required ルールセット: 名前・Enforcement status・対象ブランチ（Default）](images/main-ci-required_rulesets_image_01.png)
 
 ![main-ci-required ルールセット: Require status checks to pass で5ジョブを必須チェックに追加](images/main-ci-required_rulesets_image_02.png)
+
+> 上記スクリーンショットは reusable workflow 化（#295）前の `changes`/`backend`/... 表記の
+> ままで、`/ check` サフィックスが付いた最新の状態を反映していない。差し替えは今後の課題。
 
 sandbox 隔離用の `sandbox-isolation`（`guard` 必須）は別ルールセットで、
 [sandbox.md](sandbox.md) を参照。

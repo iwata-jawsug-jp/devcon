@@ -12,6 +12,7 @@ ARG TFLINT_VERSION=0.63.1
 ARG TRIVY_VERSION=0.71.2
 ARG CHECKOV_VERSION=3.3.2
 ARG UV_VERSION=0.11.24
+ARG COPIER_VERSION=9.17.0
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -99,3 +100,6 @@ RUN mkdir -p /home/vscode/.npm-global \
 
 # uv (Astral) — vscode ユーザーのローカルにインストール
 RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+
+# copier（#294 スキャフォールドCLI。make scaffold-verify / ci.yml の scaffold ジョブで使う）
+RUN /home/vscode/.local/bin/uv tool install "copier==${COPIER_VERSION}"

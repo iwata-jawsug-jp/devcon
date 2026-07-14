@@ -1,0 +1,60 @@
+name: reusable-changes
+
+# ADR-0012 / #295: ci.yml と ci-sandbox.yml が共有する per-area 品質ゲート。この workflow は
+# 「何が変わったか」の判定のみを担う（実行するかどうかの判断は呼び出し側に残す）。
+# ワークフローファイル自体の変更は area を問わず保守的に「変わった」扱いにする
+# （.github/workflows/** を全 area 共通のトリガーに含める）。
+
+on:
+  workflow_call:
+    outputs:
+      backend:
+        value: ${{ jobs.check.outputs.backend }}
+      frontend:
+        value: ${{ jobs.check.outputs.frontend }}
+      infra:
+        value: ${{ jobs.check.outputs.infra }}
+      scripts:
+        value: ${{ jobs.check.outputs.scripts }}
+      scaffold:
+        value: ${{ jobs.check.outputs.scaffold }}
+
+permissions:
+  contents: read
+  pull-requests: read # dorny/paths-filter reads PR changed files via the GitHub API
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      infra: ${{ steps.filter.outputs.infra }}
+      scripts: ${{ steps.filter.outputs.scripts }}
+      scaffold: ${{ steps.filter.outputs.scaffold }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'services/backend/python/**'
+              - '.github/workflows/**'
+            frontend:
+              - 'services/frontend/**'
+              - '.github/workflows/**'
+            infra:
+              - 'infra/**'
+              - '.github/workflows/**'
+            scripts:
+              - '.github/scripts/**'
+              - '.github/workflows/**'
+              # check_oauth_scopes.py (#438) cross-checks these two files against each
+              # other, so the job must also trigger when only one of them changes.
+              - 'infra/auth.tf'
+              - 'services/frontend/src/auth/oidcConfig.ts'
+            scaffold:
+              - 'copier.yml'
+              - 'tools/script/verify-scaffold.sh'
+              - '.github/workflows/**'

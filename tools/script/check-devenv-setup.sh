@@ -186,7 +186,9 @@ fi
 # （存在するだけでなく enforcement=active・target=branch・対象ブランチ・必須チェックまで見る）。
 section "GitHub Rulesets（ブランチ保護）"
 
-# check_ruleset <name> <期待する対象ブランチ (ref_name include)> <期待する必須チェック(空白区切り)> <doc参照先> <ok時の説明>
+# check_ruleset <name> <期待する対象ブランチ (ref_name include)> <期待する必須チェック(|区切り)> <doc参照先> <ok時の説明>
+# 必須チェック名はスペースを含みうる（reusable workflow 呼び出しによる「<job> / check」形式、
+# #295 / ADR-0012）ため、空白区切りではなく `|` 区切りで受け取る。
 check_ruleset() {
   local name="$1" expected_ref="$2" expected_contexts="$3" doc_hint="$4" label="$5"
 
@@ -207,9 +209,10 @@ check_ruleset() {
   [[ "$target" == "branch" ]] || problems="$problems target=${target:-取得失敗}（要 branch）"
   grep -qx "$expected_ref" <<<"$ref_includes" || problems="$problems 対象ブランチに $expected_ref が無い"
 
-  local missing=""
-  for c in $expected_contexts; do
-    grep -qx "$c" <<<"$contexts" || missing="$missing $c"
+  local missing="" c
+  IFS='|' read -ra expected_contexts_arr <<<"$expected_contexts"
+  for c in "${expected_contexts_arr[@]}"; do
+    grep -qx "$c" <<<"$contexts" || missing="$missing [$c]"
   done
   [[ -z "$missing" ]] || problems="$problems 必須チェック不足:$missing"
 
@@ -228,7 +231,8 @@ elif ! gh api "repos/$repo_slug/rulesets" >/dev/null 2>&1; then
 else
   ruleset_names="$(gh api "repos/$repo_slug/rulesets" --jq '.[].name' 2>/dev/null)"
 
-  check_ruleset "main-ci-required" "~DEFAULT_BRANCH" "changes backend frontend infra scripts" \
+  check_ruleset "main-ci-required" "~DEFAULT_BRANCH" \
+    "changes / check|backend / check|frontend / check|infra / check|scripts / check" \
     "docs/infrastructure.md『ブランチ保護（GitHub Rulesets）』" "main の必須ステータスチェック"
 
   # guard は pull_request イベントでのみ起動するため、対象は ~ALL ではなく

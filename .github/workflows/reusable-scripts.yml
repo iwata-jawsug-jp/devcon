@@ -1,0 +1,37 @@
+name: reusable-scripts
+
+# ADR-0012 / #295: ci.yml と ci-sandbox.yml が共有する scripts 品質ゲート（DORA計測スクリプト・
+# OAuth scope クロスチェック）。ci-sandbox.yml にはこのジョブ自体が存在しなかった（drift）。
+
+on:
+  workflow_call:
+    inputs:
+      should_run:
+        description: >-
+          Whether to actually execute this gate (vs. report a skipped check).
+          Keeping the job always invoked (rather than gating with `if:` on the
+          caller side) keeps the status-check context name stable regardless
+          of skip state — see ADR-0012.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: inputs.should_run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Ruff (lint + format check)
+        run: make metrics-dora-lint
+      - name: Unit tests (stdlib-only, no deps to install)
+        run: make metrics-dora-test
+      - name: OAuth scope check (auth.tf vs oidcConfig.ts)
+        run: make check-oauth-scopes

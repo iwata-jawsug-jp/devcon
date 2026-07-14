@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# copier.yml から実際にプロジェクトを生成し、生成物が壊れていないことを検証する。
+# #294「生成物の検証CI」。ローカル: make scaffold-verify / CI: ci.yml の scaffold ジョブ。
+#
+# スコープ: テンプレート化の機構（除外リスト・sed置換）が壊れていないことの確認に絞る。
+# backend の DB 統合テスト・frontend の E2E・infra のセキュリティスキャンは、生成物固有の
+# リスクではなく既存の backend/frontend/infra ジョブが常時カバーしているため、ここでは
+# 重複実行しない（生成物にだけ起こり得る問題 = 文字列置換による構文破壊・構成崩れに絞る）。
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+GEN="$WORK/generated"
+
+TEST_PROJECT_NAME="${TEST_PROJECT_NAME:-scaffold-verify}"
+TEST_GITHUB_ORG="${TEST_GITHUB_ORG:-example-org}"
+TEST_AWS_REGION="${TEST_AWS_REGION:-us-east-1}"
+
+echo "[scaffold-verify] copier copy (project_name=$TEST_PROJECT_NAME) ..."
+copier copy \
+  --vcs-ref=HEAD \
+  --data "project_name=$TEST_PROJECT_NAME" \
+  --data "github_org=$TEST_GITHUB_ORG" \
+  --data "github_repo=$TEST_PROJECT_NAME" \
+  --data "aws_region=$TEST_AWS_REGION" \
+  --defaults --trust \
+  "$REPO_ROOT" "$GEN"
+
+echo "[scaffold-verify] 置換漏れチェック（devcon / itouhi / ap-northeast-1 の残存禁止）"
+if grep -rl -e 'devcon' -e 'itouhi' -e 'ap-northeast-1' "$GEN" --exclude-dir=.git; then
+  echo "[scaffold-verify] NG: 未置換の文字列が上記ファイルに残っています" >&2
+  exit 1
+fi
+echo "[scaffold-verify] OK"
+
+echo "[scaffold-verify] terraform fmt/validate (infra, infra/bootstrap) ..."
+for layer in infra infra/bootstrap; do
+  (
+    cd "$GEN/$layer"
+    terraform fmt -check -recursive
+    terraform init -backend=false -input=false >/dev/null
+    terraform validate
+  )
+done
+echo "[scaffold-verify] OK"
+
+echo "[scaffold-verify] backend: uv sync + ruff + mypy ..."
+(
+  cd "$GEN/services/backend/python"
+  uv sync --all-extras --dev --quiet
+  uv run ruff check .
+  uv run mypy .
+)
+echo "[scaffold-verify] OK"
+
+echo "[scaffold-verify] frontend: npm ci + lint + type-check + unit test ..."
+(
+  cd "$GEN/services/frontend"
+  npm ci --silent
+  npm run lint
+  npx vue-tsc --noEmit
+  npm test
+)
+echo "[scaffold-verify] OK"
+
+echo "[scaffold-verify] JSON構文チェック（devcontainer.json / package.json / tsconfig*.json）..."
+python3 - "$GEN" <<'PYEOF'
+import json
+import sys
+from pathlib import Path
+
+gen = Path(sys.argv[1])
+targets = [
+    gen / ".devcontainer/devcontainer.json",
+    gen / "services/frontend/package.json",
+]
+targets += sorted((gen / "services/frontend").glob("tsconfig*.json"))
+for p in targets:
+    json.loads(p.read_text())
+print(f"[scaffold-verify] OK ({len(targets)} files)")
+PYEOF
+
+echo "[scaffold-verify] 全チェック green"

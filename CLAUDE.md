@@ -82,6 +82,12 @@ the frontend's types are generated from it (`make gen-types`) — never hand-wri
 - `docs/sandbox.md` — `sandbox/*` disposable real-AWS verification; a dead end, never merged into a non-sandbox branch.
 - `docs/frontend-frameworks-demo.md` — (planned) multi-framework frontend comparison demo on a
   dedicated sandbox branch, `services/frontend/` (production Vue) untouched.
+- `docs/scaffold-cli.md` — copier-based scaffold CLI (#294): hardcoded-value inventory,
+  template variable design, generation-verification CI design notes. User-facing generation
+  steps live in `README.md`; see `adr/0010` (tool choice) and `adr/0011` (template lives in
+  this repo, not a separate template repo).
+- `docs/org-rulesets.md` — (design only, #295) org-level GitHub Ruleset standard for
+  `iwata-jawsug-jp`; not yet applied live, needs an explicit go-ahead before running.
 - `docs/ai-instructions.md` — keeping these rules in sync with the Copilot
   `.github/instructions/*` mirror (change `docs/` + `CLAUDE.md` + Copilot files together).
 - `docs/adr/` — Architecture Decision Records: record the "why" behind infra/architecture
