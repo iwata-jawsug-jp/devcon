@@ -1,0 +1,92 @@
+name: Platform Maturity Scorecard
+
+# 10軸の成熟度スコアカード(#297)。評価基準: docs/metrics/scorecard-criteria.md
+# workflow_dispatch only -- metrics-dora.yml と同じ理由(この monorepo は学習・デモ目的で
+# 実トラフィックがなく、cron で定期実行しても意味のあるデータが貯まらない)。
+# 本番運用のアプリで再有効化する手順は docs/infrastructure.md 参照。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write # to push the docs/metrics/scorecard/ snapshot branch (not main directly)
+  actions: read # to list cd-app.yml/cd-app-sandbox.yml/cd-sandbox-cycle.yml workflow runs (live-smoke recency check, #376)
+
+concurrency:
+  group: metrics-scorecard
+  cancel-in-progress: false
+
+jobs:
+  scorecard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Compute scorecard
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .github/scripts/scorecard_metrics.py | tee scorecard.md
+
+      - name: Write job summary
+        run: |
+          {
+            echo "### Platform maturity scorecard: $(date -u +%F)"
+            echo
+            cat scorecard.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Append monthly snapshot
+        id: snapshot
+        run: |
+          set -euo pipefail
+          month="$(date -u +%Y-%m)"
+          mkdir -p docs/metrics/scorecard
+          file="docs/metrics/scorecard/${month}.md"
+          if [ ! -f "$file" ]; then
+            printf '# プラットフォーム成熟度スコアカード スナップショット: %s\n' "$month" > "$file"
+            printf '\n採点基準: [docs/metrics/scorecard-criteria.md](../scorecard-criteria.md)。\n' >> "$file"
+            printf 'メタデータ(宣言スコア): [catalog.json](catalog.json)。\n' >> "$file"
+          fi
+          {
+            printf '\n## %s (recorded %s)\n\n' "$(date -u +%F)" "$(date -u +%FT%TZ)"
+            cat scorecard.md
+          } >> "$file"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      # main requires the "guard" status check even on direct pushes (repo ruleset),
+      # so the snapshot has to land via a PR like everything else, not `git push` to main.
+      - name: Commit snapshot to a branch
+        id: commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${{ steps.snapshot.outputs.file }}"
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          branch="chore/scorecard-snapshot-$(date -u +%Y-%m-%d)-${{ github.run_id }}"
+          git checkout -b "$branch"
+          git commit -m "chore(metrics): platform maturity scorecard snapshot $(date -u +%F)"
+          git push -u origin "$branch"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      # This repo has "Allow GitHub Actions to create and approve pull requests"
+      # disabled (deliberately, per its no-standing-privilege security posture), so
+      # `gh pr create` here would fail. Push the branch and hand off a one-click
+      # compare link instead of a PAT that would bypass that control.
+      - name: Print snapshot PR link
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          compare_url="${{ github.server_url }}/${{ github.repository }}/compare/main...${{ steps.commit.outputs.branch }}?expand=1"
+          {
+            echo
+            echo "Snapshot branch pushed: \`${{ steps.commit.outputs.branch }}\`."
+            echo "Open a PR to land it on main: $compare_url"
+          } >> "$GITHUB_STEP_SUMMARY"

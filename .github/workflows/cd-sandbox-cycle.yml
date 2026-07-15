@@ -198,87 +198,34 @@ jobs:
   #    comment on). continue-on-error so teardown still runs on smoke failure.
   smoke-test:
     needs: [deploy-api, frontend]
-    runs-on: ubuntu-latest
     permissions:
       id-token: write # OIDC, for the disposable Cognito user create/delete
-      issues: write # to file an issue on failure
       contents: read
-    defaults:
-      run:
-        working-directory: services/frontend
+    uses: ./.github/workflows/reusable-live-smoke.yml
+    with:
+      base_url: ${{ vars.SANDBOX_CLOUDFRONT_DOMAIN_NAME != '' && format('https://{0}', vars.SANDBOX_CLOUDFRONT_DOMAIN_NAME) || '' }}
+      user_pool_id: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
+      role_arn: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      # true (alerting, not blocking, per the Count -> Block note above): a
+      # failure here must not stop teardown from running (`needs: smoke-test`
+      # + `if: always()` below).
+      continue_on_error: true
+      artifact_name_prefix: sandbox-cycle-live-smoke-report
+      unconfigured_hint: docs/sandbox.md
+
+  # File an issue on failure (alerting only -- unlike cd-app.yml's
+  # smoke-test-gate, this does not fail the check; teardown must still run).
+  file-issue-on-smoke-failure:
+    needs: smoke-test
+    if: needs.smoke-test.outputs.outcome == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
     steps:
-      - uses: actions/checkout@v7
-      - name: Configure AWS credentials (deploy role)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Create a disposable Cognito test user
-        id: user
-        env:
-          POOL_ID: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
-        run: |
-          set -euo pipefail
-          email="e2e-${{ github.run_id }}-${{ github.run_attempt }}@example.com"
-          password="$(openssl rand -base64 24)Aa1!"
-          echo "::add-mask::$password"
-
-          aws cognito-idp admin-create-user \
-            --user-pool-id "$POOL_ID" --username "$email" \
-            --user-attributes Name=email,Value="$email" Name=email_verified,Value=true \
-            --message-action SUPPRESS
-          aws cognito-idp admin-set-user-password \
-            --user-pool-id "$POOL_ID" --username "$email" --password "$password" --permanent
-
-          echo "email=$email" >> "$GITHUB_OUTPUT"
-          echo "password=$password" >> "$GITHUB_OUTPUT"
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: services/frontend/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-      - name: Run live-smoke test
-        id: smoke
-        continue-on-error: true
-        env:
-          SMOKE_BASE_URL: https://${{ vars.SANDBOX_CLOUDFRONT_DOMAIN_NAME }}
-          SMOKE_TEST_EMAIL: ${{ steps.user.outputs.email }}
-          SMOKE_TEST_PASSWORD: ${{ steps.user.outputs.password }}
-          PLAYWRIGHT_JSON_OUTPUT_NAME: live-smoke-results.json
-        run: npx playwright test --project=live-smoke --reporter=list,json
-      - name: Find which step failed (S1/S2/S3)
-        if: always() && steps.smoke.outcome == 'failure'
-        id: parse
-        run: |
-          failed_step=$(jq -r '
-            ([.. | objects | select(has("error") and .error != null and has("title"))] | .[0].title) //
-            (if ([.. | objects | select(has("error") and .error != null)] | length) > 0
-              then "S1: login (accessToken fixture)" else empty end) //
-            "unknown step"
-          ' live-smoke-results.json 2>/dev/null || echo "unknown step")
-          [ -n "$failed_step" ] || failed_step="unknown step"
-          echo "failed_step=$failed_step" >> "$GITHUB_OUTPUT"
-      - name: Upload live-smoke artifacts (trace/screenshot/video)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sandbox-cycle-live-smoke-report-${{ github.run_id }}
-          path: |
-            services/frontend/playwright-report/
-            services/frontend/test-results/
-            services/frontend/live-smoke-results.json
-          retention-days: 14
-          if-no-files-found: ignore
       - name: File an issue on failure
-        if: steps.smoke.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
-          FAILED_STEP: ${{ steps.parse.outputs.failed_step }}
+          FAILED_STEP: ${{ needs.smoke-test.outputs.failed_step }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh issue create \
@@ -298,14 +245,6 @@ jobs:
           運用に従い、直す前にこのissueへ原因を記録してください。
           BODY
           )"
-      - name: Delete the disposable Cognito test user
-        if: always()
-        env:
-          POOL_ID: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
-          EMAIL: ${{ steps.user.outputs.email }}
-        run: |
-          aws cognito-idp admin-delete-user --user-pool-id "$POOL_ID" --username "$EMAIL" \
-            || echo "::warning::Failed to delete disposable test user $EMAIL — manual cleanup may be needed."
 
   # 4) Tear down everything this run created, so the cycle actually stays
   #    ephemeral (docs/sandbox.md: sandbox is meant to be disposable). Runs

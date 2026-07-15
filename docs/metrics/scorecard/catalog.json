@@ -1,0 +1,49 @@
+{
+  "$comment": "プラットフォーム成熟度スコアカードのメタデータ。採点基準は docs/metrics/scorecard-criteria.md 参照。各軸の score は人がレビューして設定する(1-5)。.github/scripts/scorecard_metrics.py が機械信号との整合性をチェックする。JSON 形式なのは stdlib のみで読める形式にするため(#297)。",
+  "owner": "itouhi",
+  "golden_path_version": "v0.3.9",
+  "modules": [],
+  "last_reviewed": "2026-07-15",
+  "axes": {
+    "dev_environment_standardization": {
+      "score": 4,
+      "note": "Dev Container + `make dev` あり。CI とのツールバージョン一致検証は未整備"
+    },
+    "ci_cd": {
+      "score": 5,
+      "note": "#295 で reusable workflow 化・組織標準ガードレール配布済み"
+    },
+    "quality_gates": {
+      "score": 5,
+      "note": "3層ゲート + ADR-0008 live-smoke E2E が blocking"
+    },
+    "docs_adr": {
+      "score": 4,
+      "note": "ADR運用・docs一本化あり。CLAUDE.md同期のドリフト検出は手順化のみで自動化未実装"
+    },
+    "security_guardrails": {
+      "score": 4,
+      "note": "OIDC・plan/apply分離済み。ADR-0009でIAM Access Analyzer導入済み。secrets scanningはdetect-private-keyのみで汎用スキャナ未導入"
+    },
+    "observability_metrics": {
+      "score": 4,
+      "note": "ADR-0007 OTel・#237でDORA基本指標収集済み。CFR/MTTRは#42完了後"
+    },
+    "self_service": {
+      "score": 4,
+      "note": "#294スキャフォールドCLIあり。TTFC実測は#440(第2消費者実証)で確認済み"
+    },
+    "api_contract": {
+      "score": 3,
+      "note": "OpenAPIからの型生成(make gen-types)はあるが、CIで生成物と実装の一致を検証するステップは現状ない(スコアカード自動化スクリプト作成中に判明、当初の3ではなく4と見積もっていたのを修正)"
+    },
+    "infra_hardening": {
+      "score": 3,
+      "note": "state保護・plan/apply分離はあるが、Policy as Code(#296)は未着手"
+    },
+    "org_scalability": {
+      "score": 3,
+      "note": "スキャフォールドCLI(#294)はあるが、共有モジュール配布(#239)・drift追従(#298)は未完了"
+    }
+  }
+}

@@ -7,6 +7,36 @@
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-07-15
+
+### Added
+
+- **プラットフォーム成熟度スコアカードの自動生成**: `.github/ISSUE_TEMPLATE/verification.md`に
+  ラベルのみ存在していた10軸（開発環境の標準化・CI/CD・品質ゲート等）について、1〜5点の
+  採点基準とGolden Path/IDP2つの総合点への集約方法を新規に定義した
+  （`docs/metrics/scorecard-criteria.md`、#297）。`docs/metrics/scorecard/catalog.json`の
+  宣言スコアと、リポジトリ内の機械信号（ファイル存在・grepパターン検出・GitHub Actions実行
+  履歴）を突き合わせてドリフトを検知する`.github/scripts/scorecard_metrics.py`と、DORA計測
+  （#237）と同型の`.github/workflows/metrics-scorecard.yml`（`workflow_dispatch`のみ、
+  `docs/metrics/scorecard/`に月次スナップショット保存）を追加した（ADR-0014）。品質ゲート軸には
+  live-smokeゲート（#376）の直近成功日時をGitHub API経由で判定するチェックも追加した。
+- **live-smokeゲートをreusable workflow化**: `cd-app-sandbox.yml`/`cd-app.yml`/
+  `cd-sandbox-cycle.yml`の3ワークフローに重複していたdisposable Cognitoユーザー作成→
+  live-smoke実行→アーティファクトアップロード→ユーザー削除というジョブ（約270行）を
+  `.github/workflows/reusable-live-smoke.yml`に統合した（#376、ADR-0015）。CI側の
+  reusable workflow化（#295、ADR-0012）と同じ「mechanismは共有・policyは呼び出し側」という
+  設計原則をCD側にも適用し、週次エフェメラルサイクル（`cd-sandbox-cycle.yml`）も
+  この統合対象に含めた。
+
+### Changed
+
+- **AI-DLC（awslabs/aidlc-workflows）の取り込みを見送り**: フォルダー構成・取り込みサイクル・
+  ライセンスの3観点で検討した結果、公式のClaude Code導入手順が`CLAUDE.md`を丸ごと上書きする
+  方式で、`docs/ai-instructions.md`の一本化原則およびADR-0002（cc-sdd採用時に明文化した
+  「CLAUDE.mdを外部ツールに所有させない」制約）と衝突すること、AI-DLCのフェーズゲート型
+  ワークフローが既採用のcc-sddと機能的に重複することから、全面採用を見送る判断を記録した
+  （ADR-0013）。
+
 ## [0.3.9] - 2026-07-14
 
 ### Added

@@ -25,7 +25,7 @@ hooks: ## Install pre-commit git hooks
 	pre-commit install
 
 check-setup: ## Check dev environment initial setup (tools, logins, make setup)
-	./tools/script/check-devenv-setup.sh
+	bash tools/script/check-devenv-setup.sh
 
 ## ---- Run locally ----
 dev: db-up ## Run backend (:8000) and frontend (:5173) together (starts the db first)
@@ -173,4 +173,4 @@ check-oauth-scopes: ## Cross-check infra/auth.tf resource-server scopes against 
 	python3 .github/scripts/check_oauth_scopes.py
 
 scaffold-verify: ## Generate a project from copier.yml and verify it isn't broken (#294; needs copier on PATH)
-	./tools/script/verify-scaffold.sh
+	bash tools/script/verify-scaffold.sh

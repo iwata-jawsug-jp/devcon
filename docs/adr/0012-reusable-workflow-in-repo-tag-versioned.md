@@ -61,10 +61,19 @@ check 名は必然的に `<呼び出し側ジョブ名> / <内側ジョブ名>` 
    リポジトリへの切り出しは行わない。ADR-0011 と同じ理由（ドッグフーディング、単一の
    保守対象）。
 2. **バージョン参照は既存の `v*` リリースタグを使う。** 新しいバージョン体系を作らず、
-   `docs/release.md` の既存リリースフローに乗せる。下流の消費例は
-   `uses: iwata-jawsug-jp/devcon/.github/workflows/reusable-ci.yml@v0.3.9`（次回リリース時点の
-   タグ）のような形になる。`copier.yml` で生成したプロジェクトの CI もこの形で参照する
-   （#294 のテンプレートを reusable workflow 参照前提に更新するのは #295 の完了条件）。
+   `docs/release.md` の既存リリースフローに乗せる。
+   **（実装中に判明・訂正）参照先は `iwata-jawsug-jp/devcon` ではなく公開ミラー
+   `iwata-jawsug-jp/devcon` にする。** devcon は非公開リポジトリのため、他リポジトリから
+   `workflow_call` すると GitHub 側の Actions アクセス制御（`repos/<owner>/<repo>/actions/
+permissions/access`）に阻まれて起動不能（startup failure）になる。この設定を `none` から
+   変更すること自体は可能だが、リポジトリのセキュリティ設定変更であり、既存の「開発用（非公開）
+   / 公開用（`iwata-jawsug-jp/devcon`）」の2リポジトリ運用（`docs/release.md`）とも整合しない。
+   公開ミラーは元々「fork した人が消費する対象」として設計されているため、reusable workflow の
+   消費もそこを正とするのが自然。実際に `v0.3.9` を公開後、`itouhi/devcon-test` から
+   `uses: iwata-jawsug-jp/devcon/.github/workflows/reusable-backend.yml@v0.3.9` で呼び出し、
+   green になることを確認した（devcon-test#22）。`copier.yml` で生成したプロジェクトの CI も
+   この形（公開ミラー参照）で揃える（#294 のテンプレートを reusable workflow 参照前提に
+   更新するのは #295 の完了条件）。
 3. **`main-ci-required` ルールセットの必須チェック名を、reusable workflow 移行と同時に
    更新する。** 呼び出し側のジョブ名を `changes` / `backend` / `frontend` / `infra` / `scripts`
    と**まったく同じ名前のまま**にはできない（`workflow_call` の1ジョブが内部ジョブへ展開される
@@ -126,6 +135,14 @@ check 名は必然的に `<呼び出し側ジョブ名> / <内側ジョブ名>` 
   - reusable workflow 化によりログの階層が1段深くなる（Actions タブで `ci-backend` を展開しないと
     `check` の中身が見えない）。可読性はやや下がるが、drift を構造的に防げる利益の方が大きいと
     判断。
+  - **（実装中に発見・修正）org レベルルールセットとの衝突。** `docs/org-rulesets.md` で
+    `iwata-jawsug-jp` org 全体に適用した `org-baseline`（PR 必須・force-push 禁止）が、
+    `iwata-jawsug-jp/devcon` への `publish.yml` の意図的な直接 push（deploy key 経由、1リリース
+    = 1スナップショットコミット、`docs/release.md`）を `GH013: Repository rule violations` で
+    ブロックしてしまい、v0.3.9 の公開が一度失敗した。`org-baseline` の
+    `conditions.repository_name.exclude` に `devcon` を追加して解消した。**教訓:** 「PR 必須・
+    直push禁止」のような組織一律ポリシーを適用する前に、対象 org 配下の各リポジトリが持つ
+    既存の自動化（デプロイキーによる直接 push 等）を洗い出す必要がある。
 - **再検討トリガー:** タグ参照での運用が下流の追従負担として重すぎると分かった場合、または
   reusable workflow の変更頻度がリリース頻度より著しく高く `v*` タグでは追従が遅すぎると分かった
   場合、専用の軽量バージョンタグ（`workflows-v1` のような独立した体系）を再検討する。

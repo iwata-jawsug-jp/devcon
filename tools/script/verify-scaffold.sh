@@ -67,18 +67,63 @@ echo "[scaffold-verify] OK"
 echo "[scaffold-verify] JSON構文チェック（devcontainer.json / package.json / tsconfig*.json）..."
 python3 - "$GEN" <<'PYEOF'
 import json
+import re
 import sys
 from pathlib import Path
 
 gen = Path(sys.argv[1])
-targets = [
-    gen / ".devcontainer/devcontainer.json",
-    gen / "services/frontend/package.json",
-]
-targets += sorted((gen / "services/frontend").glob("tsconfig*.json"))
-for p in targets:
+
+# devcontainer.json / tsconfig*.json は JSONC（// および /* */ コメント、
+# 末尾カンマを許容）なので、strict JSON としてパースする前に取り除く。
+# 文字列リテラル中の "//"（例: "ghcr.io/devcontainers/..."）をコメントと
+# 誤認しないよう、文字列の内外を追跡しながら1文字ずつ走査する。
+def strip_jsonc(text):
+    out = []
+    in_string = False
+    escape = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == '\\':
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+        elif ch == '/' and i + 1 < n and text[i + 1] == '/':
+            i = text.find('\n', i)
+            if i == -1:
+                i = n
+        elif ch == '/' and i + 1 < n and text[i + 1] == '*':
+            end = text.find('*/', i + 2)
+            i = n if end == -1 else end + 2
+        else:
+            out.append(ch)
+            i += 1
+    text = ''.join(out)
+    text = re.sub(r',(\s*[}\]])', r'\1', text)
+    return text
+
+jsonc_targets = [gen / ".devcontainer/devcontainer.json"]
+jsonc_targets += sorted((gen / "services/frontend").glob("tsconfig*.json"))
+strict_targets = [gen / "services/frontend/package.json"]
+
+for p in jsonc_targets:
+    json.loads(strip_jsonc(p.read_text()))
+for p in strict_targets:
     json.loads(p.read_text())
-print(f"[scaffold-verify] OK ({len(targets)} files)")
+
+total = len(jsonc_targets) + len(strict_targets)
+print(f"[scaffold-verify] OK ({total} files)")
 PYEOF
 
 echo "[scaffold-verify] 全チェック green"
