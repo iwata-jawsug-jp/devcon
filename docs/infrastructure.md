@@ -346,34 +346,44 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 これでドキュメント・AI エージェントの運用だけでなく GitHub 側でも強制される
 （[development-process.md](development-process.md)）。
 
-`gh` で作成する例（admin 権限が必要）:
+`gh` で作成・更新する例（admin 権限が必要）。`required_status_checks` はネストした
+オブジェクトの配列なので、`-F 'rules[][...]'` のフラットなキー展開では表現できない
+（#27 で実際に `422 Invalid property /rules/N` になった）。JSON を組み立てて
+`--input` で渡すこと:
 
 ```bash
-gh api -X POST repos/<org>/<repo>/rulesets \
-  -f name='main-ci-required' -f target='branch' -f enforcement='active' \
-  -F 'conditions[ref_name][include][]=~DEFAULT_BRANCH' \
-  -F 'rules[][type]=required_status_checks' \
-  -F 'rules[][parameters][required_status_checks][][context]=changes / check' \
-  -F 'rules[][parameters][required_status_checks][][context]=backend / check' \
-  -F 'rules[][parameters][required_status_checks][][context]=frontend / check' \
-  -F 'rules[][parameters][required_status_checks][][context]=infra / check' \
-  -F 'rules[][parameters][required_status_checks][][context]=scripts / check'
-```
+cat > /tmp/ruleset.json <<'JSON'
+{
+  "name": "main-ci-required",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "changes / check" },
+          { "context": "backend / check" },
+          { "context": "frontend / check" },
+          { "context": "infra / check" },
+          { "context": "scripts / check" }
+        ]
+      }
+    }
+  ]
+}
+JSON
 
-既存のルールセットを更新する場合（`main-ci-required` は既に存在するはずなので、通常は
-`POST .../rulesets` ではなく `PUT .../rulesets/<id>` で必須チェックを差し替える）:
+# 新規作成
+gh api -X POST repos/<org>/<repo>/rulesets --input /tmp/ruleset.json
 
-```bash
+# 既存のルールセットを更新する場合（main-ci-required は既に存在するはずなので、通常は
+# POST .../rulesets ではなく PUT .../rulesets/<id> で必須チェックを差し替える）
 rs_id=$(gh api repos/<org>/<repo>/rulesets --jq '.[] | select(.name=="main-ci-required") | .id')
-gh api -X PUT "repos/<org>/<repo>/rulesets/$rs_id" \
-  -f name='main-ci-required' -f target='branch' -f enforcement='active' \
-  -F 'conditions[ref_name][include][]=~DEFAULT_BRANCH' \
-  -F 'rules[][type]=required_status_checks' \
-  -F 'rules[][parameters][required_status_checks][][context]=changes / check' \
-  -F 'rules[][parameters][required_status_checks][][context]=backend / check' \
-  -F 'rules[][parameters][required_status_checks][][context]=frontend / check' \
-  -F 'rules[][parameters][required_status_checks][][context]=infra / check' \
-  -F 'rules[][parameters][required_status_checks][][context]=scripts / check'
+gh api -X PUT "repos/<org>/<repo>/rulesets/$rs_id" --input /tmp/ruleset.json
 ```
 
 設定できない環境では、**Settings → Rules → Rulesets → New ruleset** で名前を

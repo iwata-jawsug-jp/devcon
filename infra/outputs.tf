@@ -129,3 +129,8 @@ output "cognito_hosted_ui_domain" {
   description = "Fully-qualified Cognito Hosted UI domain (Cognito-prefix, no ACM cert)."
   value       = "https://${aws_cognito_user_pool_domain.hosted_ui.domain}.auth.${var.aws_region}.amazoncognito.com"
 }
+
+output "cognito_hosted_ui_domain_prefix" {
+  description = "Raw Cognito Hosted UI domain prefix (frontend VITE_COGNITO_DOMAIN, e.g. \"myapp-auth\" -- not the fully-qualified URL above)."
+  value       = aws_cognito_user_pool_domain.hosted_ui.domain
+}

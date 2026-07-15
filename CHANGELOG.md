@@ -7,6 +7,33 @@
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-07-15
+
+### Fixed
+
+- **週次エフェメラルサイクル（`cd-sandbox-cycle.yml`）が`main`からの`workflow_dispatch`で
+  Terraform initに失敗する**: `env/sandbox.{backend.hcl,tfvars}`はgit-ignore対象で、
+  `sandbox/*`ブランチのような事前コミットが存在しない`main`起点の実行では欠如したまま
+  だった。`cd-infra.yml`と同じ「`.example`から実行時に生成する」ステップを`apply`/
+  `teardown`両ジョブに追加した（#479）。
+- **同サイクルの`apply`が作り直したAWSリソースIDを後続ジョブが読まず、固定の
+  `vars.SANDBOX_*`を参照していた**: `apply`のたびに変わるsubnet ID・CloudFront
+  distribution ID・Cognito user pool/client ID等を、`deploy-api`/`frontend`/
+  `smoke-test`が過去に人手で一度だけ設定したリポジトリ変数から読んでおり、
+  `InvalidSubnetID.NotFound`/`NoSuchDistribution`で失敗していた。`apply`ジョブで
+  `terraform output`をexportし、後続ジョブは`needs.apply.outputs.*`を参照するよう
+  配線し直した。`infra/outputs.tf`に`cognito_hosted_ui_domain_prefix`outputを追加
+  （#482）。
+- **`cd-infra-sandbox.yml`の`destroy`ジョブも同じ理由でTerraform initに失敗する**:
+  `apply`/`destroy`冒頭コメントの「`env/sandbox.*`がsandboxブランチに事前コミット
+  されている」という前提が実運用と食い違っていた（`cd-sandbox-cycle.yml`が作成した
+  環境を`destroy`しようとすると発生）。同じ実行時生成ステップを追加し、前提の記述も
+  実態に合わせて修正した（#484）。
+- 上記3件はsandbox実機（apply→deploy-api→frontend→smoke-test→teardown完走）で検証済み。
+  検証中に副産物として発見した`infra/bootstrap`未適用によるIAM権限欠如（#488）も解消した。
+- `docs/infrastructure.md`の`main-ci-requiredルールセット`更新コマンド例を、動作する
+  JSON `--input`版に修正した（#483）。
+
 ## [0.3.10] - 2026-07-15
 
 ### Added

@@ -56,6 +56,27 @@ jobs:
     defaults:
       run:
         working-directory: infra
+    # Every apply provisions the VPC/CloudFront/Cognito/etc. from scratch, so
+    # AWS-assigned IDs (subnets, security group, CloudFront distribution,
+    # Cognito pool/client) differ on every run -- unlike cd-app-sandbox.yml,
+    # which deploys onto a long-lived sandbox/* environment whose IDs were
+    # captured once into repo variables by hand. Downstream jobs here must
+    # read this run's actual `terraform output`, not those repo variables
+    # (#482: relying on the stale vars caused deploy-api/frontend to fail with
+    # InvalidSubnetID.NotFound / NoSuchDistribution).
+    outputs:
+      ecr_repository_url: ${{ steps.tf_outputs.outputs.ecr_repository_url }}
+      ecs_cluster_name: ${{ steps.tf_outputs.outputs.ecs_cluster_name }}
+      ecs_service_name: ${{ steps.tf_outputs.outputs.ecs_service_name }}
+      ecs_task_family: ${{ steps.tf_outputs.outputs.ecs_task_family }}
+      private_subnet_ids: ${{ steps.tf_outputs.outputs.private_subnet_ids }}
+      app_security_group_id: ${{ steps.tf_outputs.outputs.app_security_group_id }}
+      cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
+      cognito_user_pool_client_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_client_id }}
+      cognito_hosted_ui_domain_prefix: ${{ steps.tf_outputs.outputs.cognito_hosted_ui_domain_prefix }}
+      web_bucket: ${{ steps.tf_outputs.outputs.web_bucket }}
+      cloudfront_distribution_id: ${{ steps.tf_outputs.outputs.cloudfront_distribution_id }}
+      cloudfront_domain_name: ${{ steps.tf_outputs.outputs.cloudfront_domain_name }}
     steps:
       - uses: actions/checkout@v7
       - name: Configure AWS credentials (deploy role)
@@ -63,6 +84,15 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Materialize backend + tfvars from committed examples
+        # backend.hcl / *.tfvars are git-ignored and, unlike cd-infra-sandbox.yml
+        # (which runs on a sandbox/* branch that commits them once by hand), this
+        # workflow runs from `main` via workflow_dispatch (docs/sandbox.md) where
+        # they never exist on disk -- render them at runtime same as cd-infra.yml.
+        run: |
+          sed "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+            "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
+          cp "env/${TF_ENV}.tfvars.example" "env/${TF_ENV}.tfvars"
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
@@ -73,6 +103,23 @@ jobs:
         run: |
           terraform apply -no-color -input=false -auto-approve \
             -var-file=env/${{ env.TF_ENV }}.tfvars
+      - name: Export terraform outputs for downstream jobs
+        id: tf_outputs
+        run: |
+          {
+            echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)"
+            echo "ecs_cluster_name=$(terraform output -raw ecs_cluster_name)"
+            echo "ecs_service_name=$(terraform output -raw ecs_service_name)"
+            echo "ecs_task_family=$(terraform output -raw ecs_task_family)"
+            echo "private_subnet_ids=$(terraform output -json private_subnet_ids | jq -r 'join(",")')"
+            echo "app_security_group_id=$(terraform output -raw app_security_group_id)"
+            echo "cognito_user_pool_id=$(terraform output -raw cognito_user_pool_id)"
+            echo "cognito_user_pool_client_id=$(terraform output -raw cognito_user_pool_client_id)"
+            echo "cognito_hosted_ui_domain_prefix=$(terraform output -raw cognito_hosted_ui_domain_prefix)"
+            echo "web_bucket=$(terraform output -raw web_bucket)"
+            echo "cloudfront_distribution_id=$(terraform output -raw cloudfront_distribution_id)"
+            echo "cloudfront_domain_name=$(terraform output -raw cloudfront_domain_name)"
+          } >> "$GITHUB_OUTPUT"
 
   # 2) Build & deploy the app against the freshly-applied sandbox infra (same
   #    steps as cd-app-sandbox.yml's `build` + `deploy` jobs).
@@ -99,22 +146,19 @@ jobs:
         with:
           context: services/backend/python
           push: true
-          tags: ${{ steps.ecr.outputs.registry }}/${{ vars.SANDBOX_ECR_REPOSITORY }}:${{ github.sha }}
+          tags: ${{ needs.apply.outputs.ecr_repository_url }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Register new task definition revision with the built image
         id: reg
         env:
-          FAMILY: ${{ vars.SANDBOX_ECS_TASK_FAMILY }}
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          REPOSITORY: ${{ vars.SANDBOX_ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
+          FAMILY: ${{ needs.apply.outputs.ecs_task_family }}
+          IMAGE: ${{ needs.apply.outputs.ecr_repository_url }}:${{ github.sha }}
         run: |
           set -euo pipefail
-          image="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
           aws ecs describe-task-definition --task-definition "$FAMILY" \
             --query 'taskDefinition' > taskdef.json
-          jq --arg IMG "$image" '
+          jq --arg IMG "$IMAGE" '
             .containerDefinitions[0].image = $IMG
             | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
           ' taskdef.json > newdef.json
@@ -124,10 +168,10 @@ jobs:
           echo "registered: $rev"
       - name: Run Alembic migrations (one-off Fargate task)
         env:
-          CLUSTER: ${{ vars.SANDBOX_ECS_CLUSTER }}
+          CLUSTER: ${{ needs.apply.outputs.ecs_cluster_name }}
           REV: ${{ steps.reg.outputs.revision }}
-          SUBNETS: ${{ vars.SANDBOX_PRIVATE_SUBNET_IDS }}
-          SG: ${{ vars.SANDBOX_APP_SECURITY_GROUP_ID }}
+          SUBNETS: ${{ needs.apply.outputs.private_subnet_ids }}
+          SG: ${{ needs.apply.outputs.app_security_group_id }}
         run: |
           set -euo pipefail
           task_arn=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$REV" \
@@ -143,8 +187,8 @@ jobs:
           test "$code" = "0"
       - name: Roll the ECS service to the new revision
         env:
-          CLUSTER: ${{ vars.SANDBOX_ECS_CLUSTER }}
-          SERVICE: ${{ vars.SANDBOX_ECS_SERVICE }}
+          CLUSTER: ${{ needs.apply.outputs.ecs_cluster_name }}
+          SERVICE: ${{ needs.apply.outputs.ecs_service_name }}
           REV: ${{ steps.reg.outputs.revision }}
         run: |
           set -euo pipefail
@@ -174,10 +218,10 @@ jobs:
         run: npm ci
       - name: Build
         env:
-          VITE_COGNITO_USER_POOL_ID: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_USER_POOL_ID: ${{ needs.apply.outputs.cognito_user_pool_id }}
           VITE_COGNITO_REGION: ${{ env.AWS_REGION }}
-          VITE_COGNITO_CLIENT_ID: ${{ vars.SANDBOX_COGNITO_CLIENT_ID }}
-          VITE_COGNITO_DOMAIN: ${{ vars.SANDBOX_COGNITO_DOMAIN }}
+          VITE_COGNITO_CLIENT_ID: ${{ needs.apply.outputs.cognito_user_pool_client_id }}
+          VITE_COGNITO_DOMAIN: ${{ needs.apply.outputs.cognito_hosted_ui_domain_prefix }}
         run: npm run build
       - name: Configure AWS credentials (deploy role)
         uses: aws-actions/configure-aws-credentials@v6
@@ -185,11 +229,11 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Sync dist/ to S3
-        run: aws s3 sync dist/ "s3://${{ vars.SANDBOX_WEB_BUCKET }}/" --delete
+        run: aws s3 sync dist/ "s3://${{ needs.apply.outputs.web_bucket }}/" --delete
       - name: Invalidate CloudFront
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id "${{ vars.SANDBOX_CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --distribution-id "${{ needs.apply.outputs.cloudfront_distribution_id }}" \
             --paths '/*'
 
   # 3) Real-browser live-smoke against the just-provisioned-from-scratch
@@ -197,14 +241,14 @@ jobs:
   #    cd-app.yml's fail -> auto-file-issue step since this cycle has no PR to
   #    comment on). continue-on-error so teardown still runs on smoke failure.
   smoke-test:
-    needs: [deploy-api, frontend]
+    needs: [apply, deploy-api, frontend]
     permissions:
       id-token: write # OIDC, for the disposable Cognito user create/delete
       contents: read
     uses: ./.github/workflows/reusable-live-smoke.yml
     with:
-      base_url: ${{ vars.SANDBOX_CLOUDFRONT_DOMAIN_NAME != '' && format('https://{0}', vars.SANDBOX_CLOUDFRONT_DOMAIN_NAME) || '' }}
-      user_pool_id: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
+      base_url: ${{ needs.apply.outputs.cloudfront_domain_name != '' && format('https://{0}', needs.apply.outputs.cloudfront_domain_name) || '' }}
+      user_pool_id: ${{ needs.apply.outputs.cognito_user_pool_id }}
       role_arn: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
       # true (alerting, not blocking, per the Count -> Block note above): a
       # failure here must not stop teardown from running (`needs: smoke-test`
@@ -268,6 +312,13 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Materialize backend + tfvars from committed examples
+        # See the apply job above: rendered at runtime since this workflow runs
+        # from `main`, not a sandbox/* branch that commits these git-ignored files.
+        run: |
+          sed "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+            "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
+          cp "env/${TF_ENV}.tfvars.example" "env/${TF_ENV}.tfvars"
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:

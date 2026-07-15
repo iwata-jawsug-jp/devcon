@@ -84,7 +84,10 @@ gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform -chdir=infra/bootstrap o
 gh variable set SANDBOX_CLOUDFRONT_DOMAIN_NAME --body "$(terraform -chdir=infra output -raw cloudfront_domain_name)"
 ```
 
-3. **sandbox env ファイル**（git-ignored。テンプレートからコピー）:
+3. **sandbox env ファイル**（git-ignored・`.example`からの生成）: `cd-infra-sandbox.yml`の
+   `apply`/`destroy`両ジョブが`.example`テンプレートから実行時に生成するため（#479/#484）、
+   push/`workflow_dispatch`経由の検証では**手動コピーは不要**。ローカルで直接
+   `terraform`を実行する場合のみ、手元で生成する:
 
 ```bash
 cp infra/env/sandbox.backend.hcl.example infra/env/sandbox.backend.hcl   # bucket を bootstrap 出力で穴埋め
@@ -97,7 +100,8 @@ cp infra/env/sandbox.tfvars.example      infra/env/sandbox.tfvars
 # 1) sandbox 枝を作成（main から）
 git switch main && git switch -c sandbox/main      # or sandbox/<topic>
 
-# 2) sandbox env を作成（上記）。infra/** か services/** を変更して push
+# 2) infra/** か services/** を変更して push（sandbox env ファイルは push 後に
+#    ワークフロー側が生成するので、事前コピーは不要）
 git push -u origin sandbox/main
 
 # 3) Actions で発火を確認
