@@ -79,3 +79,11 @@ repos:
         language: system
         files: ^(infra/auth\.tf|services/frontend/src/auth/oidcConfig\.ts)$
         pass_filenames: false
+      # Rego unit tests only (#296, ADR-0017) -- no AWS credentials locally, so this can't
+      # run `conftest test` against a real plan; that only happens in cd-infra.yml's plan job.
+      - id: conftest-verify
+        name: conftest verify (infra/policy Rego unit tests)
+        entry: conftest verify --policy infra/policy
+        language: system
+        files: ^infra/policy/
+        pass_filenames: false

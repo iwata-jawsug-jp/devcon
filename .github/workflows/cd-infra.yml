@@ -73,6 +73,9 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.14'
+      # Render the plan as JSON once; both the IAM check below and conftest (#296) consume it.
+      - name: Render plan JSON
+        run: terraform show -json tfplan > plan.json
       # Static IAM policy validation (#340, #338): catches condition keys /
       # other structural issues in aws_iam_policy / aws_iam_role_policy
       # documents that terraform validate/tflint/checkov can't see (the
@@ -83,9 +86,21 @@ jobs:
       #   cd infra/bootstrap && terraform show -json terraform.tfstate > /tmp/bootstrap-iam-plan.json
       #   python3 .github/scripts/check_iam_policies.py /tmp/bootstrap-iam-plan.json
       - name: IAM policy validation (accessanalyzer)
+        run: python3 ../.github/scripts/check_iam_policies.py plan.json
+      # Policy as Code (#296, ADR-0017): org-specific conventions (tags, IAM wildcard
+      # actions, ...) that generic scanners (tflint/checkov/trivy) can't express. Blocking
+      # from day 1 -- see ADR-0017 for why this differs from WAF's (#279) Count->Block
+      # staged rollout.
+      # Version pinned to match .devcontainer/Dockerfile's CONFTEST_VERSION (#153, #272 —
+      # same single-source convention as TFLINT_VERSION/TRIVY_VERSION).
+      - name: Set up conftest
         run: |
-          terraform show -json tfplan > iam-plan.json
-          python3 ../.github/scripts/check_iam_policies.py iam-plan.json
+          curl -fsSL "https://github.com/open-policy-agent/conftest/releases/download/v0.68.2/conftest_0.68.2_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin conftest
+      - name: Policy as Code (conftest)
+        run: |
+          conftest verify --policy policy
+          conftest test --policy policy plan.json
       - name: Post plan as PR comment
         uses: actions/github-script@v7
         with:

@@ -23,6 +23,13 @@ Remote state per env: `terraform init -backend-config=env/<env>.backend.hcl`; va
 - `make tf-init` · `make tf-plan` · `make tf-validate` · `make security` (Trivy + Checkov)
 - **Lint:** `make tf-lint` runs the same `tflint --recursive --config=.tflint.hcl` as CI
   (it scans `bootstrap/` too).
+- **Policy as Code:** `make policy-test` runs `conftest verify` (Rego unit tests) over
+  `infra/policy/*.rego` — org-specific conventions generic scanners can't express (required
+  tags, IAM wildcard-action ban; see #296, [ADR-0017](../docs/adr/0017-policy-as-code-conftest.md)).
+  Add a policy by dropping a `.rego` + `_test.rego` pair in `infra/policy/` — no workflow
+  changes needed. `conftest test` against a real plan only runs in `cd-infra.yml`'s `plan`
+  job (needs the AWS plan role); locally/pre-commit/`ci.yml` only run the AWS-credential-free
+  unit tests.
 
 ## Conventions
 

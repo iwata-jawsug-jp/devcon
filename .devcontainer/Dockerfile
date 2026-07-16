@@ -11,6 +11,7 @@ ARG TERRAFORM_VERSION=1.13.0
 ARG TFLINT_VERSION=0.63.1
 ARG TRIVY_VERSION=0.71.2
 ARG CHECKOV_VERSION=3.3.2
+ARG CONFTEST_VERSION=0.68.2
 ARG UV_VERSION=0.11.24
 ARG COPIER_VERSION=9.17.0
 
@@ -80,6 +81,16 @@ RUN curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --
 
 # Checkov
 RUN python3.14 -m pip install --no-cache-dir "checkov==${CHECKOV_VERSION}"
+
+# Conftest (OPA/Rego Policy as Code over `terraform show -json` plan JSON, #296, ADR-0017)
+RUN arch="$(uname -m)" \
+    && case "$arch" in \
+        x86_64)  conftest_arch="x86_64" ;; \
+        aarch64) conftest_arch="arm64" ;; \
+        *) echo "Unsupported arch: $arch" && exit 1 ;; \
+    esac \
+    && curl -fsSL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_${conftest_arch}.tar.gz" \
+        | tar -xz -C /usr/local/bin conftest
 
 # GitHub CLI (gh)
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \

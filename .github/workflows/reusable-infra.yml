@@ -87,3 +87,20 @@ jobs:
           exit-code: '1'
           trivyignores: .trivyignore
           version: 'v0.71.2'
+      # Rego unit tests only (#296, ADR-0017) -- same command as `make policy-test` /
+      # the pre-commit hook. Running `conftest test` against a real plan needs the AWS plan
+      # role, so that only happens in cd-infra.yml's plan job; this job has no AWS
+      # credentials (init -backend=false), same constraint as everything else here.
+      # Version pinned to match .devcontainer/Dockerfile's CONFTEST_VERSION (#153, #272).
+      - name: Set up conftest
+        run: |
+          curl -fsSL "https://github.com/open-policy-agent/conftest/releases/download/v0.68.2/conftest_0.68.2_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin conftest
+      - name: conftest verify (Rego unit tests)
+        run: conftest verify --policy policy
+      # cognito_env_injection.rego's frontend-half checks cd-app*.yml's own env: block
+      # (#367 regression) -- needs no AWS/plan, so it runs here alongside the rest of the
+      # AWS-credential-free gates rather than cd-infra.yml (which only has the app-layer
+      # plan.json, not these workflow files, as its input).
+      - name: Policy as Code (conftest, deploy workflow env vars)
+        run: conftest test --policy policy ../.github/workflows/cd-app.yml ../.github/workflows/cd-app-sandbox.yml

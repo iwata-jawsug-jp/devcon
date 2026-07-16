@@ -47,6 +47,11 @@ jobs:
             infra:
               - 'infra/**'
               - '.github/workflows/**'
+              # Root-level tool config the infra job's steps consume directly (#511
+              # discovered this gap: a .tflint.hcl-only change didn't trigger `infra`,
+              # so its own fix couldn't be verified by CI).
+              - '.tflint.hcl'
+              - '.trivyignore'
             scripts:
               - '.github/scripts/**'
               - '.github/workflows/**'

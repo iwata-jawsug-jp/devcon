@@ -7,6 +7,32 @@
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-07-16
+
+### Added
+
+- **Policy as Code（conftest/OPA）を導入**: 汎用スキャナ（tflint/checkov/trivy）や
+  accessanalyzer 検証（ADR-0009）が対象としない、このリポジトリ固有の規約を
+  `infra/policy/*.rego` で機械検証する層を追加した（#296、[ADR-0017](docs/adr/0017-policy-as-code-conftest.md)）。
+  `cd-infra.yml` の plan ジョブが既に生成していた plan JSON に1ステップ足すだけで配線でき、
+  新規の JSON 化パイプライン構築は不要だった。初期ポリシーとして必須タグ・IAM ワイルドカード
+  アクション禁止を導入し（PR1、#509）、続けて #364/#285 の実機検証で発見されたバグクラスの
+  再発防止として、region 依存アクションへの `aws:RequestedRegion` 条件必須化・NAT 無し構成の
+  VPC エンドポイント確認・CSP `connect-src` の Cognito オリジン確認・ECS/フロントエンドへの
+  Cognito 関連環境変数注入確認を追加した（PR2、#512）。
+
+### Fixed
+
+- **tflint が GitHub Attestations API の破壊的変更でクラッシュする問題を回避**:
+  2026-07-16 に GitHub の Attestations API から `bundle` フィールドが削除された影響で、
+  tflint の AWS プラグインの attestation 検証が nil pointer で panic し、`infra/**` を
+  変更する全 PR の `ci.yml` が影響を受けていた（upstream:
+  [terraform-linters/tflint#2591](https://github.com/terraform-linters/tflint/issues/2591)）。
+  `.tflint.hcl` の AWS プラグインを legacy PGP 署名検証にフォールバックさせて回避した
+  （一時的な対応、アップストリームの修正を待って戻す予定）。副次的に、`.tflint.hcl`/
+  `.trivyignore` の変更が `ci.yml` の infra path フィルタの対象外だったため、この修正自体が
+  CI で検証できない状態だったことも発見・修正した（#510, #511）。
+
 ## [0.3.12] - 2026-07-16
 
 ### Added

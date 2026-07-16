@@ -98,3 +98,28 @@ Then wire the outputs into the app-infra layer:
   AWS-credentials step (or, if `PROJECT_NAME` is missing/wrong, at the state-lock
   `AccessDenied` a few steps later) — that is expected, not a regression.
   `ci.yml`'s `infra` job needs no AWS auth and stays green regardless.
+
+## Consuming this from another project
+
+This directory is self-contained (its own `providers.tf`/`versions.tf`, no `backend`
+block) and can be pulled into another project two ways — no dedicated module
+repository exists or is planned ([ADR-0016](../../docs/adr/0016-terraform-bootstrap-module-distributed-in-repo.md),
+same "this repo is the distributable" reasoning as [ADR-0011](../../docs/adr/0011-scaffold-template-in-place.md)/
+[ADR-0012](../../docs/adr/0012-reusable-workflow-in-repo-tag-versioned.md)):
+
+- **Whole new project**: `copier copy gh:iwata-jawsug-jp/devcon <target>` (#294) — gets
+  this directory (placeholders substituted) along with the rest of the template.
+  Use this when starting a fresh project.
+- **Bootstrap only, into an existing project**:
+  ```bash
+  terraform init -from-module="git::https://github.com/iwata-jawsug-jp/devcon.git//infra/bootstrap?ref=vX.Y.Z"
+  ```
+  Pin an actual release tag (see [Releases](https://github.com/iwata-jawsug-jp/devcon/releases)),
+  not a branch — Git source references have no version-range resolution, so the
+  consumer is responsible for tracking updates manually (#298).
+
+`devcon` is a private repository, so the Git source path above only works for
+consumers with read access to it (e.g. itouhi's own other repos, authenticated via the
+same `gh`/git credential helper). A genuine third party (outside that access boundary)
+should instead reference the public mirror, `iwata-jawsug-jp/devcon` — same reasoning
+ADR-0012 applied to the reusable-workflow reference target.

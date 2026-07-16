@@ -467,20 +467,49 @@ Web UI での設定・動作確認・注意事項の詳細は
 
 ### `cd-infra.yml`
 
-- **PR**: `terraform plan` を実行し、結果を PR にコメント（plan ロール）。加えて `terraform show
--json` の結果を [`check_iam_policies.py`](../.github/scripts/check_iam_policies.py)
-  （[ADR-0009](adr/0009-iam-access-analyzer-static-policy-validation.md)、#340）に渡し、
-  `aws_iam_policy`/`aws_iam_role_policy` の実データを `aws accessanalyzer validate-policy` で
-  検証する。`terraform validate`/tflint/checkov では検出できない「実在しない条件キーによる
-  ステートメントの無言の無効化」（#338）をここで検出する。対象は app 層の1件のみ
-  （`aws_iam_role_policy.ecs_execution_secret`、`shared.tf`）— `infra/bootstrap/` は CI 外
-  運用のため、そちらの9件（`ci_deploy_*`/`tfstate_access_*`）は以下（要ローカル AWS 認証）で
-  別途検証する。
+- **PR**: `terraform plan` を実行し、結果を PR にコメント（plan ロール）。`terraform show -json`
+  の結果（`plan.json`）を以下の2つの検証に渡す:
+  1. [`check_iam_policies.py`](../.github/scripts/check_iam_policies.py)
+     （[ADR-0009](adr/0009-iam-access-analyzer-static-policy-validation.md)、#340）—
+     `aws_iam_policy`/`aws_iam_role_policy` の実データを `aws accessanalyzer validate-policy`
+     で検証。`terraform validate`/tflint/checkov では検出できない「実在しない条件キーによる
+     ステートメントの無言の無効化」（#338）をここで検出する。対象は app 層の1件のみ
+     （`aws_iam_role_policy.ecs_execution_secret`、`shared.tf`）— `infra/bootstrap/` は CI 外
+     運用のため、そちらの9件（`ci_deploy_*`/`tfstate_access_*`）は以下（要ローカル AWS 認証）で
+     別途検証する。
 
-  ```bash
-  cd infra/bootstrap && terraform show -json terraform.tfstate > /tmp/bootstrap-iam-plan.json
-  python3 .github/scripts/check_iam_policies.py /tmp/bootstrap-iam-plan.json
-  ```
+     ```bash
+     cd infra/bootstrap && terraform show -json terraform.tfstate > /tmp/bootstrap-iam-plan.json
+     python3 .github/scripts/check_iam_policies.py /tmp/bootstrap-iam-plan.json
+     ```
+
+  2. **conftest（Policy as Code、#296、[ADR-0017](adr/0017-policy-as-code-conftest.md)）** —
+     `infra/policy/*.rego` にある、このリポジトリ固有の規約を検証。汎用スキャナ
+     （tflint/checkov/trivy）や accessanalyzer が対象としない「組織固有の暗黙知」の機械検証層。
+     `conftest verify`（Rego ユニットテスト、AWS 認証不要）は `ci.yml`（`reusable-infra.yml`）
+     でも実行するが、実際の plan に対する `conftest test` は plan JSON が必要なためこの `plan`
+     ジョブでのみ実行する。ポリシー追加は `infra/policy/` に `.rego` + `_test.rego` を足すだけで、
+     ワークフロー変更は不要。ブロッキング（Count→Block の段階導入はしない — 理由は ADR-0017
+     参照）。現在のポリシー一覧:
+     - `tags.rego` — 必須タグ（Project/Environment）
+     - `iam_wildcard.rego` — 識別ポリシーの Allow ステートメントでのワイルドカードアクション禁止
+     - `region_condition.rego` — 識別ポリシーの region 依存アクション（EC2/ECS/ECR/RDS/
+       CloudWatch Logs/ELB/Application Auto Scaling）に `aws:RequestedRegion` 条件を必須化
+       （#285 再発防止）。app 層の plan JSON と `infra/bootstrap/` の state JSON の両方の
+       スキーマに対応しているため、`infra/bootstrap/` 変更時は accessanalyzer 検証と同様に
+       ローカルで手動実行する:
+       ```bash
+       cd infra/bootstrap && terraform show -json terraform.tfstate > /tmp/bootstrap-state.json
+       conftest test --policy ../policy /tmp/bootstrap-state.json
+       ```
+     - `network_endpoints.rego` — private route table に NAT 経路が無いこと、必須の VPC
+       interface endpoint（ECR/Logs/Secrets Manager/Cognito IDP）が揃っていること（#369 再発防止）
+     - `csp.rego` — CloudFront の CSP `connect-src` が Cognito オリジンを許可していること
+       （#365 再発防止）
+     - `cognito_env_injection.rego` — ECS タスク定義の `API_COGNITO_*`（#369 再発防止、plan JSON
+       対象）と、`cd-app.yml`/`cd-app-sandbox.yml` の frontend ジョブ `Build` ステップの
+       `VITE_COGNITO_*`（#367 再発防止、ワークフロー YAML 自体が入力）の両方を検証。後者は
+       plan JSON を必要としないため `ci.yml`（`reusable-infra.yml`）で実行する。
 
 - **apply（手動）**: `workflow_dispatch` で手動実行する `terraform apply`（deploy ロール・
   `TF_ENV=prod`）。private repo ＋現プランでは GitHub Environment の required reviewers が

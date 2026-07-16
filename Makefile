@@ -7,7 +7,7 @@ FRONTEND_DIR  := services/frontend
 
 .PHONY: help setup hooks check-setup dev gen-types gen-design-tokens fmt lint test security perf-test ci-frontend \
         db-up db-down migrate makemigration \
-        tf-init tf-fmt tf-validate tf-plan tf-lint \
+        tf-init tf-fmt tf-validate tf-plan tf-lint policy-test \
         backend-setup backend-dev backend-test backend-lint \
         frontend-setup frontend-dev frontend-build frontend-lint frontend-test frontend-test-e2e \
         metrics-dora-lint metrics-dora-test check-oauth-scopes scaffold-verify
@@ -61,7 +61,7 @@ fmt: tf-fmt ## Format everything
 	cd $(BACKEND_DIR) && uv run ruff format .
 	cd $(FRONTEND_DIR) && npm run format
 
-lint: tf-lint backend-lint frontend-lint metrics-dora-lint check-oauth-scopes ## Lint everything
+lint: tf-lint policy-test backend-lint frontend-lint metrics-dora-lint check-oauth-scopes ## Lint everything
 
 test: backend-test frontend-test metrics-dora-test ## Run all unit tests (backend pytest + frontend vitest + metrics unittest)
 
@@ -118,6 +118,11 @@ tf-plan: ## terraform plan (uses env/dev.tfvars if present)
 tf-lint: ## tflint --recursive over infra (same command as CI)
 	cd $(INFRA_DIR) && tflint --init --config=$(CURDIR)/.tflint.hcl \
 		&& tflint --recursive --config=$(CURDIR)/.tflint.hcl
+
+# Rego unit tests only (#296, ADR-0017) -- no AWS credentials available locally, so this
+# can't run `conftest test` against a real plan; that only happens in cd-infra.yml's plan job.
+policy-test: ## conftest verify (Rego policy unit tests, same command as CI)
+	conftest verify --policy $(INFRA_DIR)/policy
 
 ## ---- Backend (services/backend/python, FastAPI) ----
 backend-setup: ## uv sync (install deps)
