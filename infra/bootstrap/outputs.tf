@@ -4,8 +4,8 @@ output "state_bucket_name" {
 }
 
 output "oidc_provider_arn" {
-  description = "ARN of the GitHub Actions OIDC provider."
-  value       = aws_iam_openid_connect_provider.github.arn
+  description = "ARN of the GitHub Actions OIDC provider (created by this bootstrap, or an existing one reused when create_oidc_provider = false)."
+  value       = local.oidc_provider_arn
 }
 
 output "ci_plan_role_arn" {

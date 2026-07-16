@@ -7,6 +7,52 @@
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-07-16
+
+### Added
+
+- **`infra/bootstrap` init/update/write/destroyスクリプトを追加**: 手作業だった
+  bootstrap の apply（`terraform apply`への`-var`手入力、`gh variable set`3行の
+  コピペ、`infra/env/*.backend.hcl`/`*.tfvars`の手書き）・破棄手順の欠如を
+  `tools/script/bootstrap.sh`に集約した。GitHub org/repo・AWSアカウントIDを
+  自動検出し、state バケット名（`terraform-<project>-<account_id>-<random6>`）を
+  自動生成、既存のGitHub Actions OIDCプロバイダーの有無も検出して重複作成を
+  避ける（#491, #492）。
+
+### Fixed
+
+- **`bootstrap.sh destroy`でOIDCプロバイダーの削除有無を個別確認するよう修正**:
+  `destroy`の既定target一覧に`aws_iam_openid_connect_provider.github`が無条件で
+  含まれており、このbootstrapがOIDCプロバイダーを作成していた場合は他のリソースと
+  一緒に削除されてしまっていた。同じAWSアカウントを共有する別リポジトリの
+  bootstrapが`create_oidc_provider=false`でこれを再利用している場合、削除すると
+  そちらのCI認証が壊れるため、`--include-oidc-provider`オプションを追加し、
+  指定時も`-y`/`--yes`ではスキップされない個別のy/N確認を必ず挟むようにした
+  （#493）。
+- **`bootstrap.sh`の状態判定・乱数生成バグを修正**: `has_state()`が
+  `terraform output`の終了コードのみで判定していたため、state が全く無い環境
+  でも常に「already applied」と誤検知していた（`terraform output`はstate皆無
+  でも`Warning: No outputs found`を出すだけでexit code 0を返す）。
+  `terraform state list`の中身で判定するよう修正した。また`random6()`は
+  `set -euo pipefail`下で`tr -dc 'a-z0-9' </dev/urandom | head -c6`が`head`側の
+  早期クローズにより`tr`がSIGPIPEで非ゼロ終了し、呼び出し元の`bucket=...`代入
+  ごとスクリプトがエラーメッセージ無しに無言終了するバグもあり、あわせて修正
+  した。
+- **CIのbackend/tfvars materializeがbootstrapのproject名を考慮していなかった**:
+  `infra/env/*.backend.hcl.example`のstate keyと`*.tfvars.example`のprojectは
+  `"devcon"`のリテラルプレースホルダで、ローカルの`bootstrap.sh write`は
+  これをbootstrap実行時のproject名へsedで置換するが、`cd-infra.yml`ほかCI側の
+  materializeステップはstateバケット名しか置換しておらず、`devcon`
+  以外のproject名でbootstrapを適用すると、state key prefixとIAMポリシー
+  （`ci_plan`の`${var.project}`スコープ）が食い違い、state lockオブジェクトへの
+  `s3:PutObject`が`AccessDenied`になっていた。新規リポジトリ変数
+  `PROJECT_NAME`（`bootstrap.sh write`が自動設定）を導入し、CI側4ワークフロー
+  （`cd-infra.yml`/`cd-infra-verify.yml`/`cd-sandbox-cycle.yml`/
+  `cd-infra-sandbox.yml`、計8箇所）のmaterializeステップにも同じ置換を実装
+  した。あわせてMakefileの`bootstrap-init`/`update`/`write`/`destroy`・
+  `check-iam-policies`ターゲットを削除し、`tools/script/bootstrap.sh`を直接
+  呼ぶ運用に統一した（#494）。
+
 ## [0.3.11] - 2026-07-15
 
 ### Fixed

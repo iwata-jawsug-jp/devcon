@@ -131,6 +131,22 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
 > aws secretsmanager delete-secret --secret-id kms-bootstrap-warmup --force-delete-without-recovery
 > ```
 
+**推奨: `tools/script/bootstrap.sh`（#491）を使う** — GitHub org/repo（`gh repo view` /
+`git remote get-url origin`）・AWSアカウントID（`aws sts get-caller-identity`）を自動検出し、
+state バケット名を `terraform-<project>-<account_id>-<random6>` として自動生成、さらに
+このAWSアカウントに既にGitHub Actions OIDCプロバイダーが存在するか（IAMはURLごとに
+アカウント内で1つしか持てない — 同一アカウントを共有する別リポジトリのbootstrapが
+既に作成済みの場合など）を検出して重複作成を避ける:
+
+```bash
+tools/script/bootstrap.sh init -p <project>   # 初回（org/repo/bucket/regionは自動検出 or 上書き可）
+tools/script/bootstrap.sh update              # main.tf変更後の再適用（パラメータ不要）
+tools/script/bootstrap.sh write               # outputsをリポジトリ変数へ登録 + infra/env/*.backend.hcl / *.tfvars を生成
+tools/script/bootstrap.sh destroy             # 破棄（state バケットは --include-state-bucket を付けない限り対象外）
+```
+
+以下は手動手順（参考・フォールバック）:
+
 ```bash
 cd infra/bootstrap
 terraform init                 # ローカル state（backend ブロックなし）
@@ -138,14 +154,22 @@ terraform apply                # 一度だけ
 terraform output               # state バケット名 / ロール ARN を控える
 ```
 
-出力した値を後段に配線する:
+出力した値を後段に配線する（`bootstrap.sh write` を使えば以下は自動化される）:
 
-- `state_bucket_name` → **リポジトリ変数** `AWS_TF_STATE_BUCKET`。`cd-infra.yml` は
-  各ジョブ冒頭で `env/<env>.backend.hcl.example` の `REPLACE-ME-tfstate` をこの値に
-  置換して `backend.hcl` を生成し（`*.tfvars` は `.example` をコピー）、init/plan する。
-  `backend.hcl` / `*.tfvars` は git-ignored のまま CI 実行時に組み立てる方式で、秘密値は
-  git にもログにも入らない（バケット名は非機密、RDS マスターパスワードは RDS 管理＝
-  Secrets Manager で state/tfvars に出ない）。ローカルで触る場合は同様に `.example` から
+- `state_bucket_name` → **リポジトリ変数** `AWS_TF_STATE_BUCKET`、bootstrap の `project`
+  → **リポジトリ変数** `PROJECT_NAME`。`cd-infra.yml`（他、`cd-infra-sandbox.yml` /
+  `cd-infra-verify.yml` / `cd-sandbox-cycle.yml` も同様）は各ジョブ冒頭で
+  `env/<env>.backend.hcl.example` の `REPLACE-ME-tfstate` を `AWS_TF_STATE_BUCKET` に、
+  `devcon`（プレースホルダ文字列）を `PROJECT_NAME` に置換して `backend.hcl` を
+  生成し、`*.tfvars.example` も同様に `devcon` を `PROJECT_NAME` に置換して
+  `*.tfvars` を生成、init/plan する。state key（`<project>/<env>/terraform.tfstate`）も
+  IAM ポリシー側（`bootstrap/main.tf` の `tfstate_access_plan`）と同じ `project` 値で
+  揃う必要があるため、bootstrap を `devcon` 以外の project 名で apply した場合は
+  `PROJECT_NAME` の登録が必須（未登録/不一致だと state ロックオブジェクトへの
+  `s3:PutObject` が `AccessDenied` になる）。`backend.hcl` / `*.tfvars` は git-ignored の
+  まま CI 実行時に組み立てる方式で、秘密値は git にもログにも入らない（バケット名・
+  project 名は非機密、RDS マスターパスワードは RDS 管理＝ Secrets Manager で
+  state/tfvars に出ない）。ローカルで触る場合は同様に `.example` から
   `infra/env/<env>.backend.hcl` を自前で穴埋めする。
 - `ci_plan_role_arn` / `ci_deploy_role_arn` → **リポジトリ変数**（`cd-infra.yml` /
   `cd-app.yml` が参照）。`gh` で登録する例:
@@ -154,9 +178,10 @@ terraform output               # state バケット名 / ロール ARN を控え
 gh variable set AWS_TF_STATE_BUCKET --body "$(terraform -chdir=infra/bootstrap output -raw state_bucket_name)"
 gh variable set AWS_PLAN_ROLE_ARN   --body "$(terraform -chdir=infra/bootstrap output -raw ci_plan_role_arn)"
 gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform -chdir=infra/bootstrap output -raw ci_deploy_role_arn)"
+gh variable set PROJECT_NAME        --body "<bootstrap init -p で指定した project 名>"
 ```
 
-> **これら 3 変数を登録するまで `cd-infra.yml` の plan/apply は失敗する**（下記「bootstrap
+> **これら 4 変数を登録するまで `cd-infra.yml` の plan/apply は失敗する**（下記「bootstrap
 > 適用前の CI 挙動」を参照）。
 
 ### 2. アプリ層（`infra/*.tf`・リモート state）
@@ -449,8 +474,14 @@ Web UI での設定・動作確認・注意事項の詳細は
   検証する。`terraform validate`/tflint/checkov では検出できない「実在しない条件キーによる
   ステートメントの無言の無効化」（#338）をここで検出する。対象は app 層の1件のみ
   （`aws_iam_role_policy.ecs_execution_secret`、`shared.tf`）— `infra/bootstrap/` は CI 外
-  運用のため、そちらの9件（`ci_deploy_*`/`tfstate_access_*`）は `make check-iam-policies`
-  （要ローカル AWS 認証）で別途検証する。
+  運用のため、そちらの9件（`ci_deploy_*`/`tfstate_access_*`）は以下（要ローカル AWS 認証）で
+  別途検証する。
+
+  ```bash
+  cd infra/bootstrap && terraform show -json terraform.tfstate > /tmp/bootstrap-iam-plan.json
+  python3 .github/scripts/check_iam_policies.py /tmp/bootstrap-iam-plan.json
+  ```
+
 - **apply（手動）**: `workflow_dispatch` で手動実行する `terraform apply`（deploy ロール・
   `TF_ENV=prod`）。private repo ＋現プランでは GitHub Environment の required reviewers が
   使えないため、**main マージでは自動 apply せず**、手動実行そのものをゲートとする
@@ -505,10 +536,12 @@ rule`）を返し設定できないので、上記のとおり apply を手動 `
 > `cd-infra.yml` の `plan`（PR）/ `apply`（手動 `workflow_dispatch`）は **OIDC でロールを
 > 引き受けてから**動く。
 > `infra/bootstrap/` を一度 apply し、出力したロール ARN を `AWS_PLAN_ROLE_ARN` /
-> `AWS_DEPLOY_ROLE_ARN` に、state バケット名を `AWS_TF_STATE_BUCKET` に登録するまでは、
-> **AWS 認証ステップ（`configure-aws-credentials`）で必ず失敗する**。これは想定挙動であり
-> リグレッションではない。`AWS_TF_STATE_BUCKET` 未設定の場合は、認証を越えても直後の
-> `terraform init`（backend.hcl のバケットが空）で失敗する。
+> `AWS_DEPLOY_ROLE_ARN` に、state バケット名を `AWS_TF_STATE_BUCKET` に、project 名を
+> `PROJECT_NAME` に登録するまでは、**AWS 認証ステップ（`configure-aws-credentials`）で
+> 必ず失敗する**。これは想定挙動でありリグレッションではない。`AWS_TF_STATE_BUCKET` /
+> `PROJECT_NAME` 未設定の場合は、認証を越えても直後の `terraform init`（backend.hcl の
+> バケットが空）や state ロック取得（`PROJECT_NAME` 不一致による `s3:PutObject`
+> `AccessDenied`）で失敗する。
 >
 > 一方 `ci.yml` の `infra` ジョブ（fmt / validate / tflint / checkov / trivy）は **AWS 認証
 > 不要**なので、bootstrap 未適用でも green になる。PR で「`infra` は緑なのに `plan` が赤」と

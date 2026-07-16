@@ -2,13 +2,12 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 INFRA_DIR     := infra
-BOOTSTRAP_DIR := infra/bootstrap
 BACKEND_DIR   := services/backend/python
 FRONTEND_DIR  := services/frontend
 
 .PHONY: help setup hooks check-setup dev gen-types gen-design-tokens fmt lint test security perf-test ci-frontend \
         db-up db-down migrate makemigration \
-        tf-init tf-fmt tf-validate tf-plan tf-lint check-iam-policies \
+        tf-init tf-fmt tf-validate tf-plan tf-lint \
         backend-setup backend-dev backend-test backend-lint \
         frontend-setup frontend-dev frontend-build frontend-lint frontend-test frontend-test-e2e \
         metrics-dora-lint metrics-dora-test check-oauth-scopes scaffold-verify
@@ -119,10 +118,6 @@ tf-plan: ## terraform plan (uses env/dev.tfvars if present)
 tf-lint: ## tflint --recursive over infra (same command as CI)
 	cd $(INFRA_DIR) && tflint --init --config=$(CURDIR)/.tflint.hcl \
 		&& tflint --recursive --config=$(CURDIR)/.tflint.hcl
-
-check-iam-policies: ## Validate infra/bootstrap's current IAM policies via accessanalyzer (#340; needs local AWS credentials, not part of `make lint`/`make security` -- see docs/infrastructure.md)
-	cd $(BOOTSTRAP_DIR) && terraform show -json terraform.tfstate > /tmp/bootstrap-iam-plan.json
-	python3 .github/scripts/check_iam_policies.py /tmp/bootstrap-iam-plan.json
 
 ## ---- Backend (services/backend/python, FastAPI) ----
 backend-setup: ## uv sync (install deps)

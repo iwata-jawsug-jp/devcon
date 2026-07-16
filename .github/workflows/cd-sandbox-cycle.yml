@@ -90,9 +90,11 @@ jobs:
         # workflow runs from `main` via workflow_dispatch (docs/sandbox.md) where
         # they never exist on disk -- render them at runtime same as cd-infra.yml.
         run: |
-          sed "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+          sed -e "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+              -e "s|devcon|${{ vars.PROJECT_NAME }}|g" \
             "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
-          cp "env/${TF_ENV}.tfvars.example" "env/${TF_ENV}.tfvars"
+          sed "s|devcon|${{ vars.PROJECT_NAME }}|g" \
+            "env/${TF_ENV}.tfvars.example" > "env/${TF_ENV}.tfvars"
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
@@ -316,9 +318,11 @@ jobs:
         # See the apply job above: rendered at runtime since this workflow runs
         # from `main`, not a sandbox/* branch that commits these git-ignored files.
         run: |
-          sed "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+          sed -e "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+              -e "s|devcon|${{ vars.PROJECT_NAME }}|g" \
             "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
-          cp "env/${TF_ENV}.tfvars.example" "env/${TF_ENV}.tfvars"
+          sed "s|devcon|${{ vars.PROJECT_NAME }}|g" \
+            "env/${TF_ENV}.tfvars.example" > "env/${TF_ENV}.tfvars"
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:

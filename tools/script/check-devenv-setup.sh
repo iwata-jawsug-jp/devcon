@@ -24,7 +24,7 @@ FAIL=0
 section() { echo; echo "## $1"; }
 ok()   { echo "  [OK] $1"; PASS=$((PASS + 1)); }
 ng()   { echo "  [NG] $1"; [[ -n "${2:-}" ]] && echo "       -> $2"; FAIL=$((FAIL + 1)); }
-info() { echo "  [--] $1"; }
+info() { echo "  [--] $1"; [[ -n "${2:-}" ]] && echo "       -> $2"; }
 
 # ---- 1. コンテナ同梱ツール ----
 section "コンテナ同梱ツール"
@@ -165,19 +165,36 @@ else
   ng "AWS 認証に失敗（未設定 or トークン期限切れ）" "./tools/script/aws-sso-setup.sh -a <account_id> -u <start_url>（期限切れのみなら aws sso login）"
 fi
 
-# ---- 7. 自分の AWS へのデプロイ用リポジトリ変数（本格セットアップ・任意）----
-section "リポジトリ変数（本格セットアップ・任意 — fork して自分の AWS にデプロイする場合のみ必要）"
+# ---- 7. infra/bootstrap 初期設定（本格セットアップ・任意）----
+# tools/script/bootstrap.sh（#491）で init/write した結果が揃っているかをまとめて確認する。
+# fork して自分の AWS にデプロイする場合のみ必要 — 未完了はすべて info（NGにはしない）。
+section "infra/bootstrap 初期設定（本格セットアップ・任意 — fork して自分の AWS にデプロイする場合のみ必要）"
+
+if command -v terraform >/dev/null 2>&1 && terraform -chdir=infra/bootstrap output >/dev/null 2>&1; then
+  ok "infra/bootstrap: ローカルで apply 済み（terraform output が取得できる）"
+else
+  info "infra/bootstrap: 未適用" "自分の AWS にデプロイしない場合は不要。必要なら ./tools/script/bootstrap.sh init"
+fi
+
+for f in infra/env/dev.backend.hcl infra/env/dev.tfvars; do
+  if [[ -f "$f" ]]; then
+    ok "$f が存在する"
+  else
+    info "$f が無い" "./tools/script/bootstrap.sh write で生成、または $f.example から手動作成"
+  fi
+done
+
 if gh auth status >/dev/null 2>&1; then
   vars="$(gh variable list 2>/dev/null | awk '{print $1}')"
   for v in AWS_TF_STATE_BUCKET AWS_PLAN_ROLE_ARN AWS_DEPLOY_ROLE_ARN; do
     if grep -qx "$v" <<<"$vars"; then
       ok "$v 登録済み"
     else
-      info "$v 未登録（infra/bootstrap を apply していない/自分の AWS にデプロイしない場合は不要）"
+      info "$v 未登録" "./tools/script/bootstrap.sh write で登録（infra/bootstrap を適用していない/自分の AWS にデプロイしない場合は不要）"
     fi
   done
 else
-  info "gh 未ログインのためスキップ"
+  info "gh 未ログインのためリポジトリ変数の確認をスキップ"
 fi
 
 # ---- 8. GitHub Rulesets（ブランチ保護）----

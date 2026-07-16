@@ -52,9 +52,11 @@ jobs:
         # name is a repo variable, and the RDS master password is RDS-managed
         # (Secrets Manager), never present in tfvars or state.
         run: |
-          sed "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+          sed -e "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+              -e "s|devcon|${{ vars.PROJECT_NAME }}|g" \
             "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
-          cp "env/${TF_ENV}.tfvars.example" "env/${TF_ENV}.tfvars"
+          sed "s|devcon|${{ vars.PROJECT_NAME }}|g" \
+            "env/${TF_ENV}.tfvars.example" > "env/${TF_ENV}.tfvars"
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
@@ -77,7 +79,9 @@ jobs:
       # policy is syntactically valid either way) -- only the app layer's
       # single such resource (ecs_execution_secret, shared.tf). infra/bootstrap/
       # is CI-external (local apply only, docs/infrastructure.md), so its
-      # own IAM policies are validated separately via `make check-iam-policies`.
+      # own IAM policies are validated separately:
+      #   cd infra/bootstrap && terraform show -json terraform.tfstate > /tmp/bootstrap-iam-plan.json
+      #   python3 .github/scripts/check_iam_policies.py /tmp/bootstrap-iam-plan.json
       - name: IAM policy validation (accessanalyzer)
         run: |
           terraform show -json tfplan > iam-plan.json
@@ -158,9 +162,11 @@ jobs:
         # See the plan job: render git-ignored backend.hcl / *.tfvars from the
         # committed .example templates at runtime; no secrets in git or logs.
         run: |
-          sed "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+          sed -e "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+              -e "s|devcon|${{ vars.PROJECT_NAME }}|g" \
             "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
-          cp "env/${TF_ENV}.tfvars.example" "env/${TF_ENV}.tfvars"
+          sed "s|devcon|${{ vars.PROJECT_NAME }}|g" \
+            "env/${TF_ENV}.tfvars.example" > "env/${TF_ENV}.tfvars"
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
