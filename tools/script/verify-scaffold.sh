@@ -34,6 +34,15 @@ if grep -rl -e 'devcon' -e 'itouhi' -e 'ap-northeast-1' "$GEN" --exclude-dir=.gi
 fi
 echo "[scaffold-verify] OK"
 
+echo "[scaffold-verify] 混入チェック（.git / copier.yml / copier.yaml が生成物に含まれないこと）"
+for leaked in .git copier.yml copier.yaml; do
+  if [[ -e "$GEN/$leaked" ]]; then
+    echo "[scaffold-verify] NG: 生成物に $leaked が混入しています（copier.yml の _exclude を確認）" >&2
+    exit 1
+  fi
+done
+echo "[scaffold-verify] OK"
+
 echo "[scaffold-verify] terraform fmt/validate (infra, infra/bootstrap) ..."
 for layer in infra infra/bootstrap; do
   (

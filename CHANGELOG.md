@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-07-17
+
+### Fixed
+
+- **copier スキャフォールド生成物への `.git` 混入バグを修正**: `copier.yml` の `_exclude` を
+  自前定義すると copier 標準の除外（`.git`・`copier.yml`・`copier.yaml`・`~*`・`*.py[co]`・
+  `__pycache__`・`.DS_Store`・`.svn`）が継承されず丸ごと上書きされる仕様のため、
+  `copier copy` の生成物に devcon 本体の全コミット履歴（`.git/`、90MB）と
+  `copier.yml` 自体がそのまま複製されていた。標準除外を明示的に足し戻して解消し、
+  `verify-scaffold.sh` に混入検出のアサーションを追加した（#515）。
+- **`docs/adr/*` の生成物除外リストの drift を解消**: `0001`〜`0011` の個別ファイル名列挙が
+  その後追加された `0012`〜`0017`（6件）に追従できておらず、生成物にそのまま出力されて
+  いた。glob パターン（`docs/adr/*.md` + `!docs/adr/template.md`）に置き換え、
+  `docs/org-rulesets.md`・`docs/frontend-frameworks-demo.md` も除外に追加した（#515）。
+- **公開ミラー（`iwata-jawsug-jp/devcon`）経由の `copier copy` で `.devcontainer` が
+  破損するバグを修正**: `publish-to-public.sh` が `copier.yml` の中身も含めて
+  `devcon`→`devcon` を無差別置換するため、公開ミラー側の `copier.yml` では
+  `_tasks` の置換パターンが `s#devcon#...#g` になり、`devcontainer` という頻出語の
+  先頭一致で `ghcr.io/devcontainers/...` 等を破壊していた。`devcon` パターンだけ
+  `\b` で単語境界を要求して解消した（他の3パターンは Cognito ユーザープールID形式
+  `ap-northeast-1_xxxxxxxxx` を壊すため意図的に境界なしのまま）（#515）。
+
 ## [0.3.13] - 2026-07-16
 
 ### Added

@@ -11,25 +11,34 @@
 # 方式を _tasks で行う。チェックイン済みファイルは一切変更しない。
 
 _exclude:
+  # copier の標準除外（`_exclude` を自前定義すると copier のデフォルトは継承されず丸ごと
+  # 上書きされる — 明示しないと `.git`（本リポジトリの全コミット履歴）や `copier.yml` 自体が
+  # そのまま生成物に複製されてしまう。#515 で実機確認・修正）
+  - copier.yaml
+  - copier.yml
+  - '~*'
+  - '*.py[co]'
+  - __pycache__
+  - .git
+  - .DS_Store
+  - .svn
   # リリース配管そのもの（公開ミラー専用。生成されたプロジェクトには不要）
   - .github/workflows/publish.yml
   - tools/script/publish-to-public.sh
   - docs/release.md
   # 開発用リポジトリの内部運用ドキュメント（採否判断前の検討メモ）
   - docs/proposal
-  # 本テンプレート自身の作業ノート・意思決定履歴（ADR運用の型は adr/template.md で引き継ぐ）
+  # iwata-jawsug-jp（公開ミラー用org）自身に適用した運用記録。生成先の任意のorg/userには
+  # 当てはまらない（#515）
+  - docs/org-rulesets.md
+  # sandboxブランチでの実験計画メモ。生成先プロジェクトとは無関係（#515）
+  - docs/frontend-frameworks-demo.md
+  # 本テンプレート自身の作業ノート・意思決定履歴（ADR運用の型は adr/template.md で引き継ぐ）。
+  # 個別ファイル名の列挙は追加のたびに更新漏れが起きる（#515 で 0012〜0017 の漏れを確認）ため
+  # glob + re-include にする
   - docs/scaffold-cli.md
-  - docs/adr/0001-record-architecture-decisions.md
-  - docs/adr/0002-adopt-spec-driven-development-with-cc-sdd.md
-  - docs/adr/0003-keep-monorepo-through-domain-and-authn-expansion.md
-  - docs/adr/0004-rename-services-by-role-and-nest-backend-by-language.md
-  - docs/adr/0005-adopt-docker-in-docker-with-privileged-for-devcontainer.md
-  - docs/adr/0006-dora-deployment-frequency-and-lead-time-definitions.md
-  - docs/adr/0007-opentelemetry-adot-sidecar-for-distributed-tracing.md
-  - docs/adr/0008-live-smoke-playwright-project-with-disposable-cognito-user.md
-  - docs/adr/0009-iam-access-analyzer-static-policy-validation.md
-  - docs/adr/0010-adopt-copier-for-scaffold-cli.md
-  - docs/adr/0011-scaffold-template-in-place.md
+  - docs/adr/*.md
+  - '!docs/adr/template.md'
   - CHANGELOG.md
   # 開発用リポジトリの自己検証専用（docs/proposal/template-verification-environment-proposal.md）
   - .github/workflows/cd-infra-verify.yml
@@ -72,6 +81,14 @@ aws_region:
 # publish-to-public.sh の EXCLUDES 適用後の置換ロジック（SRC_REPO_PATH → DEV_NAME の順）と
 # 同じ順序: より具体的な文字列（org/repo パス）を先に置換してから、単独のプロジェクト名を
 # 置換する。テキストファイルのみ対象（grep -Iq でバイナリを除外）。
+#
+# `devcon` パターンだけ \b で単語境界を要求する: 公開ミラー（iwata-jawsug-jp/devcon）
+# 経由でこの copier.yml が使われるとき、publish-to-public.sh 自身の変換で `devcon` は
+# 短い `devcon` に化ける。`devcon` は `.devcontainer/devcontainer.json` 等の
+# `devcontainer` という頻出語の先頭一致になってしまうため、単語境界なしだと
+# `ghcr.io/devcontainers/...` のような文字列を破壊する（#515 で実機確認）。他の3パターンは
+# 衝突がなく、\b を付けると逆に `ap-northeast-1_xxxxxxxxx`（CognitoユーザープールID）のような
+# 後続がアンダースコアの正当な一致を壊すため、意図的に付けない。
 _tasks:
   - >-
     find . -path ./.git -prune -o -type f -print0 | xargs -0 grep -Il . 2>/dev/null | while IFS=
@@ -79,6 +96,6 @@ _tasks:
     sed -i
     -e 's#iwata-jawsug-jp/devcon#{{ github_org }}/{{ github_repo }}#g'
     -e 's#itouhi#{{ github_org }}#g'
-    -e 's#devcon#{{ project_name }}#g'
+    -e 's#\bdevcon\b#{{ project_name }}#g'
     -e 's#ap-northeast-1#{{ aws_region }}#g'
     "$f"; done
