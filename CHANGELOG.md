@@ -7,6 +7,30 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-17
+
+### Fixed
+
+- **`verify-scaffold.sh` が公開ミラー経由で `devcontainer` を未置換残存と誤検知する不具合を修正**:
+  置換漏れチェックの `devcon` パターンに単語境界が無く、`publish-to-public.sh` が
+  このスクリプト自身も含めて `devcon` → `devcon` を無差別置換すると、公開ミラー
+  （`iwata-jawsug-jp/devcon`）側では実行時にこの行が単語境界なしの `devcon` パターンになり、
+  `devcontainer` という頻出語の先頭一致を誤検知していた（v0.3.14 以降の全リリースで
+  公開ミラーの `scaffold` ジョブが失敗）。`copier.yml` の `_tasks` が同じ理由で既に
+  `\bdevcon\b` としているのと同じ対策を適用した（#536）。
+- **devcontainer 事前ビルドの `cacheFrom` が未 publish な名前空間を参照していた不具合、および
+  `tags`/`cache-to` のタグ衝突で実イメージが破壊される不具合を修正**: `devcon` 自身の
+  `devcontainer.json` が、公開ミラーへの publish 時にのみ書き換わる想定だった
+  `ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest` を参照していたため、`devcon`
+  自身は Rebuild Container してもキャッシュの恩恵を一切受けられなかった。また
+  `devcontainer-build.yml` の `tags` と `cache-to`（`mode=max`）が同じ `:latest` タグを
+  共有しており、`cache-to` が書き込む buildkit cache config manifest が実イメージを
+  上書きしていたことを実機（`docker buildx imagetools inspect --raw` および実際の
+  `docker build --cache-from` 実行）で確認した。`cacheFrom` を公開ミラーの canonical な
+  イメージへの直接参照に変更し、`cache-from`/`cache-to` を `tags` とは別タグ（`:buildcache`）
+  に分離した。設計判断の訂正は [ADR-0018](docs/adr/0018-devcontainer-image-ghcr-cachefrom.md)
+  参照（#538）。
+
 ## [0.5.0] - 2026-07-17
 
 ### Added

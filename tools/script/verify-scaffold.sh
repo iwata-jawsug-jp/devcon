@@ -28,7 +28,15 @@ copier copy \
   "$REPO_ROOT" "$GEN"
 
 echo "[scaffold-verify] 置換漏れチェック（devcon / itouhi / ap-northeast-1 の残存禁止）"
-if grep -rl -e 'devcon' -e 'itouhi' -e 'ap-northeast-1' "$GEN" --exclude-dir=.git; then
+# devcon だけ \b で単語境界を要求する: publish-to-public.sh はこのスクリプト自身も
+# 含めて devcon → devcon を無差別に文字列置換するため、公開ミラー
+# （iwata-jawsug-jp/devcon）側では実行時にこの行の 'devcon' も 'devcon' に化ける。
+# 単語境界なしだと devcontainer という頻出語の先頭一致を「残存あり」と誤検知する
+# （copier.yml の _tasks が同じ理由で \bdevcon\b にしているのと同じ罠・同じ対策。
+# #517/#536 で実機確認）。itouhi / ap-northeast-1 は衝突が無く、単語境界を付けると
+# Cognito ユーザープールID形式（末尾がアンダースコア）の正当な残存を見逃すため付けない。
+if grep -rlP '\bdevcon\b' "$GEN" --exclude-dir=.git \
+  || grep -rl -e 'itouhi' -e 'ap-northeast-1' "$GEN" --exclude-dir=.git; then
   echo "[scaffold-verify] NG: 未置換の文字列が上記ファイルに残っています" >&2
   exit 1
 fi

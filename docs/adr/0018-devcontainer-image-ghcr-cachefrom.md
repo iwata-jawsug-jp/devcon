@@ -50,15 +50,27 @@ AWS ECR は「devcontainer を開くために先に AWS 認証が要る」循環
 
 1. **レジストリは GHCR。**
 2. **`devcontainer.json` は `build.dockerfile` を維持し、`build.cacheFrom` に
-   `ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest` を追加する。** ソース（開発用リポジトリ）
-   側はこの文字列のまま書く。`tools/script/publish-to-public.sh` の既存変換により、公開ミラーでは
-   自動的に `ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest` になる。
+   `ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache` を直接（ハードコードで）指定する
+   （タグの理由は 7. 参照）。** `iwata-jawsug-jp/devcon`・公開ミラー・copier 生成先のすべてが、
+   この1つの canonical なイメージをキャッシュ元として共有参照する（下記「訂正」参照）。
 3. **公開ワークフロー（`.github/workflows/devcontainer-build.yml`）は `iwata-jawsug-jp/devcon`
    でのみ実行するようジョブレベルの `if: github.repository == 'iwata-jawsug-jp/devcon'` で
-   ガードする。** `iwata-jawsug-jp/devcon` 自身は push しない（誤って自分の名前空間に publish
-   しないため、かつ二重ビルドを避けるため）。ワークフローの起動自体は
-   `GitHub Release 公開 → publish.yml → 公開ミラーの main 更新 → devcontainer-build.yml の
-push トリガー` の連鎖で起きる。
+   ガードする。** push 先タグも同じ canonical なイメージ1箇所（
+   `ghcr.io/iwata-jawsug-jp/devcon/devcontainer`）に固定する。`iwata-jawsug-jp/devcon` 自身は
+   push しない（他組織の GHCR への書き込み権限が無く、そもそも実行してはいけない）。
+   ワークフローの起動自体は `GitHub Release 公開 → publish.yml → 公開ミラーの main 更新 →
+devcontainer-build.yml の push トリガー` の連鎖で起きる。
+
+> **訂正1（2026-07-17, #538）:** 初版では 2./3. の参照先を `ghcr.io/iwata-jawsug-jp/devcon/devcontainer`
+> と書き、`tools/script/publish-to-public.sh` の文字列変換（`iwata-jawsug-jp/devcon` →
+> `iwata-jawsug-jp/devcon`）で公開ミラー向けに自動的に書き換わる設計にしていた。この設計だと
+> **`iwata-jawsug-jp/devcon` 自身が参照する `cacheFrom` は永久に publish されない自分専用の
+> 名前空間を指したままになり、`devcon` 自身は何度 Rebuild Container してもキャッシュの
+> 恩恵を一切受けられない**（常に soft-fail で通常ビルドにフォールバックするだけ）という欠陥が
+> あった。実機で GHCR パッケージの公開可視性を確認した際に発覚。`iwata-jawsug-jp/devcon` も
+> 公開ミラーの canonical なイメージを直接参照する形（上記の通り）に修正し、
+> publish 時の文字列変換に依存しない設計に改めた。
+
 4. **`devcontainer-build.yml` は `copier.yml` の `_exclude` に含める。** `publish.yml` と同じく
    `iwata-jawsug-jp/devcon` ⇄ `iwata-jawsug-jp/devcon` のリポジトリペア専用の配管であり、
    copier 生成先には「常にスキップされるだけの死んだジョブ」として残ってしまうため。
@@ -68,6 +80,16 @@ push トリガー` の連鎖で起きる。
 6. **`copier.yml` の `github_org`/`github_repo` バリデータへの小文字強制は追加しない。**
    generated project は GHCR パスを `github_org`/`github_repo` から動的に組み立てないため
    （4. の設計）、大文字小文字はこの用途に影響しない。
+7. **`cache-from`/`cache-to` は `tags` とは別タグ（`:buildcache`）にする。**
+
+> **訂正2（2026-07-17, #538）:** 初版では `cache-to`/`cache-from` も `tags` と同じ `:latest`
+> タグを共有していた。`cache-to`（`mode=max`）が書き込む buildkit cache config manifest が
+> 実イメージを上書きしてしまい、`:latest` が「`docker run` できない、キャッシュメタデータのみの
+> 参照」になっていることを実機（`docker buildx imagetools inspect --raw`）で確認した。この
+> 状態で `docker build --cache-from` を実行すると、レイヤーの一部は取得できるものの最終的な
+> イメージ export に失敗しビルド自体が壊れることも実機確認した。`cache-from`/`cache-to` を
+> `:buildcache` という別タグに分離し、`devcontainer.json` の `cacheFrom` もそちらを参照する
+> よう修正した。
 
 ## Consequences
 
@@ -77,7 +99,10 @@ push トリガー` の連鎖で起きる。
 - トレードオフ: `devcon` 自身のローカル/Codespaces 利用でも、キャッシュ元は公開ミラー側の
   イメージになる（自分専用の事前ビルドは持たない）。公開ミラー側の初回 push（GitHub Release）
   までは、`devcon` でも公開ミラーでも通常ビルドと同じ速度のまま（regression ではないが
-  恩恵もまだ無い）。
+  恩恵もまだ無い）。GHCR パッケージ自体の公開可視性は実機確認済み（2026-07-17、
+  `docker manifest inspect` による匿名 pull 確認）。実際のキャッシュヒットによる高速化は、
+  #538 の修正を公開ミラーへ再 publish したのちに実機確認する（当初 publish 分は #538 の
+  バグにより `:latest` が壊れており未確認）。
 - 運用負担: GHCR は新規パッケージを初回 push 時に private 作成することがあるため、初回
   ワークフロー実行後に `iwata-jawsug-jp` 組織の管理者が Package settings で可視性を Public に
   変更する一回限りの手作業が必要（自動化できない）。

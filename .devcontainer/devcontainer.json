@@ -2,7 +2,7 @@
   "name": "devcon",
   "build": {
     "dockerfile": "Dockerfile",
-    "cacheFrom": "ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest"
+    "cacheFrom": "ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache"
   },
   "remoteUser": "vscode",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",

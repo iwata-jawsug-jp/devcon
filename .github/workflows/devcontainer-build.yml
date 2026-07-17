@@ -1,12 +1,16 @@
 name: Devcontainer build
 
-# .devcontainer/Dockerfile をビルドして GHCR へ push し、devcontainer.json の build.cacheFrom
-# が参照する事前ビルド済みレイヤーを用意する（#532）。目的は開発用リポジトリではなく
-# 公開ミラー（iwata-jawsug-jp/devcon）で devcontainer 初回起動を速くすること — devcon
-# 自身は自分の名前空間（iwata-jawsug-jp/devcon）に push しても誰も参照しない（devcontainer.json の
-# cacheFrom は publish 時に tools/script/publish-to-public.sh の文字列変換で
-# ghcr.io/iwata-jawsug-jp/devcon/... に書き換わる。docs/release.md 参照）ため、
-# below の job-level if で iwata-jawsug-jp/devcon 以外では常にスキップする。
+# .devcontainer/Dockerfile をビルドして GHCR（ghcr.io/iwata-jawsug-jp/devcon/devcontainer）へ
+# push する（#532）。devcontainer.json の build.cacheFrom は :buildcache タグ（実イメージの
+# :latest とは別）を、devcon・公開ミラー（iwata-jawsug-jp/devcon）・copier 生成先の
+# すべてが共通のキャッシュ元として参照する設計（#536 で devcon 自身が参照する
+# cacheFrom を自分の未公開の名前空間ではなくこの canonical なイメージに向ける形へ修正済み）。
+# push 先はこの1箇所に固定するため、publish-to-public.sh の文字列変換には依存しない
+# （この文字列は `iwata-jawsug-jp/devcon` を含まないため変換の対象にもならない）。
+#
+# ビルド・push 自体は公開ミラー（iwata-jawsug-jp/devcon）でだけ実行する。devcon
+# 自身では below の job-level if で常にスキップする（GITHUB_TOKEN に他組織の GHCR への
+# 書き込み権限は無く、そもそも実行してはいけない）。
 #
 # copier で生成したプロジェクトにこのワークフロー自体は不要（生成先は独自の GHCR 名前空間を
 # 持たず、公開ミラーの正規イメージを cacheFrom として共有する設計 — #532 の議論参照）なので
@@ -50,5 +54,10 @@ jobs:
           tags: |
             ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest
             ghcr.io/iwata-jawsug-jp/devcon/devcontainer:${{ github.sha }}
-          cache-from: type=registry,ref=ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest
-          cache-to: type=registry,ref=ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest,mode=max
+          # cache-to/cache-from は tags と別タグ（:buildcache）にする。同じ:latestを共有すると
+          # cache-to（mode=max）が書き込む buildkit cacheconfig manifest が実イメージを
+          # 上書きしてしまい、:latest が「docker run できない、キャッシュメタデータだけの
+          # 参照」になる（#536 で実機発生・確認）。devcontainer.json の cacheFrom もこの
+          # :buildcache を参照する。
+          cache-from: type=registry,ref=ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache
+          cache-to: type=registry,ref=ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache,mode=max
