@@ -322,11 +322,26 @@ cmd_write() {
   echo "==> project=$project state_bucket_name=$bucket"
 
   if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    gh variable set AWS_TF_STATE_BUCKET --body "$bucket"
-    gh variable set AWS_PLAN_ROLE_ARN --body "$plan_arn"
-    gh variable set AWS_DEPLOY_ROLE_ARN --body "$deploy_arn"
-    gh variable set PROJECT_NAME --body "$project"
-    echo "==> リポジトリ変数を設定しました: AWS_TF_STATE_BUCKET / AWS_PLAN_ROLE_ARN / AWS_DEPLOY_ROLE_ARN / PROJECT_NAME"
+    # gh variable set はリポジトリ変数への書き込み権限が要る。GitHub Codespaces の既定認証
+    # （Codespaces注入の GITHUB_TOKEN）はこの権限を持たないことがあり（#516/#520）、失敗を
+    # set -e で素通りさせるとこの後の infra/env/* 生成（GitHub とは無関係）まで巻き添えで
+    # 止まってしまう。4件まとめて成否判定し、失敗してもスクリプトは継続させる。
+    #
+    # Codespaces上では gh auth login で再ログインしても解決しない（gh の認証優先順位は
+    # GH_TOKEN > GITHUB_TOKEN > 保存済み認証情報で、Codespaces既定の GITHUB_TOKEN が常に
+    # 保存済み認証情報より優先されるため）。書き込み権限のある PAT を GH_TOKEN として明示的に
+    # 渡す必要がある。
+    if gh variable set AWS_TF_STATE_BUCKET --body "$bucket" \
+      && gh variable set AWS_PLAN_ROLE_ARN --body "$plan_arn" \
+      && gh variable set AWS_DEPLOY_ROLE_ARN --body "$deploy_arn" \
+      && gh variable set PROJECT_NAME --body "$project"; then
+      echo "==> リポジトリ変数を設定しました: AWS_TF_STATE_BUCKET / AWS_PLAN_ROLE_ARN / AWS_DEPLOY_ROLE_ARN / PROJECT_NAME"
+    else
+      echo "==> リポジトリ変数の設定に失敗しました（権限不足の可能性）。GitHub Codespaces の既定認証には" >&2
+      echo "    Actions Variables への書き込み権限が無いことがある。書き込み権限のある個人アクセストークンを" >&2
+      echo "    GH_TOKEN=<token> ./tools/script/bootstrap.sh write のように指定して再実行するか、" >&2
+      echo "    GitHub UI（Settings > Secrets and variables > Actions）から手動で登録してください。" >&2
+    fi
   else
     echo "==> gh 未ログインのためリポジトリ変数の設定をスキップしました（gh auth login 後に再実行してください）" >&2
   fi

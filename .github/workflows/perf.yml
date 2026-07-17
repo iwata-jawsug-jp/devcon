@@ -83,7 +83,7 @@ jobs:
         run: k6 run --summary-export=perf-summary.json perf/k6/items-smoke.js
       - name: Upload k6 summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-summary
           path: perf-summary.json

@@ -18,6 +18,23 @@ set -uo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
+# GitHub Rulesets / リポジトリ変数の確認は admin/maintain 相当の権限が要る（#516）。
+# GitHub Codespaces の既定認証（Codespaces注入の GITHUB_TOKEN）は API によって権限が
+# 異なり、Rulesets は読めても Actions Variables は読めない、といったケースがある。
+# .env.check-setup（任意・.gitignore済み、.env.check-setup.example参照）に確認専用の
+# 最小権限トークンがあれば、該当コマンドだけそのトークンを使う（シェル全体には export しない）。
+GH_CHECK_SETUP_TOKEN=""
+if [[ -f .env.check-setup ]]; then
+  GH_CHECK_SETUP_TOKEN="$(grep -m1 '^GH_CHECK_SETUP_TOKEN=' .env.check-setup | cut -d= -f2-)"
+fi
+gh_verify() {
+  if [[ -n "$GH_CHECK_SETUP_TOKEN" ]]; then
+    GH_TOKEN="$GH_CHECK_SETUP_TOKEN" gh "$@"
+  else
+    gh "$@"
+  fi
+}
+
 PASS=0
 FAIL=0
 
@@ -134,10 +151,20 @@ fi
 section "AIコーディングエージェント（ログイン状態）"
 if $has_claude; then
   claude_config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-  if [[ -s "$claude_config_dir/.credentials.json" ]]; then
+  # 対話ログイン（~/.claude/.credentials.json）だけでなく、GitHub Codespaces Secrets
+  # 経由の非対話認証（CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY）も有効な認証状態として
+  # 扱う（docs/development-environment.md「GitHub Codespaces: 新しい Codespace でも
+  # Claude Code の再ログインを省略する」参照）。この2つは Claude Code 自体がそれを検出して
+  # 対話ログインを丸ごとスキップするため、.credentials.json は作られない。
+  if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    ok "Claude Code: 環境変数 CLAUDE_CODE_OAUTH_TOKEN による認証あり"
+  elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    ok "Claude Code: 環境変数 ANTHROPIC_API_KEY による認証あり"
+  elif [[ -s "$claude_config_dir/.credentials.json" ]]; then
     ok "Claude Code: 認証情報あり ($claude_config_dir/.credentials.json)"
   else
-    ng "Claude Code: 未ログイン" "claude を起動してブラウザ認証を完了する"
+    ng "Claude Code: 未ログイン" \
+      "claude を起動してブラウザ認証を完了する（または Codespaces Secrets に CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY を登録）"
   fi
 fi
 if $has_copilot; then
@@ -185,14 +212,19 @@ for f in infra/env/dev.backend.hcl infra/env/dev.tfvars; do
 done
 
 if gh auth status >/dev/null 2>&1; then
-  vars="$(gh variable list 2>/dev/null | awk '{print $1}')"
-  for v in AWS_TF_STATE_BUCKET AWS_PLAN_ROLE_ARN AWS_DEPLOY_ROLE_ARN; do
-    if grep -qx "$v" <<<"$vars"; then
-      ok "$v 登録済み"
-    else
-      info "$v 未登録" "./tools/script/bootstrap.sh write で登録（infra/bootstrap を適用していない/自分の AWS にデプロイしない場合は不要）"
-    fi
-  done
+  if vars_raw="$(gh_verify variable list 2>&1)"; then
+    vars="$(awk '{print $1}' <<<"$vars_raw")"
+    for v in AWS_TF_STATE_BUCKET AWS_PLAN_ROLE_ARN AWS_DEPLOY_ROLE_ARN; do
+      if grep -qx "$v" <<<"$vars"; then
+        ok "$v 登録済み"
+      else
+        info "$v 未登録" "./tools/script/bootstrap.sh write で登録（infra/bootstrap を適用していない/自分の AWS にデプロイしない場合は不要）"
+      fi
+    done
+  else
+    info "リポジトリ変数の取得に失敗（権限不足の可能性 — GitHub Codespaces の既定認証には Actions Variables の読み取り権限が無いことがある）" \
+      "AWS_TF_STATE_BUCKET / AWS_PLAN_ROLE_ARN / AWS_DEPLOY_ROLE_ARN の登録有無はここでは判定できない。.env.check-setup.example を参照して確認用トークンを設定すると判定できる"
+  fi
 else
   info "gh 未ログインのためリポジトリ変数の確認をスキップ"
 fi
@@ -215,11 +247,11 @@ check_ruleset() {
   fi
 
   local rs_id enforcement target ref_includes contexts problems=""
-  rs_id="$(gh api "repos/$repo_slug/rulesets" --jq ".[] | select(.name==\"$name\") | .id" 2>/dev/null)"
-  enforcement="$(gh api "repos/$repo_slug/rulesets/$rs_id" --jq '.enforcement' 2>/dev/null)"
-  target="$(gh api "repos/$repo_slug/rulesets/$rs_id" --jq '.target' 2>/dev/null)"
-  ref_includes="$(gh api "repos/$repo_slug/rulesets/$rs_id" --jq '.conditions.ref_name.include[]' 2>/dev/null)"
-  contexts="$(gh api "repos/$repo_slug/rulesets/$rs_id" \
+  rs_id="$(gh_verify api "repos/$repo_slug/rulesets" --jq ".[] | select(.name==\"$name\") | .id" 2>/dev/null)"
+  enforcement="$(gh_verify api "repos/$repo_slug/rulesets/$rs_id" --jq '.enforcement' 2>/dev/null)"
+  target="$(gh_verify api "repos/$repo_slug/rulesets/$rs_id" --jq '.target' 2>/dev/null)"
+  ref_includes="$(gh_verify api "repos/$repo_slug/rulesets/$rs_id" --jq '.conditions.ref_name.include[]' 2>/dev/null)"
+  contexts="$(gh_verify api "repos/$repo_slug/rulesets/$rs_id" \
     --jq '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context' 2>/dev/null)"
 
   [[ "$enforcement" == "active" ]] || problems="$problems enforcement=${enforcement:-取得失敗}（要 active）"
@@ -243,10 +275,11 @@ check_ruleset() {
 repo_slug="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
 if [[ -z "$repo_slug" ]]; then
   info "リポジトリを特定できないためスキップ（gh repo view 失敗）"
-elif ! gh api "repos/$repo_slug/rulesets" >/dev/null 2>&1; then
-  info "rulesets の取得に失敗（gh 未ログイン、または admin/maintain 権限が必要）— スキップ"
+elif ! gh_verify api "repos/$repo_slug/rulesets" >/dev/null 2>&1; then
+  info "rulesets の取得に失敗（gh 未ログイン、または admin/maintain 権限が必要）— スキップ" \
+    ".env.check-setup.example を参照して確認用トークンを設定すると判定できる"
 else
-  ruleset_names="$(gh api "repos/$repo_slug/rulesets" --jq '.[].name' 2>/dev/null)"
+  ruleset_names="$(gh_verify api "repos/$repo_slug/rulesets" --jq '.[].name' 2>/dev/null)"
 
   check_ruleset "main-ci-required" "~DEFAULT_BRANCH" \
     "changes / check|backend / check|frontend / check|infra / check|scripts / check" \

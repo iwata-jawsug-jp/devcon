@@ -124,7 +124,7 @@ jobs:
           echo "password=$password" >> "$GITHUB_OUTPUT"
       - name: Set up Node
         if: steps.config.outputs.configured == 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -163,7 +163,7 @@ jobs:
           echo "failed_step=$failed_step" >> "$GITHUB_OUTPUT"
       - name: Upload live-smoke artifacts (trace/screenshot/video)
         if: always() && steps.config.outputs.configured == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact_name_prefix }}-${{ github.run_id }}
           path: |

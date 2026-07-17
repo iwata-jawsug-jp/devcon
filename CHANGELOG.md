@@ -7,6 +7,45 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-17
+
+### Added
+
+- **Codespaces で Claude Code のオンボーディング/信頼ダイアログを事前承認する `make claude-setup` を追加**:
+  新規 GitHub Codespaces 作成時、`~/.claude` の名前付きボリュームが空のため初回オンボーディング
+  画面と「このフォルダを信頼しますか」トラストダイアログが毎回出る問題に対応した。
+  `tools/script/claude-codespaces-setup.sh` が `~/.claude/.claude.json` に
+  `hasCompletedOnboarding: true` とこのリポジトリの `hasTrustDialogAccepted: true` を、
+  既存ファイルがあれば該当2キーだけをマージする形で書き込む（#526）。
+- **`docs/development-environment.md` に Codespaces Secrets 経由の認証永続化手順を追記**:
+  Claude Code の非対話認証（Pro/Max サブスクリプションなら `claude setup-token` で発行した
+  トークンを `CLAUDE_CODE_OAUTH_TOKEN`、API キー課金なら `ANTHROPIC_API_KEY`）と、npm の
+  GitHub Packages（private）を `PACKAGE_USERNAME` / `PACKAGE_REPO_TOKEN` で使う手順を、
+  いずれも個人アカウントの Codespaces Secrets に登録すれば新規 Codespace でも引き継がれる
+  こととあわせて記録した（#524, #525）。
+
+### Fixed
+
+- **`check-devenv-setup.sh` が Codespaces Secrets 経由の Claude Code 認証を誤検知する不具合を修正**:
+  `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` による非対話認証を使う場合、Claude Code が
+  それを検出して対話ログイン自体をスキップするため `~/.claude/.credentials.json` が
+  作られず、「未ログイン」と誤判定していた。この2つの環境変数も有効な認証状態として
+  扱うよう修正した（#527）。
+- **`check-devenv-setup.sh` の `gh` 権限不足によるリポジトリ変数の誤判定を修正**: `gh variable
+list` の失敗（権限不足など）をstderrごと握りつぶしていたため、実際は登録済みかもしれない
+  `AWS_TF_STATE_BUCKET` 等の変数まで一律「未登録」と誤表示していた。取得成否を先に判定して
+  から分岐するよう変更し、取得自体の失敗は「権限不足で確認できない」旨の情報表示にした
+  （#519）。
+- **`reusable-infra.yml` の Checkov ステップが working-directory の二重適用でスキャン対象0件
+  だった問題を修正**: `defaults.run.working-directory: infra` が設定された `check` ジョブで
+  `checkov -d infra` が実際には `infra/infra` を探しに行き、`--soft-fail` により無検査のまま
+  green になっていた。`checkov -d .` に修正した（#521）。
+- **`bootstrap.sh write` が `gh` 権限不足時に `infra/env` 生成まで巻き添えで止まる不具合を修正**:
+  `gh variable set` が権限不足で失敗すると `set -euo pipefail` によりスクリプトがその場で
+  強制終了し、後続の GitHub とは無関係な `infra/env/*.backend.hcl` / `*.tfvars` 生成処理まで
+  実行されなくなっていた。4件の `gh variable set` をまとめて成否判定し、失敗してもスクリプト
+  本体は継続して生成処理まで到達するよう修正した（#522）。
+
 ## [0.3.14] - 2026-07-17
 
 ### Fixed

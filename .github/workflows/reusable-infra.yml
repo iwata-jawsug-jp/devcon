@@ -73,7 +73,7 @@ jobs:
       - name: Checkov
         run: |
           pip install --quiet checkov==3.3.2
-          checkov -d infra --quiet --compact --soft-fail
+          checkov -d . --quiet --compact --soft-fail
       # Trivy is BLOCKING (exit-code 1) in all three gates (pre-commit / make / CI);
       # accepted findings are ignored explicitly in .trivyignore with reasons (#150).
       # `version` pinned to match .devcontainer/Dockerfile's TRIVY_VERSION (#153, #272) —
