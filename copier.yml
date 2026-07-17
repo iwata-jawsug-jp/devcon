@@ -26,6 +26,12 @@ _exclude:
   - .github/workflows/publish.yml
   - tools/script/publish-to-public.sh
   - docs/release.md
+  # devcontainer 事前ビルドイメージの公開ワークフロー（#532）。devcon⇄iwata-jawsug-jp/devcon
+  # のリポジトリペア専用（job-level if で iwata-jawsug-jp/devcon 以外は常にスキップする作り）。
+  # 生成先プロジェクトは独自の GHCR 名前空間を持たず、公開ミラーの正規イメージを
+  # devcontainer.json の cacheFrom で共有参照する設計のため、生成先に置いても常にスキップされる
+  # だけの死んだジョブになる。
+  - .github/workflows/devcontainer-build.yml
   # 開発用リポジトリの内部運用ドキュメント（採否判断前の検討メモ）
   - docs/proposal
   # iwata-jawsug-jp（公開ミラー用org）自身に適用した運用記録。生成先の任意のorg/userには

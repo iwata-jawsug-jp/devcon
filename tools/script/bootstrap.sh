@@ -27,12 +27,35 @@
 #                                          create_oidc_provider=false でこれを再利用している
 #                                          可能性があり、削除するとそちらのCI認証も壊れるため、
 #                                          -y/--yes を指定しても必ず個別に確認する。
+#   adopt    - 別の開発PC（このリポジトリの `init` を実行していないマシン）で、既に他のPCで
+#              適用済みの bootstrap 設定を使えるようにする。ローカル state は作らない
+#              （state は `init` を実行した1台のマシンだけが持つ設計 — README「一度だけ・
+#              人力・ローカル state」参照）。リポジトリ変数（PROJECT_NAME /
+#              AWS_TF_STATE_BUCKET / AWS_PLAN_ROLE_ARN / AWS_DEPLOY_ROLE_ARN。`write` が
+#              登録済みのはず）を読み、現在のAWS認証情報に対して実リソース（state バケット・
+#              IAMロール2つ）が実在するか確認したうえで、infra/env/*.backend.hcl / *.tfvars を
+#              生成する。`update`/`destroy` はローカル state が要るため、引き続き `init` を
+#              実行した元のマシンから行うこと。
+#   recover  - `init` を実行したマシン自体（＝ローカル state を持つ唯一のマシン）が失われた
+#              場合に、AWS上にまだ残っている実リソースから state を作り直す。`adopt` と同じ
+#              リポジトリ変数を読んで対象を特定・実在確認したあと、`terraform import` を
+#              main.tf の全 managed resource（S3 state バケット一式 + IAMロール/ポリシー/
+#              アタッチメント）に対して実行し、terraform.auto.tfvars も書く。OIDCプロバイダー
+#              は所有権がAWS側から判別できないため、既定では import しない
+#              （`--owns-oidc-provider` を指定した場合のみ）。既に import 済みのリソースは
+#              スキップするため、一部失敗しても再実行すれば再開できる。完了後は
+#              `terraform plan` で差分が無いことを確認すること。
 #
 # Usage:
 #   ./tools/script/bootstrap.sh init -p <project> [-o <org>] [-r <repo>] [-b <bucket>] [-y]
 #   ./tools/script/bootstrap.sh update [-o <org>] [-r <repo>] [-y]
 #   ./tools/script/bootstrap.sh write [--force]
 #   ./tools/script/bootstrap.sh destroy [--include-state-bucket] [--include-oidc-provider] [-y]
+#   ./tools/script/bootstrap.sh adopt [-p <project>] [-b <bucket>] [--plan-role-arn <arn>]
+#                                      [--deploy-role-arn <arn>] [-o <org>] [-r <repo>] [--force]
+#   ./tools/script/bootstrap.sh recover [-p <project>] [-b <bucket>] [--plan-role-arn <arn>]
+#                                        [--deploy-role-arn <arn>] [-o <org>] [-r <repo>]
+#                                        [--owns-oidc-provider] [-R <region>] [-y]
 #
 set -euo pipefail
 
@@ -68,6 +91,38 @@ Commands:
                                           created it (always asks separately, even with -y --
                                           other repos sharing this AWS account may reuse it)
               -y, --yes                  Skip the confirmation prompt
+
+  adopt     Adopt bootstrap config already applied from another machine (no local Terraform
+            state is created here -- run 'update'/'destroy' from the machine that ran 'init').
+            Reads repo variables published by 'write' (override any of them with the flags
+            below), verifies the referenced AWS resources actually exist under the current
+            AWS credentials, then materializes infra/env/*.backend.hcl / *.tfvars.
+              -p, --project <name>            Project name (default: repo var PROJECT_NAME)
+              -b, --bucket-name <name>        State bucket (default: repo var AWS_TF_STATE_BUCKET)
+              --plan-role-arn <arn>           (default: repo var AWS_PLAN_ROLE_ARN)
+              --deploy-role-arn <arn>         (default: repo var AWS_DEPLOY_ROLE_ARN)
+              -o, --org <org>                 GitHub org (auto-detected if omitted)
+              -r, --repo <repo>               GitHub repo (auto-detected if omitted)
+              --force                         Overwrite infra/env files that already exist
+
+  recover   Rebuild local Terraform state when the machine that ran 'init' (and its local
+            state) was lost, by importing the still-existing AWS resources. Reads the same
+            repo variables as 'adopt' (override with the same flags), verifies they exist,
+            then runs 'terraform import' for every resource main.tf declares and writes
+            terraform.auto.tfvars. Safe to re-run -- already-imported resources are skipped.
+              -p, --project <name>            Project name (default: repo var PROJECT_NAME)
+              -b, --bucket-name <name>        State bucket (default: repo var AWS_TF_STATE_BUCKET)
+              --plan-role-arn <arn>           (default: repo var AWS_PLAN_ROLE_ARN)
+              --deploy-role-arn <arn>         (default: repo var AWS_DEPLOY_ROLE_ARN)
+              --owns-oidc-provider            Only set this if you're sure THIS bootstrap
+                                               originally created the GitHub OIDC provider (not
+                                               a sibling repo's bootstrap reusing it) -- also
+                                               imports it. Default: false (looked up via data
+                                               source, not imported -- the safe choice when unsure)
+              -o, --org <org>                 GitHub org (auto-detected if omitted)
+              -r, --repo <repo>               GitHub repo (auto-detected if omitted)
+              -R, --region <region>           AWS region (default: ap-northeast-1)
+              -y, --yes                       Skip the confirmation prompt
 
   -h, --help  Show this help
 EOF
@@ -294,6 +349,34 @@ cmd_update() {
   tf apply -auto-approve
 }
 
+# infra/env/*.backend.hcl / *.tfvars を .example から生成する（write / adopt 共通）。
+materialize_env_files() {
+  local project="$1" bucket="$2" force="$3"
+  local example real
+
+  for example in infra/env/*.backend.hcl.example; do
+    real="${example%.example}"
+    if [[ -f "$real" && "$force" != true ]]; then
+      echo "==> skip: $real（既に存在。上書きするには --force）"
+      continue
+    fi
+    sed -e "s/REPLACE-ME-tfstate/$bucket/" \
+      -e "s/devcon/$project/g" \
+      "$example" >"$real"
+    echo "==> generated: $real"
+  done
+
+  for example in infra/env/*.tfvars.example; do
+    real="${example%.example}"
+    if [[ -f "$real" && "$force" != true ]]; then
+      echo "==> skip: $real（既に存在。上書きするには --force）"
+      continue
+    fi
+    sed -e "s/devcon/$project/g" "$example" >"$real"
+    echo "==> generated: $real"
+  done
+}
+
 # ============================================================
 # write
 # ============================================================
@@ -346,28 +429,330 @@ cmd_write() {
     echo "==> gh 未ログインのためリポジトリ変数の設定をスキップしました（gh auth login 後に再実行してください）" >&2
   fi
 
-  local example real
-  for example in infra/env/*.backend.hcl.example; do
-    real="${example%.example}"
-    if [[ -f "$real" && "$force" != true ]]; then
-      echo "==> skip: $real（既に存在。上書きするには --force）"
-      continue
+  materialize_env_files "$project" "$bucket" "$force"
+}
+
+# 他の開発PCで `write` が登録したリポジトリ変数から project/bucket/plan_arn/deploy_arn を
+# 読む（-p/-b/--plan-role-arn/--deploy-role-arn で明示済みの値はそのまま使う）。
+# adopt / recover 共通。解決した値は RESOLVED_PROJECT / RESOLVED_BUCKET / RESOLVED_PLAN_ARN /
+# RESOLVED_DEPLOY_ARN に入る。
+resolve_published_values() {
+  local project="$1" bucket="$2" plan_arn="$3" deploy_arn="$4" org="$5" repo="$6"
+
+  if [[ -z "$project" || -z "$bucket" || -z "$plan_arn" || -z "$deploy_arn" ]]; then
+    if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+      echo "Error: gh 未ログインのためリポジトリ変数を読めません。" >&2
+      echo "       gh auth login するか、-p/-b/--plan-role-arn/--deploy-role-arn で明示指定してください。" >&2
+      exit 2
     fi
-    sed -e "s/REPLACE-ME-tfstate/$bucket/" \
-      -e "s/devcon/$project/g" \
-      "$example" >"$real"
-    echo "==> generated: $real"
+    echo "==> $org/$repo のリポジトリ変数から未指定分を取得します..."
+    gh_var() { gh variable get "$1" --repo "$org/$repo" 2>/dev/null; }
+    [[ -z "$project" ]] && project="$(gh_var PROJECT_NAME)"
+    [[ -z "$bucket" ]] && bucket="$(gh_var AWS_TF_STATE_BUCKET)"
+    [[ -z "$plan_arn" ]] && plan_arn="$(gh_var AWS_PLAN_ROLE_ARN)"
+    [[ -z "$deploy_arn" ]] && deploy_arn="$(gh_var AWS_DEPLOY_ROLE_ARN)"
+  fi
+
+  local missing=""
+  [[ -z "$project" ]] && missing="$missing PROJECT_NAME(-p/--project)"
+  [[ -z "$bucket" ]] && missing="$missing AWS_TF_STATE_BUCKET(-b/--bucket-name)"
+  [[ -z "$plan_arn" ]] && missing="$missing AWS_PLAN_ROLE_ARN(--plan-role-arn)"
+  [[ -z "$deploy_arn" ]] && missing="$missing AWS_DEPLOY_ROLE_ARN(--deploy-role-arn)"
+  if [[ -n "$missing" ]]; then
+    echo "Error: 値を決定できませんでした:$missing" >&2
+    echo "       bootstrap を適用した側のマシンで '$0 write' を実行してリポジトリ変数へ登録するか、" >&2
+    echo "       このコマンドに値を直接指定してください。" >&2
+    exit 1
+  fi
+
+  RESOLVED_PROJECT="$project"
+  RESOLVED_BUCKET="$bucket"
+  RESOLVED_PLAN_ARN="$plan_arn"
+  RESOLVED_DEPLOY_ARN="$deploy_arn"
+}
+
+# state バケットと ci_plan/ci_deploy ロールが、現在のAWS認証情報から実際に見えるか確認する
+# （リポジトリ変数の値をそのまま信用しない -- 想定と違うAWSアカウントに繋いでいる事故を防ぐ）。
+# 問題があれば理由を表示して exit 1 する。adopt / recover 共通。
+verify_aws_resources() {
+  local bucket="$1" plan_arn="$2" deploy_arn="$3" account_id="$4"
+
+  echo
+  echo "==> AWS環境を確認します..."
+  local problems=""
+
+  local arn arn_account
+  for arn in "$plan_arn" "$deploy_arn"; do
+    arn_account="${arn#arn:aws:iam::}"
+    arn_account="${arn_account%%:*}"
+    if [[ "$arn_account" != "$account_id" ]]; then
+      problems="${problems}    - $arn のAWSアカウントID（$arn_account）が現在の認証情報のアカウント（$account_id）と一致しません
+"
+    fi
   done
 
-  for example in infra/env/*.tfvars.example; do
-    real="${example%.example}"
-    if [[ -f "$real" && "$force" != true ]]; then
-      echo "==> skip: $real（既に存在。上書きするには --force）"
+  if [[ -z "$problems" ]]; then
+    if aws s3api head-bucket --bucket "$bucket" >/dev/null 2>&1; then
+      echo "  [OK] state バケット '$bucket' が存在し、アクセスできます"
+    else
+      problems="${problems}    - state バケット '$bucket' が見つからない、またはアクセスできません
+"
+    fi
+
+    local plan_role_name="${plan_arn##*/}" deploy_role_name="${deploy_arn##*/}"
+    if aws iam get-role --role-name "$plan_role_name" >/dev/null 2>&1; then
+      echo "  [OK] IAMロール '$plan_role_name'（ci_plan）が存在します"
+    else
+      problems="${problems}    - IAMロール '$plan_role_name'（ci_plan_role_arn）が見つかりません
+"
+    fi
+    if aws iam get-role --role-name "$deploy_role_name" >/dev/null 2>&1; then
+      echo "  [OK] IAMロール '$deploy_role_name'（ci_deploy）が存在します"
+    else
+      problems="${problems}    - IAMロール '$deploy_role_name'（ci_deploy_role_arn）が見つかりません
+"
+    fi
+  fi
+
+  if [[ -n "$problems" ]]; then
+    echo
+    echo "Error: AWS環境の確認に失敗しました:" >&2
+    echo -n "$problems" >&2
+    echo "       他の開発PCの bootstrap 適用と、現在このマシンで使っているAWS認証情報が" >&2
+    echo "       同じAWSアカウントを指しているか確認してください。" >&2
+    exit 1
+  fi
+}
+
+# ============================================================
+# adopt
+# ============================================================
+cmd_adopt() {
+  local project="" org="" repo="" bucket="" plan_arn="" deploy_arn="" force=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -p | --project) project="${2:-}"; shift 2 ;;
+      -o | --org) org="${2:-}"; shift 2 ;;
+      -r | --repo) repo="${2:-}"; shift 2 ;;
+      -b | --bucket-name) bucket="${2:-}"; shift 2 ;;
+      --plan-role-arn) plan_arn="${2:-}"; shift 2 ;;
+      --deploy-role-arn) deploy_arn="${2:-}"; shift 2 ;;
+      --force) force=true; shift ;;
+      -h | --help) usage; exit 0 ;;
+      *) echo "Error: unknown argument: $1" >&2; usage; exit 2 ;;
+    esac
+  done
+
+  if [[ -z "$org" || -z "$repo" ]]; then
+    if detect_github_org_repo; then
+      org="${org:-$DETECTED_ORG}"
+      repo="${repo:-$DETECTED_REPO}"
+      echo "==> GitHub org/repo を自動検出: $org/$repo"
+    else
+      echo "Error: GitHub org/repo を自動検出できませんでした。-o/-r で指定してください。" >&2
+      exit 2
+    fi
+  fi
+
+  local account_id
+  if ! account_id="$(detect_account_id)"; then
+    echo "Error: AWSアカウントIDを取得できません。認証情報を設定してください（docs/aws-temporary-credentials.md 参照）。" >&2
+    exit 1
+  fi
+  echo "==> AWSアカウントID（現在の認証情報）: $account_id"
+
+  resolve_published_values "$project" "$bucket" "$plan_arn" "$deploy_arn" "$org" "$repo"
+  project="$RESOLVED_PROJECT"; bucket="$RESOLVED_BUCKET"
+  plan_arn="$RESOLVED_PLAN_ARN"; deploy_arn="$RESOLVED_DEPLOY_ARN"
+
+  echo "==> project=$project state_bucket_name=$bucket"
+  echo "    ci_plan_role_arn=$plan_arn"
+  echo "    ci_deploy_role_arn=$deploy_arn"
+
+  verify_aws_resources "$bucket" "$plan_arn" "$deploy_arn" "$account_id"
+
+  echo
+  echo "==> AWS環境の確認が完了しました。infra/env/*.backend.hcl / *.tfvars を生成します。"
+  materialize_env_files "$project" "$bucket" "$force"
+
+  echo
+  echo "==> 完了。このマシンにはローカル Terraform state を作っていません"
+  echo "    （state は '$0 init'（または '$0 recover'）を実行した1台のマシンだけが持つ設計）。"
+  echo "    infra/bootstrap 自体の update/destroy は、そちらのマシンから実行してください。"
+  echo "    元のマシンの state 自体が失われている場合は '$0 recover' を使ってください。"
+}
+
+# ============================================================
+# recover
+# ============================================================
+cmd_recover() {
+  local project="" org="" repo="" bucket="" plan_arn="" deploy_arn=""
+  local region="ap-northeast-1" owns_oidc=false yes=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -p | --project) project="${2:-}"; shift 2 ;;
+      -o | --org) org="${2:-}"; shift 2 ;;
+      -r | --repo) repo="${2:-}"; shift 2 ;;
+      -b | --bucket-name) bucket="${2:-}"; shift 2 ;;
+      --plan-role-arn) plan_arn="${2:-}"; shift 2 ;;
+      --deploy-role-arn) deploy_arn="${2:-}"; shift 2 ;;
+      --owns-oidc-provider) owns_oidc=true; shift ;;
+      -R | --region) region="${2:-}"; shift 2 ;;
+      -y | --yes) yes=true; shift ;;
+      -h | --help) usage; exit 0 ;;
+      *) echo "Error: unknown argument: $1" >&2; usage; exit 2 ;;
+    esac
+  done
+
+  if [[ -z "$org" || -z "$repo" ]]; then
+    if detect_github_org_repo; then
+      org="${org:-$DETECTED_ORG}"
+      repo="${repo:-$DETECTED_REPO}"
+      echo "==> GitHub org/repo を自動検出: $org/$repo"
+    else
+      echo "Error: GitHub org/repo を自動検出できませんでした。-o/-r で指定してください。" >&2
+      exit 2
+    fi
+  fi
+
+  local account_id
+  if ! account_id="$(detect_account_id)"; then
+    echo "Error: AWSアカウントIDを取得できません。認証情報を設定してください（docs/aws-temporary-credentials.md 参照）。" >&2
+    exit 1
+  fi
+  echo "==> AWSアカウントID（現在の認証情報）: $account_id"
+
+  resolve_published_values "$project" "$bucket" "$plan_arn" "$deploy_arn" "$org" "$repo"
+  project="$RESOLVED_PROJECT"; bucket="$RESOLVED_BUCKET"
+  plan_arn="$RESOLVED_PLAN_ARN"; deploy_arn="$RESOLVED_DEPLOY_ARN"
+
+  echo "==> project=$project state_bucket_name=$bucket"
+  echo "    ci_plan_role_arn=$plan_arn"
+  echo "    ci_deploy_role_arn=$deploy_arn"
+
+  verify_aws_resources "$bucket" "$plan_arn" "$deploy_arn" "$account_id"
+
+  if has_state; then
+    echo
+    echo "==> $BOOTSTRAP_DIR には既に local state があります。未インポート分だけ補います（再実行しても安全）。"
+  fi
+
+  echo
+  echo "==> 以下の値で terraform.auto.tfvars を書き、main.tf の各リソースを import します"
+  echo "    （既に state にあるリソースはスキップします）:"
+  echo "      project              = $project"
+  echo "      github_org           = $org"
+  echo "      github_repo          = $repo"
+  echo "      state_bucket_name    = $bucket"
+  echo "      aws_region           = $region"
+  echo "      create_oidc_provider = $owns_oidc"
+  if ! $owns_oidc && oidc_provider_exists; then
+    echo
+    echo "      注意: このAWSアカウントにはGitHub Actions OIDCプロバイダーが既に存在しますが、"
+    echo "      所有権（このbootstrapが作ったのか、同一アカウントを共有する他リポジトリのbootstrapが"
+    echo "      作ったのか）はAWS側からは判別できないため、既定では import しません（データソースとして"
+    echo "      参照するだけ）。このbootstrapが作成したと確信できる場合のみ --owns-oidc-provider を"
+    echo "      指定してください（誤って指定すると、他リポジトリが使っているOIDCプロバイダーをこの"
+    echo "      state が『所有』したことになり、将来の '$0 destroy --include-oidc-provider' で"
+    echo "      誤削除するリスクがあります）。"
+  fi
+  echo
+
+  confirm "$yes" "続行しますか？（terraform init と複数の terraform import を実行します）" || { echo "中止しました。"; exit 1; }
+
+  write_tfvars "$project" "$org" "$repo" "$bucket" "$region" "$owns_oidc"
+  tf init
+
+  local plan_role_name="${plan_arn##*/}" deploy_role_name="${deploy_arn##*/}"
+  local ro_policy_arn="arn:aws:iam::aws:policy/ReadOnlyAccess"
+
+  # ci_deploy_* リソースのアドレス suffix → main.tf のポリシー名 suffix
+  # （aws_iam_policy.<key> の name = "${project}-<suffix>"）。main.tf の
+  # 該当 resource ブロックにポリシーを追加/変更したら、ここも合わせて更新すること。
+  declare -A policy_suffix=(
+    [ci_deploy_state]="deploy-tfstate-access"
+    [ci_deploy_network]="deploy-network"
+    [ci_deploy_compute]="deploy-compute"
+    [ci_deploy_storage_cdn]="deploy-storage-cdn"
+    [ci_deploy_data]="deploy-data"
+    [ci_deploy_auth]="deploy-auth"
+    [ci_deploy_observability]="deploy-observability"
+    [ci_deploy_iam]="manage-project-iam"
+  )
+
+  # main.tf の全 managed resource（data source は除く）の address / import ID 対応表を組み立てる。
+  local addresses=() ids=()
+
+  addresses+=("aws_s3_bucket.state"); ids+=("$bucket")
+  addresses+=("aws_s3_bucket_versioning.state"); ids+=("$bucket")
+  addresses+=("aws_s3_bucket_server_side_encryption_configuration.state"); ids+=("$bucket")
+  addresses+=("aws_s3_bucket_public_access_block.state"); ids+=("$bucket")
+  addresses+=("aws_s3_bucket_lifecycle_configuration.state"); ids+=("$bucket")
+  addresses+=("aws_s3_bucket_policy.state"); ids+=("$bucket")
+
+  if $owns_oidc; then
+    addresses+=("aws_iam_openid_connect_provider.github[0]")
+    ids+=("arn:aws:iam::${account_id}:oidc-provider/token.actions.githubusercontent.com")
+  fi
+
+  addresses+=("aws_iam_role.ci_plan"); ids+=("$plan_role_name")
+  addresses+=("aws_iam_role_policy_attachment.ci_plan_readonly"); ids+=("${plan_role_name}/${ro_policy_arn}")
+  addresses+=("aws_iam_role_policy.ci_plan_access_analyzer"); ids+=("${plan_role_name}:access-analyzer-validate-policy")
+  addresses+=("aws_iam_role_policy.ci_plan_state"); ids+=("${plan_role_name}:tfstate-access-dev")
+
+  addresses+=("aws_iam_role.ci_deploy"); ids+=("$deploy_role_name")
+
+  local key policy_arn
+  for key in ci_deploy_state ci_deploy_network ci_deploy_compute ci_deploy_storage_cdn \
+    ci_deploy_data ci_deploy_auth ci_deploy_observability ci_deploy_iam; do
+    policy_arn="arn:aws:iam::${account_id}:policy/${project}-${policy_suffix[$key]}"
+    addresses+=("aws_iam_policy.${key}"); ids+=("$policy_arn")
+    addresses+=("aws_iam_role_policy_attachment.${key}"); ids+=("${deploy_role_name}/${policy_arn}")
+  done
+
+  echo
+  echo "==> terraform import を実行します（${#addresses[@]}件）..."
+  local existing_state
+  existing_state="$(tf state list 2>/dev/null || true)"
+
+  local i addr id failed=() imported=0 skipped=0
+  for i in "${!addresses[@]}"; do
+    addr="${addresses[$i]}"
+    id="${ids[$i]}"
+    if grep -qxF "$addr" <<<"$existing_state"; then
+      echo "  [skip] $addr（既に state にあります）"
+      skipped=$((skipped + 1))
       continue
     fi
-    sed -e "s/devcon/$project/g" "$example" >"$real"
-    echo "==> generated: $real"
+    if tf import "$addr" "$id" >/dev/null; then
+      echo "  [ok]   $addr"
+      imported=$((imported + 1))
+    else
+      echo "  [FAIL] $addr (id: $id)" >&2
+      failed+=("$addr")
+    fi
   done
+
+  echo
+  echo "==> import 完了: ${imported}件 新規 / ${skipped}件 スキップ済み / ${#failed[@]}件 失敗"
+
+  if [[ ${#failed[@]} -gt 0 ]]; then
+    echo
+    echo "Error: 以下のリソースの import に失敗しました:" >&2
+    printf '    - %s\n' "${failed[@]}" >&2
+    echo "       main.tf の該当リソース定義とAWS側の実リソースを確認し、必要なら手動で" >&2
+    echo "       'terraform -chdir=$BOOTSTRAP_DIR import <address> <id>' を実行するか、" >&2
+    echo "       '$0 recover' を再実行してください（成功済み分はスキップされます）。" >&2
+    exit 1
+  fi
+
+  echo
+  echo "==> 完了。次のコマンドで差分が無いことを確認してください"
+  echo "    （差分がある場合、import ID の想定と main.tf の実際の定義がずれている可能性があります）:"
+  echo "      terraform -chdir=$BOOTSTRAP_DIR plan"
+  echo "    差分が無ければ、このマシンで '$0 update' / '$0 write' / '$0 destroy' が使えます。"
 }
 
 # ============================================================
@@ -491,6 +876,8 @@ main() {
     update) cmd_update "$@" ;;
     write) cmd_write "$@" ;;
     destroy) cmd_destroy "$@" ;;
+    adopt) cmd_adopt "$@" ;;
+    recover) cmd_recover "$@" ;;
     -h | --help | "") usage; [[ -z "$command" ]] && exit 2 || exit 0 ;;
     *) echo "Error: unknown command: $command" >&2; usage; exit 2 ;;
   esac

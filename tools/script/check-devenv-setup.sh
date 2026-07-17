@@ -197,8 +197,31 @@ fi
 # fork して自分の AWS にデプロイする場合のみ必要 — 未完了はすべて info（NGにはしない）。
 section "infra/bootstrap 初期設定（本格セットアップ・任意 — fork して自分の AWS にデプロイする場合のみ必要）"
 
+# `terraform output` の成否だけで判定すると、「本当に未適用」と「適用済みだがこの
+# チェックアウトで terraform init が未実行（.terraform/providers のプラグインキャッシュが
+# 無い。コンテナ再構築直後など）」を区別できず、後者も「未適用」と誤表示してしまう（#529）。
+# ローカル state ファイルに managed resource が実在するかを直接見て区別する。
+bootstrap_state="infra/bootstrap/terraform.tfstate"
+bootstrap_state_has_resources() {
+  [[ -f "$bootstrap_state" ]] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 -c "
+import json, sys
+try:
+    with open('$bootstrap_state') as f:
+        state = json.load(f)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if any(r.get('mode') == 'managed' for r in state.get('resources', [])) else 1)
+" 2>/dev/null
+}
+
 if command -v terraform >/dev/null 2>&1 && terraform -chdir=infra/bootstrap output >/dev/null 2>&1; then
   ok "infra/bootstrap: ローカルで apply 済み（terraform output が取得できる）"
+elif bootstrap_state_has_resources; then
+  ok "infra/bootstrap: ローカルで apply 済み（$bootstrap_state にリソースあり）"
+  echo "       -> terraform output はまだ実行できません。このチェックアウトで"
+  echo "          'terraform -chdir=infra/bootstrap init' が未実行の可能性があります（適用自体は済んでいます）。"
 else
   info "infra/bootstrap: 未適用" "自分の AWS にデプロイしない場合は不要。必要なら ./tools/script/bootstrap.sh init"
 fi

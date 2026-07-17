@@ -7,6 +7,38 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-17
+
+### Added
+
+- **`bootstrap.sh` に別マシンでの設定取り込み（`adopt`）と state 復旧（`recover`）を追加**:
+  `infra/bootstrap` はローカル state 限定のため、`init` を実行した1台以外の開発PCでは
+  bootstrap 設定を使えず、その1台自体を失うと AWS 上にリソースが残っていても復旧手段が
+  無かった。`adopt` は `write` が公開済みのリポジトリ変数（`PROJECT_NAME` /
+  `AWS_TF_STATE_BUCKET` / `AWS_PLAN_ROLE_ARN` / `AWS_DEPLOY_ROLE_ARN`）を読み、現在の
+  AWS 認証情報で state バケット・IAM ロール2つの実在を確認したうえで
+  `infra/env/*.backend.hcl` / `*.tfvars` を生成する（ローカル state は作らない）。
+  `recover` は同じ検証を行ったあと `terraform import` で `main.tf` の全 managed resource
+  （state バケット一式・IAM ロール2つ・ポリシー8個・アタッチメント9個・inline ポリシー2個）
+  を再構築し `terraform.auto.tfvars` も書く。既に import 済みのリソースはスキップするため、
+  一部失敗しても再実行で再開できる（#530）。
+- **devcontainer イメージを GHCR に事前ビルド公開し `build.cacheFrom` で取り込むようにした**:
+  devcontainer 初回起動が `.devcontainer/Dockerfile` の完全ローカルビルドで遅い問題に対応。
+  `image` への全面移行ではなく `build.cacheFrom` を追加する方式を採用し、`Dockerfile` 編集
+  → ローカル即 Rebuild Container という既存の開発者体験を維持しつつ初回起動を高速化した。
+  公開は公開ミラー（`iwata-jawsug-jp/devcon`）側でのみ実行するようジョブガードし、
+  開発用リポジトリ自身が誤って自分の名前空間に push しないようにした。設計判断は
+  [ADR-0018](docs/adr/0018-devcontainer-image-ghcr-cachefrom.md) 参照（#532, #534）。
+
+### Fixed
+
+- **`check-devenv-setup.sh` が `terraform init` 未実行を `infra/bootstrap` 未適用と誤判定する
+  不具合を修正**: 判定が `terraform -chdir=infra/bootstrap output` の成否のみに依存しており、
+  実際には適用済みでもこのチェックアウトでプロバイダプラグイン未キャッシュ（コンテナ再構築
+  直後等）だと「未適用」と誤表示していた。`terraform.tfstate` に managed resource が実在
+  するかを python3 で直接確認するフォールバックを追加し、「本当に未適用」と「適用済みだが
+  このチェックアウトで `terraform init` 未実行」を区別するようにした（#529）。
+
 ## [0.4.0] - 2026-07-17
 
 ### Added

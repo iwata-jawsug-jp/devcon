@@ -38,6 +38,56 @@ See `./tools/script/bootstrap.sh --help` for all options (`-o/-r/-b/-R` override
 `write`, `--include-state-bucket` on `destroy`). The manual steps below remain as a reference /
 fallback.
 
+### Using this on a second dev machine
+
+`init`/`update`/`destroy` need the local `terraform.tfstate` this layer produces (see "Notes"
+below for why it can't have a remote backend), so they only work on the one machine that ran
+`init`. A second dev machine doesn't need that state — it just needs the values `write` already
+published as repo variables (`PROJECT_NAME` / `AWS_TF_STATE_BUCKET` / `AWS_PLAN_ROLE_ARN` /
+`AWS_DEPLOY_ROLE_ARN`). Run:
+
+```bash
+tools/script/bootstrap.sh adopt
+```
+
+It reads those repo variables (override any of them with `-p`/`-b`/`--plan-role-arn`/
+`--deploy-role-arn` if `gh` can't read them), verifies the state bucket and both IAM roles
+actually exist under the AWS credentials active on this machine, then generates
+`infra/env/*.backend.hcl` / `*.tfvars` locally — without creating any Terraform state here. If
+the verification fails (e.g. this machine is authenticated against a different AWS account),
+`adopt` stops with an error instead of writing files from unverified values. `update`/`destroy`
+for `infra/bootstrap` itself still must run from the original `init` machine.
+
+### If the `init` machine itself is lost
+
+If the one machine holding the local state is gone (disk failure, container rebuild, etc.) but
+the AWS resources it created are still there, rebuild the state from AWS instead:
+
+```bash
+tools/script/bootstrap.sh recover
+```
+
+Like `adopt`, it reads the repo variables `write` published (or explicit `-p`/`-b`/
+`--plan-role-arn`/`--deploy-role-arn` overrides) and verifies the referenced AWS resources
+exist. It then runs `terraform init` and `terraform import` for every resource `main.tf`
+declares (the S3 state bucket and its sub-resources, both CI IAM roles, all policies and
+attachments) and writes `terraform.auto.tfvars`, so `update`/`write`/`destroy` work again from
+this machine. It's safe to re-run: already-imported resources are skipped, so a partial failure
+(e.g. one wrong assumption about a resource name) can be fixed and retried without redoing the
+rest.
+
+The GitHub Actions OIDC provider is the one exception: whether _this_ bootstrap created it or
+merely reused one a sibling repo's bootstrap already created isn't something AWS records, so
+`recover` never imports it unless you pass `--owns-oidc-provider` (only do this if you're sure
+— importing it when you're not gives this state destroy authority over a resource another
+repo's CI may depend on).
+
+After it finishes, run `terraform -chdir=infra/bootstrap plan` and confirm it reports no
+changes — that's the signal the reconstructed state actually matches the imported values (a
+mismatched import ID would otherwise show up there as spurious diffs, not as an import error).
+Verified end-to-end against a real applied environment: `terraform plan` reported no changes
+after a full `recover` from a deleted `terraform.tfstate`.
+
 > **Brand-new AWS account/region prerequisite**: `main.tf` reads the account's
 > default AWS-managed KMS keys via `data "aws_kms_alias"` (`alias/aws/rds`,
 > `alias/aws/secretsmanager`) to scope the `ci_deploy` IAM policy. Those aliases
