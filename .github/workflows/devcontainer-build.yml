@@ -1,12 +1,23 @@
 name: Devcontainer build
 
-# .devcontainer/Dockerfile をビルドして GHCR（ghcr.io/iwata-jawsug-jp/devcon/devcontainer）へ
+# .devcontainer/devcontainer.json をビルドして GHCR（ghcr.io/iwata-jawsug-jp/devcon/devcontainer）へ
 # push する（#532）。devcontainer.json の build.cacheFrom は :buildcache タグ（実イメージの
 # :latest とは別）を、devcon・公開ミラー（iwata-jawsug-jp/devcon）・copier 生成先の
 # すべてが共通のキャッシュ元として参照する設計（#536 で devcon 自身が参照する
 # cacheFrom を自分の未公開の名前空間ではなくこの canonical なイメージに向ける形へ修正済み）。
 # push 先はこの1箇所に固定するため、publish-to-public.sh の文字列変換には依存しない
 # （この文字列は `iwata-jawsug-jp/devcon` を含まないため変換の対象にもならない）。
+#
+# `devcontainer build`（@devcontainers/cli）経由でビルドする（#542、ADR-0018 訂正3）。
+# 生の .devcontainer/Dockerfile を docker/build-push-action で直接ビルドしていた旧実装では、
+# Codespaces / VS Code Dev Containers 拡張が実際に使う devcontainers CLI 経由のビルド経路
+# （devcontainer.json の features 組み込みのため、ベースステージを
+# `dev_container_auto_added_stage_label` にリネームし `_DEV_CONTAINERS_*` build-arg と
+# 追加ビルドコンテキストを注入した「別のビルドグラフ」でビルドする）と op ダイジェストの
+# チェーンが一致せず、公開した :buildcache が実際の Codespaces ビルドで一切再利用されない
+# 不具合があった（実機確認: devcontainer-build.yml 自身の直近実行ログでも CACHED が0件）。
+# ここで devcontainers CLI 経由でビルドすることで、実際の消費経路と同じグラフに対して
+# :buildcache を作る。
 #
 # ビルド・push 自体は公開ミラー（iwata-jawsug-jp/devcon）でだけ実行する。devcon
 # 自身では below の job-level if で常にスキップする（GITHUB_TOKEN に他組織の GHCR への
@@ -46,18 +57,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v4
-      - name: Build & push devcontainer image
-        uses: docker/build-push-action@v7
         with:
-          context: .devcontainer
-          push: true
-          tags: |
-            ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest
-            ghcr.io/iwata-jawsug-jp/devcon/devcontainer:${{ github.sha }}
-          # cache-to/cache-from は tags と別タグ（:buildcache）にする。同じ:latestを共有すると
-          # cache-to（mode=max）が書き込む buildkit cacheconfig manifest が実イメージを
-          # 上書きしてしまい、:latest が「docker run できない、キャッシュメタデータだけの
-          # 参照」になる（#536 で実機発生・確認）。devcontainer.json の cacheFrom もこの
-          # :buildcache を参照する。
-          cache-from: type=registry,ref=ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache
-          cache-to: type=registry,ref=ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache,mode=max
+          driver: docker-container
+          use: true
+      - name: Install devcontainers CLI
+        run: npm install -g @devcontainers/cli@0.87.0
+      - name: 'Build & push devcontainer image (devcontainers CLI 経由。features 込みで実際の消費経路と同じグラフをビルドする)'
+        run: |
+          devcontainer build \
+            --workspace-folder . \
+            --platform linux/amd64 \
+            --image-name ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest \
+            --image-name ghcr.io/iwata-jawsug-jp/devcon/devcontainer:${{ github.sha }} \
+            --cache-from ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache \
+            --cache-to type=registry,ref=ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache,mode=max \
+            --push true

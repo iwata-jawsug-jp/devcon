@@ -7,6 +7,26 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-17
+
+### Fixed
+
+- **`devcontainer-build.yml` が Codespaces / VS Code Dev Containers の実際のビルド経路と
+  異なるグラフで `:buildcache` を作っており、キャッシュが恒久的にミスしていた不具合を修正**:
+  `docker/build-push-action` で生の `.devcontainer/Dockerfile` を直接ビルドしていたが、
+  Codespaces / VS Code Dev Containers は `devcontainer.json` の `features`
+  （`docker-in-docker`）組み込みのため、ベースステージを `dev_container_auto_added_stage_label`
+  にリネームし `_DEV_CONTAINERS_*` build-arg と追加ビルドコンテキストを注入した別のビルド
+  グラフでビルドする。BuildKit のレジストリキャッシュは `FROM` 起点の op ダイジェストチェーン
+  で一致判定するため、この構造差により公開した `:buildcache` が実際の Codespaces ビルドで
+  一切再利用されなかった（実機確認: `devcontainer-build.yml` 自身の直近実行ログでも `CACHED`
+  が0件）。GHCR パッケージの可視性・認証は問題なくアクセス権の問題ではなかった。
+  `devcontainer-build.yml` を `devcontainer build`（`@devcontainers/cli`）経由のビルドに
+  変更し、実際の消費経路と同じグラフに対して `:buildcache` を作るようにした。ローカルで
+  既存の `:buildcache` に対して `devcontainer build --cache-from` を実行し、全 `RUN` ステップ
+  が `CACHED` になることを実機確認済み。設計判断の訂正は
+  [ADR-0018](docs/adr/0018-devcontainer-image-ghcr-cachefrom.md) 参照（#542）。
+
 ## [0.5.1] - 2026-07-17
 
 ### Fixed

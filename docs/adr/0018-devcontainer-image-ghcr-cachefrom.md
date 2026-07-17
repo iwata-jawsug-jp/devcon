@@ -91,18 +91,56 @@ devcontainer-build.yml の push トリガー` の連鎖で起きる。
 > `:buildcache` という別タグに分離し、`devcontainer.json` の `cacheFrom` もそちらを参照する
 > よう修正した。
 
+> **訂正3（2026-07-17, #542）:** 「良い面」「トレードオフ」に記載した #538 の実機検証（全12
+> `RUN` ステップが `CACHED`）は、`.devcontainer/Dockerfile` に対して `docker build
+--cache-from` を**直接**実行するテストであり、Codespaces / VS Code Dev Containers / copier
+> 生成先が実際に使う経路（devcontainers CLI 経由のビルド）を通していなかった。実際に
+> Codespaces でビルドしたところ、`RUN` が1件も `CACHED` にならず全ステップが実行された
+> （#542）。devcontainers CLI は `devcontainer.json` の `features`（本リポジトリでは
+> `docker-in-docker`）を組み込む際、生の `Dockerfile` をそのままビルドせず、ベースステージへ
+> `AS dev_container_auto_added_stage_label` を付与し `_DEV_CONTAINERS_BASE_IMAGE` 等の
+> build-arg と追加ビルドコンテキスト（`dev_containers_feature_content_source`）を注入した
+> **別のビルドグラフ**を組み立てる。`devcontainer-build.yml` は `docker/build-push-action` で
+> 生の `Dockerfile` を直接ビルドしており devcontainers CLI を経由しないため、`:buildcache` は
+> devcontainers CLI が実際に組み立てるグラフとは op ダイジェストのチェーンが異なり、
+> `FROM` 起点で一致判定する BuildKit のレジストリキャッシュが一切マッチしない。GHCR パッケージ
+> の可視性・認証は問題なく（`[auth]` トークン取得・`importing cache manifest` はいずれも
+> 成功）、これはアクセス権の問題ではなく**キャッシュを生成するビルド経路と実際に消費するビルド
+> 経路が構造的に異なる**という設計不備だった。`devcontainer-build.yml` 自身の直近実行
+> （v0.5.1、`iwata-jawsug-jp/devcon` の run 29618796597）のログでも `CACHED` が0件であることを
+> `gh run view --log` で確認済み（自分の直前ビルドが書いたはずの `:buildcache` すら再利用でき
+> ていない）。修正: `devcontainer-build.yml` を `docker/build-push-action` から
+> `@devcontainers/cli` の `devcontainer build` コマンド経由のビルドに変更した（#542）。
+> `--cache-from`/`--cache-to` はそのまま buildx へ伝播するため（CLI ソース
+> `devContainersSpecCLI.js` で確認）、生成される `:buildcache` は devcontainers CLI が
+> 実際に組み立てるグラフ（features 込み）と一致するようになる。ローカルで
+> `devcontainer build --cache-from ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache`
+> を実行し、既存の `:buildcache`（devcontainers CLI 経由の修正前は一度もこの経路で書かれた
+> ことがないにも関わらず）に対して `.devcontainer/Dockerfile` 由来の全 RUN ステップが
+> `CACHED` になることを実機確認済み（features 側の追加インストールステージ自体は
+> devcontainers CLI 経由でビルドされたことが一度も無かったため今回は未キャッシュで実行され
+> たが、これは今回の修正で `:buildcache` に書き込まれるため次回以降はキャッシュされる）。
+
 ## Consequences
 
-- 良い面: `Dockerfile` が前回公開時点と同じであれば、初回起動がほぼ pull のみの速度になる。
+- 良い面: `Dockerfile` が前回公開時点と同じであれば、初回起動がほぼ pull のみの速度になる
+  （訂正3参照: `devcontainer-build.yml` を devcontainers CLI 経由のビルドに修正し、実際の
+  Codespaces 消費経路と同じグラフでキャッシュヒットすることをローカルで実機確認済み、#542）。
   copier 生成直後（まだ CI を一度も回していない）プロジェクトでも soft-fail により壊れない。
   `Dockerfile` 編集 → ローカル即 Rebuild Container という既存の開発者体験を維持する。
 - トレードオフ: `devcon` 自身のローカル/Codespaces 利用でも、キャッシュ元は公開ミラー側の
   イメージになる（自分専用の事前ビルドは持たない）。公開ミラー側の初回 push（GitHub Release）
   までは、`devcon` でも公開ミラーでも通常ビルドと同じ速度のまま（regression ではないが
-  恩恵もまだ無い）。GHCR パッケージ自体の公開可視性は実機確認済み（2026-07-17、
-  `docker manifest inspect` による匿名 pull 確認）。実際のキャッシュヒットによる高速化は、
-  #538 の修正を公開ミラーへ再 publish したのちに実機確認する（当初 publish 分は #538 の
-  バグにより `:latest` が壊れており未確認）。
+  恩恵もまだ無い）。GHCR パッケージ自体の公開可視性、および実際のキャッシュヒットによる
+  高速化は v0.5.1 で実機確認済み（2026-07-17）: `docker manifest inspect` による匿名 pull
+  確認、`docker buildx imagetools inspect --raw` で `:latest`（実イメージ・OCI image index）
+  と `:buildcache`（cache config manifest）が正しく分離されていることの確認、実際に
+  `docker build --cache-from ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache` を
+  実行し `.devcontainer/Dockerfile` の全12個の `RUN` ステップ（Python/GitHub CLI/Claude Code/
+  conftest/tflint/Node.js/AWS CLI/Terraform/Trivy/Checkov/uv/copier のインストール）すべてが
+  `CACHED` と表示されビルド時間 1分21秒で成功したことを確認（#538）。**ただしこれは
+  devcontainers CLI を経由しない直接ビルドでの確認であり、実際の Codespaces 利用時には
+  キャッシュヒットしない不具合が後に発覚し、#542 で修正済み（訂正3参照）。**
 - 運用負担: GHCR は新規パッケージを初回 push 時に private 作成することがあるため、初回
   ワークフロー実行後に `iwata-jawsug-jp` 組織の管理者が Package settings で可視性を Public に
   変更する一回限りの手作業が必要（自動化できない）。
