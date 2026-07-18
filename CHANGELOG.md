@@ -7,6 +7,24 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-07-18
+
+### Fixed
+
+- **devcontainer 事前ビルドキャッシュが実際の Codespaces では引き続き機能しなかった不具合を修正**:
+  v0.5.2（`:buildcache` 単体参照）リリース後の実機テストで、Codespaces が実際に使う buildx
+  `docker` ドライバでは `type=registry` 形式のレジストリキャッシュ（`:buildcache`）を読み込め
+  ないことが判明した（`docker-container` ドライバ限定の制約）。まず `cacheFrom` に inline
+  cache 対応の `:latest` を追加したが（#547）、それでも実際の Codespaces では `RUN` が1件も
+  キャッシュヒットしなかった。ホスト側 Docker Engine（`moby-engine` 24.0.x 系）で containerd
+  snapshotter が無効なためと推測し、devcontainer spec の `initializeCommand`（コンテナビルド
+  前にホスト側で実行される）から buildx builder を `docker-container` ドライバへ切り替える
+  対応を追加した（#548）。`docker buildx use` はリポジトリ単位ではなくホスト全体のグローバル
+  設定を書き換えるため、ローカルの VS Code Dev Containers 拡張へ副作用が及ばないよう
+  `CODESPACES=true` の場合のみ実行するようガードした（#550）。実際に Codespaces を新規作成し、
+  `Dockerfile` 由来の `RUN` 13件全てが `CACHED` になることを実機確認済み。設計判断の詳細は
+  [ADR-0018](docs/adr/0018-devcontainer-image-ghcr-cachefrom.md) 訂正4・訂正5参照（#546）。
+
 ## [0.5.2] - 2026-07-17
 
 ### Fixed

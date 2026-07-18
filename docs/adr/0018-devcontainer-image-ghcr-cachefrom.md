@@ -51,8 +51,9 @@ AWS ECR は「devcontainer を開くために先に AWS 認証が要る」循環
 1. **レジストリは GHCR。**
 2. **`devcontainer.json` は `build.dockerfile` を維持し、`build.cacheFrom` に
    `ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache` を直接（ハードコードで）指定する
-   （タグの理由は 7. 参照）。** `iwata-jawsug-jp/devcon`・公開ミラー・copier 生成先のすべてが、
-   この1つの canonical なイメージをキャッシュ元として共有参照する（下記「訂正」参照）。
+   （タグの理由は 7. 参照。訂正4で `:latest` も加えた配列に変更）。** `iwata-jawsug-jp/devcon`・
+   公開ミラー・copier 生成先のすべてが、この1つの canonical なイメージをキャッシュ元として
+   共有参照する（下記「訂正」参照）。
 3. **公開ワークフロー（`.github/workflows/devcontainer-build.yml`）は `iwata-jawsug-jp/devcon`
    でのみ実行するようジョブレベルの `if: github.repository == 'iwata-jawsug-jp/devcon'` で
    ガードする。** push 先タグも同じ canonical なイメージ1箇所（
@@ -60,6 +61,12 @@ AWS ECR は「devcontainer を開くために先に AWS 認証が要る」循環
    push しない（他組織の GHCR への書き込み権限が無く、そもそも実行してはいけない）。
    ワークフローの起動自体は `GitHub Release 公開 → publish.yml → 公開ミラーの main 更新 →
 devcontainer-build.yml の push トリガー` の連鎖で起きる。
+4. **`devcontainer.json` に `initializeCommand": "bash .devcontainer/initialize.sh"` を追加し、
+   Codespaces（`CODESPACES=true`）でのみコンテナビルド前にホスト側で buildx builder を
+   `docker-container` ドライバへ切り替える（訂正5参照）。** 失敗時は必ず `exit 0` で抜け
+   デフォルトの `docker` ドライバへフォールバックする（soft-fail、Codespace 作成自体は
+   壊さない）。ローカルの VS Code Dev Containers 拡張では `docker buildx use` がホスト全体の
+   グローバル設定を書き換えてしまう副作用を避けるため何もしない。
 
 > **訂正1（2026-07-17, #538）:** 初版では 2./3. の参照先を `ghcr.io/iwata-jawsug-jp/devcon/devcontainer`
 > と書き、`tools/script/publish-to-public.sh` の文字列変換（`iwata-jawsug-jp/devcon` →
@@ -121,11 +128,118 @@ devcontainer-build.yml の push トリガー` の連鎖で起きる。
 > devcontainers CLI 経由でビルドされたことが一度も無かったため今回は未キャッシュで実行され
 > たが、これは今回の修正で `:buildcache` に書き込まれるため次回以降はキャッシュされる）。
 
+> **訂正4（2026-07-18, #546）:** 訂正3の修正を v0.5.2 としてリリースし公開ミラーの
+> `devcontainer-build.yml` が実際に green（全 `RUN` が `CACHED`、実機確認済み）になった後も、
+> **実際の Codespaces で Rebuild Container すると依然として `RUN` が1件も `CACHED` にならない**
+> ことが実機で判明した。ビルドグラフの不一致（訂正3）は解消済みだったが、別レイヤーの原因が
+> あった: Codespaces の `devcontainer up` はビルドログに `"default" instance using docker
+driver` と出る通り、デフォルトの `docker` buildx ドライバを使う。一方、
+> `devcontainer-build.yml`（CI）や訂正3の実機検証はいずれも `docker/setup-buildx-action@v4` で
+> 明示的に `driver: docker-container` を設定していた。**`type=registry` 形式のレジストリ
+> キャッシュ（`cache-from`/`cache-to` に指定していた `:buildcache`）は `docker-container`
+> ドライバでしか使えず、`docker` ドライバでは読み込めない**（Docker 公式ドキュメント
+> [Cache storage backends](https://docs.docker.com/build/cache/backends/)、
+> [docker/buildx#2165](https://github.com/docker/buildx/discussions/2165) で確認）。
+> `importing cache manifest` 自体はエラーなく完了する（メタデータの取得は driver を問わず
+> できる）ため一見正常に見えるが、実際のキャッシュ適用は一切行われない。Codespaces の
+> ビルド環境（デフォルトビルダー）はリポジトリ側から `docker-container` に強制する手段が
+> 無いため、`type=registry` キャッシュに依存する設計は Codespaces では原理的に機能しない。
+>
+> 実機で `docker buildx use default`（`docker` ドライバに切り替え、Codespaces と同条件）にして
+> 再現したのち、`cacheFrom` を `:buildcache`（`type=registry`）ではなく `:latest`（実イメージ）
+> に変えて実行したところ、`docker` ドライバでも全 `RUN` ステップが `CACHED` になることを確認
+> した。devcontainers CLI は `docker buildx build` 実行時に `--build-arg
+BUILDKIT_INLINE_CACHE=1` を常に自動付与するため、`:latest` には push 時点で
+> [inline cache](https://docs.docker.com/build/cache/backends/inline/) が既に埋め込まれており、
+> `type=registry` を使わない素の `--cache-from <image>`（inline cache 読み込み）は `docker`
+> ドライバでも動作する。`devcontainer.json` の `build.cacheFrom` を `:buildcache` 単体から
+> `["ghcr.io/.../devcontainer:latest", "ghcr.io/.../devcontainer:buildcache"]` の配列に変更し
+> （`:latest` で `docker` ドライバのデフォルト環境をカバーしつつ、`:buildcache` は
+> `docker-container` ドライバを使う開発者向けに残す）、devcontainer.json 自体の設定のまま
+> `docker` ドライバで全19件 `CACHED`・約19.5秒で成功することを実機確認済み（#546）。
+> `devcontainer-build.yml`（CI）側の変更は不要（`:latest` push 時に inline cache が既に
+> 付与されているため）。
+
+> **訂正5（2026-07-18, #546）:** 訂正4（`cacheFrom` への `:latest` 追加）をマージ後、実際に
+> 新規作成した Codespaces で再確認したところ、`RUN` は依然として1件もキャッシュヒットしなかった。
+> 現在稼働中のこの Codespaces 自身の作成ログ（`/workspaces/.codespaces/.persistedshare/creation.log`）
+> でも同じ症状を再実機確認した（`importing cache manifest` は `:buildcache`・`:latest` 両方とも
+> 成功するが、`RUN` 2/14〜11/14 は全て実行される）。
+>
+> ホスト側 Docker Engine の containerd snapshotter 有効/無効を直接確認する手段はやはり無かった
+> （`docker info` は `docker-in-docker` feature が作る入れ子の dockerd を見るだけで、Codespaces
+> がビルドに使うホスト側 Docker Engine とは別物であることを実機確認済み）。ただし creation.log
+> 冒頭が参照する `github/codespaces-host-images` の README で、ホストの `moby-engine` が
+> **24.0.x 系**であることが判明した。containerd image store（containerd snapshotter）は
+> Moby/Docker Engine では `daemon.json` に `features.containerd-snapshotter: true` を明示しない
+> 限り有効にならないオプトイン機能であり、Codespaces のホストイメージがこれを有効化している
+> という情報はどこにも無い。デフォルト無効という前提のほうが、`type=registry` に加え `:latest`
+> の inline cache も `docker` ドライバでは効かないという実機症状と整合する。
+>
+> `docker-container` ドライバは自前の buildkitd コンテナで完結し、ホスト側の containerd
+> snapshotter 設定に依存しない（[Cache storage backends](https://docs.docker.com/build/cache/backends/)）。
+> devcontainer spec の `initializeCommand` はコンテナビルド前にホスト側で実行されるフックである
+> ため、ここで `docker buildx create --driver docker-container --use` を実行し、Codespaces
+> 自身が呼ぶ `devcontainer up` のビルドが `docker-container` ドライバを使うよう仕向けられないか
+> 実機検証した（`devcontainer build` コマンドは `initializeCommand` を一切実行しないため代替に
+> ならないことも確認済み。Codespaces が実際に使うのは `devcontainer up`）。
+>
+> 最小構成の devcontainer で検証したところ、`initializeCommand` から builder を切り替えると
+> ビルドログの `building with` 行が `"default" instance using docker driver` から
+> `"devcon-builder" instance using docker-container driver` に変わることを実機確認した。
+> また `initializeCommand` が非ゼロ終了すると `devcontainer up` 全体（Codespace 作成そのもの）
+> が失敗することも実機確認したため、`.devcontainer/initialize.sh` は builder の作成・切り替え
+> のどちらが失敗しても必ず `exit 0` で抜け、デフォルトの `docker` ドライバのままフォールバック
+> する設計にした（最悪でも現状と同じ「キャッシュなしの通常ビルド」に留まり、Codespace 作成自体
+> は壊さない）。
+>
+> 実際の `devcon` の `.devcontainer`（本物の `Dockerfile` と `cacheFrom` 設定そのまま）を
+> 隔離ディレクトリにコピーし `devcontainer up --skip-post-create` を実行したところ、
+> `docker-container` ドライバに切り替わった上で `RUN` 2/14〜14/14 の13件すべてが `CACHED`、
+> `outcome: success` でコンテナ作成まで成功することを実機確認した。ただしこの検証は本セッション
+> の入れ子 dockerd（containerd snapshotter 有効）上で行ったものであり、containerd snapshotter
+> が無効なホスト環境そのものは再現できていなかった。`devcontainer.json` に
+> `"initializeCommand": "bash .devcontainer/initialize.sh"` を追加した。
+>
+> **その後、PR #548 のブランチから実際に Codespaces を新規作成（Rebuild Container 相当）して
+> 最終確認した。** `initializeCommand` が `devcon-builder`（`docker-container` ドライバ）
+> を作成・使用し、本体のビルドが `building with "devcon-builder" instance using
+docker-container driver` になった上で、`Dockerfile` 由来の `RUN` 13件（2/14〜14/14。apt
+> 基本パッケージ・Python 3.14・Node.js・AWS CLI・Terraform・tflint・trivy・checkov・conftest・
+> gh・claude-code・uv・copier）が**すべて `CACHED`** になることを実機確認した。containerd
+> snapshotter が実際に無効なホスト（moby-engine 24.0.x 系）であっても `docker-container`
+> ドライバ経由なら registry cache（`:buildcache`）・inline cache（`:latest`）のどちらも問題なく
+> 機能することが確定した。
+>
+> なお `docker-in-docker` feature 自体のインストールステージ（`dev_containers_target_stage 4/4`、
+> `--mount=type=bind,from=dev_containers_feature_content_source` で feature コンテンツを
+> bind mount する RUN）だけは今回も毎回 `CACHED` にならず実行される（訂正3で触れた通り、feature
+> コンテンツの一時ディレクトリはビルドごとに生成され直すため、この1ステップは devcontainers CLI
+> の feature 機構そのものの制約で恒常的にキャッシュ対象外になる）。所要47.8秒程度で
+> `Dockerfile` 側の重い install 群（今回の本題）とは無関係な既知の残差であり、追加対応はしない。
+>
+> `docker buildx use` はリポジトリ単位ではなくホスト全体のグローバル設定を書き換えるため、
+> ローカルの VS Code Dev Containers 拡張（Codespaces 以外）で同じ `devcontainer.json` を使うと
+> 開発者の buildx デフォルト builder を他プロジェクトの分まで勝手に切り替えてしまう副作用が
+> ある。Codespaces はコンテナ内に `CODESPACES=true` を自動設定しており、`initializeCommand` は
+> その `devcontainer up` プロセスの子として動くため同じ環境変数を継承している。
+> `.devcontainer/initialize.sh` の先頭で `CODESPACES=true` を確認し、Codespaces 以外では
+> switch 処理そのものをスキップして `docker` ドライバのまま何もしないようにした。最小構成の
+> devcontainer で `CODESPACES=false`／`CODESPACES=true` 双方を実機確認済み（前者は
+> `building with "default" instance using docker driver` のまま、後者のみ builder が
+> 切り替わる）。
+
 ## Consequences
 
 - 良い面: `Dockerfile` が前回公開時点と同じであれば、初回起動がほぼ pull のみの速度になる
-  （訂正3参照: `devcontainer-build.yml` を devcontainers CLI 経由のビルドに修正し、実際の
-  Codespaces 消費経路と同じグラフでキャッシュヒットすることをローカルで実機確認済み、#542）。
+  （訂正3・訂正4参照: `devcontainer-build.yml` を devcontainers CLI 経由のビルドに修正した
+  だけでは不十分で、Codespaces が使う `docker` buildx ドライバは `type=registry` キャッシュを
+  読めないため、`cacheFrom` に inline cache 対応の `:latest` を追加してようやく `docker`
+  ドライバでも `CACHED` になることを実機確認済み、#542・#546）。それでも実際の Codespaces では
+  ホスト側 Docker Engine の containerd snapshotter が無効と見られ `:latest` の inline cache も
+  効かなかったため、訂正5で `initializeCommand` からビルド前に `docker-container` ドライバへ
+  切り替える仕組みを追加し、実際に Codespaces を新規作成して最終確認した結果、`Dockerfile` 由来の
+  `RUN` 13件全てが `CACHED` になることを実機確認済み（#546）。
   copier 生成直後（まだ CI を一度も回していない）プロジェクトでも soft-fail により壊れない。
   `Dockerfile` 編集 → ローカル即 Rebuild Container という既存の開発者体験を維持する。
 - トレードオフ: `devcon` 自身のローカル/Codespaces 利用でも、キャッシュ元は公開ミラー側の
