@@ -109,6 +109,19 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
 `init`をやり直しても、前回適用時にAWS側に残ったままの同名リソースと衝突
 （`EntityAlreadyExists`）しないようにするためのもの。
 
+> **`plan_subjects`/`deploy_subjects`は`sub`クレームを2形式で持つ（#581、実機検証済み）**
+>
+> GitHub Actionsが発行するOIDCトークンの`sub`クレームは、リポジトリによってclassic形式
+> （`repo:<org>/<repo>:pull_request`等）と、owner_id/repository_id埋め込み形式
+> （`repo:<org>@<owner_id>/<repo>@<repo_id>:pull_request`等）のいずれかになり、GitHub側の
+> 発行条件は不明。`sub`を`repository`/`event_name`/`ref`/`environment`クレームに置き換える
+> 案も検討したが、実AWS環境で`terraform apply`は通るのに実際のGitHub Actions実行では
+> `AssumeRoleWithWebIdentity`が失敗した（AWS IAMがこのOIDCプロバイダーに対して
+> `sub`/`aud`/`job_workflow_ref`以外のクレームを条件キーとして認識しないため、と推測される
+> ——`sub`を完全に外すと`terraform apply`自体が`MalformedPolicyDocument: ... must evaluate
+... sub or job_workflow_ref`で拒否されることからも裏付けられる）。そのため
+> `plan_subjects`/`deploy_subjects`の各要素を両`sub`形式で列挙する方式を採用している。
+
 > **`*-ci-deploy` は sandbox と prod で同一ロール（判断の記録、#153 finding #10/#306）**
 >
 > `deploy_subjects`（`bootstrap/main.tf`）は `ref:refs/heads/main` / `environment:production` に
@@ -182,6 +195,14 @@ tools/script/bootstrap.sh adopt               # 他PCのbootstrap設定をリポ
 
 AWS環境の確認に失敗した場合（別アカウントに繋いでいる等）はファイルを生成せずエラー終了する。
 `infra/bootstrap` 自体の `update`/`destroy` は引き続き `init` を実行したマシンから行うこと。
+
+> **1つのAWSアカウント内でproject名は一意にすること。** 別リポジトリ/別マシンから同じ
+> project名で `bootstrap.sh init` を実行すると、IAMロール/ポリシー名の一意化トークン
+> （`<project>-<suffix>-...`、`<suffix>`は`init`のたびにランダム生成）により名前衝突は
+> 起きず`terraform apply`自体は成功してしまうが、同じproject名を名乗る独立した環境が
+> 気付かないまま複数できてしまう。`bootstrap.sh init`はAWS API上に同名projectの
+> `*-ci-plan`ロールが既に存在するかを事前チェックし、見つかった場合は分かりやすい
+> エラーで終了する（既存環境を使いたい場合は上記の`adopt`を使うこと、#563）。
 
 **自動バックアップ**: `init`/`update`成功後（および`recover`のimportフォールバック成功後）、
 `terraform.tfstate`/`terraform.auto.tfvars` を state バケット自身の `_bootstrap-state-backup/`

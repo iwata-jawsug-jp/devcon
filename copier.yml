@@ -51,6 +51,12 @@ _exclude:
   - .github/workflows/cd-app-verify.yml
   - infra/env/golden-path-verify.tfvars.example
   - infra/env/golden-path-verify.backend.hcl.example
+  # cc-sdd 試験導入 PoC（#61）の評価用ダミー spec。ready_for_implementation: false・全approval
+  # 未承認のまま、リネーム（#61直後の services/api → services/backend/python 等）前の古いパス
+  # 記述で凍結されている。「履歴として残すが生成先には持ち込まない」という
+  # docs/proposal/services-backend-frontend-rename-proposal.md「3.3 あえて変更しない」の
+  # 既存方針を CHANGELOG.md/docs/proposal と同様にここでも適用する（#564）
+  - .kiro/specs/items-add-field
 
 project_name:
   type: str

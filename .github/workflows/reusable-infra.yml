@@ -49,7 +49,7 @@ jobs:
       - name: Set up TFLint
         uses: terraform-linters/setup-tflint@v6
         with:
-          tflint_version: 'v0.63.1'
+          tflint_version: 'v0.64.0'
       # Same command as `make tf-lint`: without --config, tflint would silently
       # ignore the repo-root .tflint.hcl (and its AWS ruleset).
       - name: TFLint

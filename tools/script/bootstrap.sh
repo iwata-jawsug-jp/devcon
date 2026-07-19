@@ -247,6 +247,18 @@ oidc_provider_exists() {
     | tr '\t' '\n' | grep -q "oidc-provider/token.actions.githubusercontent.com"
 }
 
+# 同一AWSアカウント内で project 名が既に bootstrap 済みでないか確認する（#563）。IAMロール名は
+# "${project}-${resource_name_suffix}-ci-plan"（#571）で suffix は init のたびに random6() で
+# 新規生成されるため、固定名の get-role では検出できない（衝突しなくなった分、同名 project の
+# 再 init が気付かれないまま複数の独立した環境を作ってしまう）。suffix を知らなくても
+# 検出できるよう、list-roles を project 名の prefix/suffix 一致でフィルタする。
+project_name_in_use() {
+  local project="$1"
+  aws iam list-roles \
+    --query "Roles[?starts_with(RoleName, '${project}-') && ends_with(RoleName, '-ci-plan')].RoleName" \
+    --output text 2>/dev/null | grep -q .
+}
+
 # Whether *this* bootstrap's state already manages the OIDC provider resource
 # (present regardless of the moved-block refactor's [0] index or not).
 state_has_oidc_resource() {
@@ -325,6 +337,12 @@ cmd_init() {
     exit 1
   fi
   echo "==> AWSアカウントID: $account_id"
+
+  if project_name_in_use "$project"; then
+    echo "Error: project名 '$project' は既にこのAWSアカウント（$account_id）で使用されています。" >&2
+    echo "       別のproject名を指定するか、既存環境を使う場合は '$0 adopt' を使ってください。" >&2
+    exit 1
+  fi
 
   # IAMロール/ポリシー名（"<project>-<suffix>-ci-plan"等、main.tf の local.name_prefix、
   # #571）の一意化トークン。bucket が自動生成の場合は同じ値を使う（=「stateバケットと同じ

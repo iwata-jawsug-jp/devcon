@@ -8,7 +8,7 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 # - AWS CLI v2 / gh / Claude Code は CI のゲート（fmt/lint/test/security）対象ツールではなく
 #   結果の再現性に影響しないため、意図的に latest のまま。
 ARG TERRAFORM_VERSION=1.13.0
-ARG TFLINT_VERSION=0.63.1
+ARG TFLINT_VERSION=0.64.0
 ARG TRIVY_VERSION=0.71.2
 ARG CHECKOV_VERSION=3.3.2
 ARG CONFTEST_VERSION=0.68.2
