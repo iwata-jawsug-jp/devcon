@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "aws": {
+      "command": "uvx",
+      "args": [
+        "mcp-proxy-for-aws==1.6.3",
+        "https://aws-mcp.us-east-1.api.aws/mcp",
+        "--profile",
+        "agent-mcp",
+        "--metadata",
+        "AWS_REGION=ap-northeast-1",
+        "--read-only"
+      ]
+    },
+    "terraform": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "hashicorp/terraform-mcp-server:1.1.0"]
+    }
+  }
+}

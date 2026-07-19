@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-19
+
+### Added
+
+- **AWS MCP Server（Agent Toolkit for AWS）を `.mcp.json` に導入**: `docs/proposal/mcp-server-selection-proposal.md`（#566）の設計に基づき、AWS 公式 MCP Server を SigV4 方式（[`mcp-proxy-for-aws`](https://github.com/aws/mcp-proxy-for-aws) 経由）で追加した。提案書が示していた `"url"` 直接登録は OAuth 認証方式であり、ブラウザでサインインした人間自身の権限で実行されるため下記のエージェント専用 IAM ロールを一切経由しないことが判明し、SigV4 方式に訂正した。`.mcp.json` は `uvx` 経由で `mcp-proxy-for-aws==1.6.3`（`--profile agent-mcp` / `AWS_REGION=ap-northeast-1` / `--read-only`）を起動する。`.claude/settings.json` の `ask`（`Bash(aws:*)`）が MCP 経由の呼び出しには適用されない非対称性（実績: Terraform MCP のツール呼び出しが確認プロンプト無しで動作）を `docs/development-environment.md` に明記した（#572）。
+- **AWS MCP Server 用エージェント専用 IAM ロールを新設**: `infra/bootstrap` に `ReadOnlyAccess` + 3つの Deny statement（MCP 経由以外を全拒否・`sts:AssumeRole` 拒否・破壊的操作の保険）で構成する `agent-mcp` ロールを追加し、CI の `ci_plan`/`ci_deploy` ロールとは信頼ポリシー・認証情報の発行経路を分離した。実 AWS への `terraform apply` 検証で2件のバグを発見・修正した: (1) `DenyDestructiveActions` の `"*:Delete*"`/`"*:Terminate*"` が IAM の「サービスプレフィックスにワイルドカード不可」制約に反し `MalformedPolicyDocument` で失敗する不具合、(2) ローカル state 消失後に `init` をやり直すと AWS 側に残った同名ポリシーと `EntityAlreadyExists` で衝突する不具合（`resource_name_suffix` 変数を追加し、bootstrap 管理の全 IAM ロール/ポリシー名にランダムサフィックスを付与して解消、`ci_plan`/`ci_deploy` 系も含めて命名規則を統一）。`bootstrap.sh` の `recover`/`adopt`/`destroy` が参照するリソース一覧にも新ロールを追加した（#571）。
+- **`aws-sso-setup.sh` に `agent-mcp` プロファイル自動セットアップを追加**: `agent-mcp` サブコマンドが、指定 SSO プロファイルの認証状態確認・`infra/bootstrap` のローカル state からの `agent_mcp_role_arn` 自動検出・`~/.aws/config` への `agent-mcp` プロファイル書き込み・`sts get-caller-identity` による疎通確認までを自動化する。既存の `login` 動作（サブコマンド未指定時）は完全に後方互換。
+- **`infra/bootstrap` の state を S3 へ自動バックアップし、`recover` でまず復元を試みるようにした**: `infra/bootstrap` はチキン&エッグ制約でローカル state 限定のため、それを持つ唯一のマシンを失うと `terraform import` ベースの `recover` しか復旧手段が無かった。`init`/`update` 成功後（および `recover` の import フォールバック成功後）に state バケット内の `_bootstrap-state-backup/` へ自動アップロードするようにし、`recover` はローカルに state が無ければまずこのバックアップからの復元を試み、成功すれば import を実行せずに完了するようにした。
+- **HashiCorp Terraform MCP Server を `.mcp.json` に導入**: Terraform Registry のプロバイダー/モジュール仕様参照用に、`hashicorp/terraform-mcp-server:1.1.0`（Docker 起動）を project scope で追加した。実機で MCP の initialize ハンドシェイクと `tools/list` のスキーマ登録までは確認したが、実際の Terraform Registry 参照呼び出しは検証セッションのネットワーク制限により未確認のまま（通常のネットワーク到達性がある環境での再確認が必要）（#573）。
+- **MCP サーバー選定方針・Serena MCP 導入の提案書を追加**: `docs/proposal/mcp-server-selection-proposal.md`（AWS MCP Server を中核とした選定方針、少数精鋭・公式優先の原則、段階導入計画、#568/closes #566）と `docs/proposal/serena-mcp-adoption-proposal.md`（LSP ベースのコード操作 MCP の試験導入、目的・設定設計・効果測定計画・撤退条件、#567/closes #565）を作成した。両提案書が前提にしていた「`itouhi/terraform` の設定内容を確認して整合を取る」という未解決点は、同リポジトリの破棄により対象を失ったため解消済みと訂正した（#569）。
+- **copier `update` が機能するよう `.copier-answers.yml` を生成するようにした**: `copier.yml` が `.copier-answers.yml.jinja` を用意していなかったため、生成した下流プロジェクトに `.copier-answers.yml` が書き込まれず、`copier update` が「テンプレート参照を取得できない」で即エラーになり、テンプレート更新への追従が原理的に不可能だったことを実機確認した。`.copier-answers.yml.jinja` を追加して解消し、置換ループが本物のテンプレート参照元（`_src_path`）まで書き換えないよう除外した。実機検証として、18件超の PR 分のドリフトを挟んで `copier update` がコンフリクトなく反映されること、下流でのローカル変更が上流の変更と衝突する場合は標準的な git 風コンフリクトマーカーが挿入されることを確認した。`README.md` に生成先向けの実行手順を追加し、破壊的変更は該当 CHANGELOG エントリに明記する運用とした（#298 PR1、#554, #555）。
+- **WSL2 での Docker DNS 未到達による MCP サーバー障害の対処法を追記**: WSL2 上に Docker デーモンを立てている環境では DNS 解決が壊れ、`docker run` 経由の MCP サーバー（Terraform MCP 等）が外部レジストリに到達できないことがある（Codespaces では非再現）。`docs/development-environment.md` のトラブルシューティング表に対処法を追記した（#570）。
+
+### Changed
+
+- **devcontainer 事前ビルドキャッシュの `cacheFrom` から不要な `:latest` を除去**: v0.5.3 で `docker` ドライバのキャッシュヒットのため `cacheFrom` に inline cache 対応の `:latest` を追加していたが、`:buildcache`（registry cache）単体でも `docker-container` ドライバ下で問題なくキャッシュヒットするかを実機で切り分けた。実際に Codespaces を新規作成し、`Dockerfile` 由来の `RUN` 14件全てが `CACHED` になることを確認できたため `:latest` を外した。設計判断の訂正は [ADR-0018](docs/adr/0018-devcontainer-image-ghcr-cachefrom.md) 訂正6参照（#552, #553）。
+
 ## [0.5.3] - 2026-07-18
 
 ### Fixed

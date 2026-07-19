@@ -198,6 +198,119 @@ aws sts get-caller-identity --profile roles-anywhere
 
 ---
 
+## 5. `agent-mcp` ロール（AWS MCP Server 用、#571）を引き受ける
+
+`infra/bootstrap/` が作る `<project>-<suffix>-agent-mcp`（`<suffix>`は`terraform output -raw
+resource_name_suffix`で確認できるランダム6文字）ロールは、Claude Code が AWS MCP Server
+経由でこのAWSアカウントを読み取る際に使う、CIとは無関係の**エージェント専用ロール**（設計は
+[infrastructure.md「Terraform 2 層構成」](infrastructure.md#1-infrabootstrap初回のみローカル-state)
+参照）。信頼ポリシーは account root principal のため、**個別に `sts:AssumeRole` を許可された
+IAM ユーザー/ロールであれば誰でも引き受けられる**。
+
+### AWS SSO（IAM Identity Center）でログイン済みの場合
+
+`tools/script/aws-sso-setup.sh agent-mcp` が以下を自動化する:
+
+```bash
+tools/script/aws-sso-setup.sh agent-mcp                 # デフォルトのSSOプロファイル("default")を使う
+tools/script/aws-sso-setup.sh agent-mcp --sso-profile dev  # 別名プロファイルの場合
+```
+
+SSOプロファイルの認証状態を確認（未ログインなら`aws sso login`を自動実行）し、
+`infra/bootstrap`のローカルstateから`agent_mcp_role_arn`を自動検出して（無ければ
+`--role-arn`で明示指定）、`~/.aws/config`に`agent-mcp`プロファイル（`role_arn` +
+`source_profile`）を書き込み、`sts get-caller-identity`で疎通確認する。
+
+SSOのpermission setが`AWSAdministratorAccess`相当（`aws-sso-setup.sh login`の既定値）なら
+追加の権限付与は不要なことが多い。`AccessDenied`になる場合は、そのpermission setに
+下記のインラインポリシーと同等の許可を追加する必要がある（IAM Identity Center側の設定は
+このリポジトリのTerraform管理対象外）。
+
+### IAM ユーザー + assume-role（上記セクション2）を使っている場合の手動セットアップ
+
+SSOではなく上記セクション2のベースIAMユーザーパターンを使っている場合は、以下を手動で行う
+（`aws-sso-setup.sh agent-mcp`と同じ結果を、SSOを使わずに得る手順）。
+
+#### セットアップ（初回のみ）
+
+1. 上記セクション2のセットアップ済みベース IAM ユーザーに、`agent-mcp` ロールへの
+   `sts:AssumeRole` を追加で許可する（既存の `local-bootstrap-admin` 用ポリシーに
+   リソースを追記するか、`agent-mcp` 専用の別ポリシーを付与する）:
+
+   ```json
+   {
+     "Effect": "Allow",
+     "Action": "sts:AssumeRole",
+     "Resource": "arn:aws:iam::<account-id>:role/<project>-<suffix>-agent-mcp"
+   }
+   ```
+
+   このロール自身は Terraform 管理だが、ベース IAM ユーザー側への許可付与はこのリポジトリの
+   Terraform 管理対象外（ベース IAM ユーザー自体がこのリポジトリの外で作られるため）。
+
+2. `~/.aws/config` に専用プロファイルを追加する（`role_arn` を `agent-mcp` のARNに差し替える
+   だけで、他はセクション2の `admin` プロファイルと同じ）:
+
+   ```ini
+   [profile agent-mcp]
+   role_arn        = arn:aws:iam::<account-id>:role/<project>-<suffix>-agent-mcp
+   source_profile  = base
+   mfa_serial      = arn:aws:iam::<account-id>:mfa/<user>
+   duration_seconds = 3600
+   region = ap-northeast-1
+   ```
+
+#### 利用
+
+```bash
+aws sts get-caller-identity --profile agent-mcp
+```
+
+（`aws-sso-setup.sh agent-mcp`を使った場合も、同名の`agent-mcp`プロファイルが同じ形で
+書き込まれるので、以降はこのコマンドで疎通確認できる。）
+
+このプロファイル自体は「ロールを引き受けられること」の確認用。**実際に AWS MCP Server が
+使う認証情報は、`.mcp.json` の `aws` エントリ（[#572](https://github.com/iwata-jawsug-jp/devcon/issues/572)
+で実装済み、`docs/development-environment.md` 参照）が `mcp-proxy-for-aws --profile agent-mcp`
+としてこのプロファイルを直接指定することで、`agent-mcp` ロールを経由する。** OAuth方式
+（ブラウザでのAWS Sign-in）ではなく SigV4 方式でなければこのロールは経由しない、という
+選定理由も #572 で記録済み。
+
+> **Note**: `DenyUnlessViaAWSMCP` により、このロールの一時クレデンシャルは AWS MCP Server の
+> プロキシを経由しないリクエスト（例えば `aws sts get-caller-identity --profile agent-mcp`
+> を含む、素の AWS CLI/SDK からの呼び出し全般）では `aws:ViaAWSMCPService` コンテキストキーが
+> 立たないため、**読み取り系を含め全アクションが Deny される**。上記の `get-caller-identity`
+> 疎通確認だけは STS が対象外なので通るが、それ以外のAWS API呼び出しをこのプロファイルで
+> 直接試しても意図的に失敗する。実際に権限があることの確認は AWS MCP Server 経由でのみ行える。
+
+### CloudTrail での監査（提案書4.3節、runbook）
+
+ダウンストリームAWS API呼び出しは `userIdentity.invokedBy` に呼び出し元MCPサーバーのサービス
+プリンシパル（`aws-mcp.amazonaws.com`）が記録される
+（[AWS公式ドキュメント](https://docs.aws.amazon.com/agent-toolkit/latest/userguide/logging-using-cloudtrail.html)）。
+CloudTrail Lake でMCP経由の操作だけを抽出するクエリの例:
+
+```sql
+SELECT eventTime, eventName, userIdentity.arn, sourceIPAddress
+FROM <event-data-store>
+WHERE userIdentity.invokedBy = 'aws-mcp.amazonaws.com'
+  AND userIdentity.sessionContext.sessionIssuer.arn LIKE '%<project>-<suffix>-agent-mcp'
+ORDER BY eventTime DESC
+```
+
+異常検知（例: 本来read-onlyのはずのロールで `Deny` された書き込み試行が多発する）は
+CloudWatch Logs Insights クエリまたは EventBridge ルールで実装できるが、具体的な閾値・
+通知先の設計は本issueのスコープ外。
+
+> **注意: このクエリは本リポジトリの `infra/` にCloudTrail trailが存在しないため未検証。**
+> `grep -rn "cloudtrail" infra/` は0件（2026-07時点）。trailの新規作成・データイベント
+> 有効化（AWS MCP Server自身の `CallTool` イベントは `eventCategory: "Data"` に分類されるため、
+> それも見たい場合は追加でデータイベントロギングが必要）は別issueで検討する。上のクエリは
+> 「trailとevent data storeが用意された前提でのSQL構文」の記録であり、実データでの動作確認は
+> 済んでいない。
+
+---
+
 ## 関連ドキュメント
 
 - [README.md「AWS SSO 初期設定」](../README.md#aws-sso-初期設定) — 既定の推奨手順（IAM Identity

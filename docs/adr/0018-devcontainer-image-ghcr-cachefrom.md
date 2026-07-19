@@ -51,7 +51,8 @@ AWS ECR は「devcontainer を開くために先に AWS 認証が要る」循環
 1. **レジストリは GHCR。**
 2. **`devcontainer.json` は `build.dockerfile` を維持し、`build.cacheFrom` に
    `ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache` を直接（ハードコードで）指定する
-   （タグの理由は 7. 参照。訂正4で `:latest` も加えた配列に変更）。** `iwata-jawsug-jp/devcon`・
+   （タグの理由は 7. 参照。訂正4で `:latest` も加えた配列に変更したが、訂正6で
+   `:buildcache` 単体に戻した）。** `iwata-jawsug-jp/devcon`・
    公開ミラー・copier 生成先のすべてが、この1つの canonical なイメージをキャッシュ元として
    共有参照する（下記「訂正」参照）。
 3. **公開ワークフロー（`.github/workflows/devcontainer-build.yml`）は `iwata-jawsug-jp/devcon`
@@ -228,6 +229,21 @@ docker-container driver` になった上で、`Dockerfile` 由来の `RUN` 13件
 > devcontainer で `CODESPACES=false`／`CODESPACES=true` 双方を実機確認済み（前者は
 > `building with "default" instance using docker driver` のまま、後者のみ builder が
 > 切り替わる）。
+
+> **訂正6（2026-07-18, #552）:** 訂正5で `docker-container` ドライバへの切り替えが本体の
+> ビルドで機能することを確認した際、`:buildcache`（registry cache）・`:latest`（inline
+> cache）のどちらも問題なく機能すると確認していた（訂正5末尾）。`:latest` はそもそも訂正4で
+> `docker` ドライバ（Codespaces のデフォルト）に registry cache が読めない問題への回避策として
+> 追加したものであり、訂正5でドライバ自体を `docker-container` に切り替えられるようになった今は
+> 不要ではないかという疑問から、`cacheFrom` を `:buildcache` 単体に戻して切り分けた。実際に
+> このブランチから新規 Codespaces を作成したところ、`building with "devcon-builder"
+instance using docker-container driver` の下で `Dockerfile` 由来の `RUN` 14件全てが
+> `CACHED` になることを実機確認した（`docker-in-docker` feature インストールステージのみ
+> 訂正3・訂正5と同じ既知の制約で毎回未キャッシュ）。`:latest` 有り（訂正4）と同等のキャッシュ
+> ヒット率を `:buildcache` 単体で達成できることが確定したため、`cacheFrom` を `:buildcache`
+> 単体に戻した（#552）。`:latest` の push・inline cache 埋め込み自体は 7. の理由で
+> `devcontainer-build.yml` 側は引き続き行う（`docker` ドライバへのフォールバック時の保険として
+> 残す）。
 
 ## Consequences
 

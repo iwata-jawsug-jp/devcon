@@ -25,6 +25,20 @@ variable "state_bucket_name" {
   type        = string
 }
 
+variable "resource_name_suffix" {
+  description = <<-EOT
+    Short random token (same one used to build state_bucket_name, e.g. its trailing
+    "-<random6>") appended to every bootstrap-managed IAM role/policy name
+    ("$${project}-$${resource_name_suffix}-ci-plan", etc.). Without this, re-running
+    `init` after the local state that tracked a prior apply was lost/discarded hits
+    EntityAlreadyExists against the still-existing AWS-side IAM roles/policies from that
+    prior attempt -- a fresh suffix per `init` guarantees a fresh, unclaimed name instead.
+    Required (no default): generated once by tools/script/bootstrap.sh init and persisted
+    in terraform.auto.tfvars.
+  EOT
+  type        = string
+}
+
 variable "create_oidc_provider" {
   description = <<-EOT
     Whether to create the GitHub Actions OIDC provider (token.actions.githubusercontent.com).

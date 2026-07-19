@@ -16,6 +16,17 @@ the app-infra layer, which depends on the resources created here.
   - `*-ci-plan` — read-only, assumed by PR pipelines to run `terraform plan`.
   - `*-ci-deploy` — assumed on push to `main` / the `production` environment
     to `terraform apply` and deploy the app.
+- One **agent-only IAM role** (`*-agent-mcp`, #571): read-only (`ReadOnlyAccess` + guardrail
+  Denies), assumed locally by a human via the AWS MCP Server (Claude Code) — not OIDC, not
+  used by CI, never registered as a GitHub repo variable. See
+  `docs/aws-temporary-credentials.md` for how to assume it from the devcontainer.
+
+Every IAM role/policy name above is actually `<project>-<suffix>-...` (`local.name_prefix`,
+main.tf, #571) — `<suffix>` is a random 6-char token (`var.resource_name_suffix`, the same
+one `bootstrap.sh init` uses for the state bucket name). It exists so that re-running `init`
+after the local state that tracked a prior apply was lost/discarded always gets a fresh,
+unclaimed name instead of hitting `EntityAlreadyExists` against the still-existing AWS-side
+resources from that prior attempt.
 
 ## Apply once (local state)
 
@@ -58,23 +69,35 @@ the verification fails (e.g. this machine is authenticated against a different A
 `adopt` stops with an error instead of writing files from unverified values. `update`/`destroy`
 for `infra/bootstrap` itself still must run from the original `init` machine.
 
+### Automatic state backup
+
+Every successful `init`/`update` (and the import-based path of `recover`, below) uploads
+`terraform.tfstate` and `terraform.auto.tfvars` to `s3://<state bucket>/_bootstrap-state-backup/`
+— inside the very bucket this layer creates, under a key prefix that doesn't overlap with the
+app layer's own remote-state keys or `ci_plan`'s read-only `dev`-key scoping. The bucket's
+existing versioning means an accidental bad backup doesn't destroy the previous one. This isn't
+a Terraform remote backend (bootstrap still can't depend on the bucket it itself creates — see
+"Notes" below); it's a plain object copy that `recover` can pull down directly, without needing
+to re-derive state from AWS one resource at a time.
+
 ### If the `init` machine itself is lost
 
-If the one machine holding the local state is gone (disk failure, container rebuild, etc.) but
-the AWS resources it created are still there, rebuild the state from AWS instead:
+If the one machine holding the local state is gone (disk failure, container rebuild, etc.):
 
 ```bash
 tools/script/bootstrap.sh recover
 ```
 
-Like `adopt`, it reads the repo variables `write` published (or explicit `-p`/`-b`/
-`--plan-role-arn`/`--deploy-role-arn` overrides) and verifies the referenced AWS resources
-exist. It then runs `terraform init` and `terraform import` for every resource `main.tf`
-declares (the S3 state bucket and its sub-resources, both CI IAM roles, all policies and
-attachments) and writes `terraform.auto.tfvars`, so `update`/`write`/`destroy` work again from
-this machine. It's safe to re-run: already-imported resources are skipped, so a partial failure
-(e.g. one wrong assumption about a resource name) can be fixed and retried without redoing the
-rest.
+It first tries restoring `terraform.tfstate`/`terraform.auto.tfvars` from the S3 backup above —
+if one exists, this is all `recover` does (fast, and exact: no import-ID guessing). Only when no
+backup is found (or `--no-restore` is passed) does it fall back to rebuilding state from AWS
+directly: like `adopt`, it reads the repo variables `write` published (or explicit `-p`/`-b`/
+`--plan-role-arn`/`--deploy-role-arn` overrides), verifies the referenced AWS resources exist,
+then runs `terraform init` and `terraform import` for every resource `main.tf` declares (the S3
+state bucket and its sub-resources, all IAM roles, policies, and attachments) and writes
+`terraform.auto.tfvars`, so `update`/`write`/`destroy` work again from this machine. It's safe to
+re-run: already-imported resources are skipped, so a partial failure (e.g. one wrong assumption
+about a resource name) can be fixed and retried without redoing the rest.
 
 The GitHub Actions OIDC provider is the one exception: whether _this_ bootstrap created it or
 merely reused one a sibling repo's bootstrap already created isn't something AWS records, so

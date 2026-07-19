@@ -38,7 +38,7 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
   ロックは **S3 ネイティブロック**（`use_lockfile`）を使用し、DynamoDB は不要
   （ロックは state と同じバケットの `<key>.tflock` オブジェクト）。
 - **GitHub OIDC プロバイダ**（`token.actions.githubusercontent.com`, aud `sts.amazonaws.com`）
-- **CI 用 IAM ロール 2 つ**
+- **CI 用 IAM ロール 2 つ + エージェント専用 IAM ロール 1 つ（#571）**
   - `*-ci-plan` … PR 用の読み取り専用（plan）。AWS 管理の `ReadOnlyAccess`。
     state バケットへのアクセスは **`dev` キーのみ**に限定（`tfstate_access_plan`、#45/#153）:
     `cd-infra.yml` の plan ジョブは常に `TF_ENV=dev` で走るため、PR 経由の plan が
@@ -88,6 +88,26 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
     十分と判断し、追加の自動化（PR テンプレートのチェック項目、CODEOWNERS 等）は
     見送る。複数人運用に移行する場合は本項目を再検討する。
   - いずれも assume-role を OIDC の `sub`/`aud` 条件（org/repo）で制限
+- `*-agent-mcp` … Claude Code が AWS MCP Server 経由で AWS を読み取る際に使う、CI とは
+  無関係の**エージェント専用ロール**（#571、
+  提案書 4.2〜4.5節）。OIDC ではなく
+  `sts:AssumeRole`（account root principal）で、devcontainer 内の人間が個別に
+  `sts:AssumeRole` を許可された IAM ユーザーとしてローカルで引き受ける想定
+  （`docs/aws-temporary-credentials.md`）。権限は `ReadOnlyAccess` に加え、
+  ①MCP経由でない呼び出しを全拒否する `DenyUnlessViaAWSMCP`（`aws:ViaAWSMCPService`
+  条件。**提案書の `aws:CalledViaAWSMCP`+`Bool` という記載は誤り** — 前者は文字列型の
+  条件キーで `Bool` 演算子とは組み合わせられない）、②`sts:AssumeRole` 系への
+  `DenyAssumeRole`（多段assumeによる権限昇格の遮断）、③破壊的操作への保険的な
+  `DenyDestructiveActions`（IAMは`"*:Delete*"`のようなサービスプレフィックス側の
+  ワイルドカードを拒否するため`iam:*`のみ、実AWS適用で判明・修正済み）の3つのDeny
+  statementを重ねている。CIのOIDCロールとは引き受け条件・認証情報の発行経路が異なるため
+  兼用せず、GitHub repo変数にも登録しない。
+
+`*-ci-plan`/`*-ci-deploy`/`*-agent-mcp`はいずれも実際には`<project>-<suffix>-...`
+（`local.name_prefix`、main.tf、#571）。`<suffix>`は`var.resource_name_suffix`（ランダム6文字、
+`bootstrap.sh init`がstateバケット名と同じトークンを使う）で、ローカルstateを失った後に
+`init`をやり直しても、前回適用時にAWS側に残ったままの同名リソースと衝突
+（`EntityAlreadyExists`）しないようにするためのもの。
 
 > **`*-ci-deploy` は sandbox と prod で同一ロール（判断の記録、#153 finding #10/#306）**
 >
@@ -150,7 +170,10 @@ tools/script/bootstrap.sh destroy             # 破棄（state バケットは -
 マシンでしか動かない。**別の開発PCで同じ設定を使いたい**場合は state を必要としない
 `adopt` を使う — `write` が登録済みのリポジトリ変数（`PROJECT_NAME` /
 `AWS_TF_STATE_BUCKET` / `AWS_PLAN_ROLE_ARN` / `AWS_DEPLOY_ROLE_ARN`）を読み、
-そのマシンのAWS認証情報で実際に state バケット・IAMロール2つが存在するか確認した
+そのマシンのAWS認証情報で実際に state バケット・IAMロール3つ（ci-plan/ci-deployは
+リポジトリ変数のARNから、agent-mcpはリポジトリ変数に載せていないため
+`"<project>-<suffix>-agent-mcp"`（`<suffix>`はci-plan/ci-deployのARNから逆算）という
+決定的な名前から判定）が存在するか確認した
 うえで `infra/env/*.backend.hcl` / `*.tfvars` を生成する（ローカル state は作らない）:
 
 ```bash
@@ -160,31 +183,43 @@ tools/script/bootstrap.sh adopt               # 他PCのbootstrap設定をリポ
 AWS環境の確認に失敗した場合（別アカウントに繋いでいる等）はファイルを生成せずエラー終了する。
 `infra/bootstrap` 自体の `update`/`destroy` は引き続き `init` を実行したマシンから行うこと。
 
-**`init` を実行したマシン自体を失った場合**（ディスク故障・コンテナ再作成等）は、AWS上に
-残っているリソースから state を作り直す `recover` を使う:
+**自動バックアップ**: `init`/`update`成功後（および`recover`のimportフォールバック成功後）、
+`terraform.tfstate`/`terraform.auto.tfvars` を state バケット自身の `_bootstrap-state-backup/`
+キー配下へ自動アップロードする。stateをS3をbackendとして使う訳ではない（bootstrapは自分が
+作るバケットに依存できないチキン&エッグ制約は変わらず — 下記「Notes」参照）が、ただの
+オブジェクトコピーとして退避しておくことで、次項の`recover`が実リソースからのimportより
+高速・確実に復元できるようにする。バケットのバージョニングにより、誤って古い/壊れたバックアップ
+で上書きしても過去バージョンへ戻せる。
+
+**`init` を実行したマシン自体を失った場合**（ディスク故障・コンテナ再作成等）は、
+`recover` を使う:
 
 ```bash
-tools/script/bootstrap.sh recover             # AWS上の実リソースから state を再構築
+tools/script/bootstrap.sh recover
 ```
 
-`adopt` と同じくリポジトリ変数から対象を特定・実在確認したあと、`terraform init` +
-`main.tf` の全 managed resource（state バケット一式・IAMロール2つ・ポリシー8個・
-アタッチメント9個・inlineポリシー2個）への `terraform import` を実行し、
-`terraform.auto.tfvars` も書く。GitHub Actions OIDCプロバイダーだけは「どのbootstrapが
-作ったか」がAWS側から判別できないため既定では import せず、確信がある場合のみ
-`--owns-oidc-provider` を指定する（誤って指定すると、他リポジトリが使っている可能性のある
-OIDCプロバイダーをこの state が『所有』したことになり、`destroy --include-oidc-provider`
-での誤削除リスクが生まれる）。既に import 済みのリソースはスキップするため、一部失敗しても
-再実行すれば再開できる。完了後は `terraform -chdir=infra/bootstrap plan` で差分が無いことを
-必ず確認する（差分があれば import ID の想定ミスの可能性がある）。実際に `terraform.tfstate`
-を削除した状態から `recover` → `plan` で差分ゼロになることを確認済み。
+まず上記のS3バックアップからの復元を試みる（あれば`terraform.tfstate`/
+`terraform.auto.tfvars`をダウンロードするだけで完了 — importは実行しない）。バックアップが
+無い場合（または`--no-restore`指定時）のみ、`adopt`と同じくリポジトリ変数から対象を特定・
+実在確認したあと、`terraform init` + `main.tf`の全 managed resource（state バケット一式・
+IAMロール3つ・ポリシー8個・アタッチメント10個・inlineポリシー3個）への`terraform import`を
+実行し、`terraform.auto.tfvars`も書く（このフォールバック経路のみ、完了後にバックアップも
+更新する）。GitHub Actions OIDCプロバイダーだけは「どのbootstrapが作ったか」がAWS側から判別
+できないため既定では import せず、確信がある場合のみ`--owns-oidc-provider`を指定する
+（誤って指定すると、他リポジトリが使っている可能性のあるOIDCプロバイダーをこのstateが
+『所有』したことになり、`destroy --include-oidc-provider`での誤削除リスクが生まれる）。
+既に import 済みのリソースはスキップするため、一部失敗しても再実行すれば再開できる。
+完了後は`terraform -chdir=infra/bootstrap plan`で差分が無いことを必ず確認する
+（差分があれば import ID の想定ミスの可能性がある）。実際に`terraform.tfstate`を削除した
+状態からのimportフォールバック→`plan`で差分ゼロになることを確認済み。
 
 以下は手動手順（参考・フォールバック）:
 
 ```bash
 cd infra/bootstrap
 terraform init                 # ローカル state（backend ブロックなし）
-terraform apply                # 一度だけ
+terraform apply \
+  -var resource_name_suffix="$(tr -dc 'a-z0-9' </dev/urandom | head -c6)"  # 一度だけ
 terraform output               # state バケット名 / ロール ARN を控える
 ```
 
@@ -217,6 +252,11 @@ gh variable set PROJECT_NAME        --body "<bootstrap init -p で指定した p
 
 > **これら 4 変数を登録するまで `cd-infra.yml` の plan/apply は失敗する**（下記「bootstrap
 > 適用前の CI 挙動」を参照）。
+
+`agent_mcp_role_arn`（#571）はこの一覧に含めない — CIから使わない（devcontainer内の人間が
+ローカルで `sts:AssumeRole` する専用ロールのため）。ARNは `terraform -chdir=infra/bootstrap
+output -raw agent_mcp_role_arn` で確認し、`docs/aws-temporary-credentials.md` の手順で
+`~/.aws/config` に設定する。
 
 ### 2. アプリ層（`infra/*.tf`・リモート state）
 
@@ -734,7 +774,8 @@ state のため、無人の定期teardownが手動検証中の環境を破棄し
 ## ブートストラップ順序（新規 clone から）
 
 1. `make setup` — ツールチェーンと git フック。
-2. `infra/bootstrap/` をローカル state で一度だけ apply（state バケット・ロック表・OIDC・IAM ロール）。
+2. `infra/bootstrap/` をローカル state で一度だけ apply（state バケット・ロック表・OIDC・
+   CI用IAMロール2つ・エージェント専用IAMロール1つ（#571、`*-agent-mcp`））。
 3. アプリ層をリモート state に移行: `terraform init -backend-config=env/<env>.backend.hcl`
    （既存ローカル state があれば `-migrate-state`）。
 4. 初回の `cd-infra.yml` でアプリ基盤をプロビジョニング → その後 `cd-app.yml` を有効化。

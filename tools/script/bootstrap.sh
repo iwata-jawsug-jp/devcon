@@ -11,9 +11,11 @@
 #              `terraform-<project>-<account_id>-<random6>` として自動生成、既存の
 #              GitHub Actions OIDC プロバイダーの有無も検出したうえで terraform apply する
 #              （ローカル state。infra/bootstrap/terraform.auto.tfvars に解決した値を保存）。
+#              成功後、state バケット自身の中に terraform.tfstate / terraform.auto.tfvars を
+#              自動バックアップする（後述、recover 参照）。
 #   update   - 2回目以降。terraform.auto.tfvars（無ければ既存 state から復元）を再利用し、
 #              パラメータ指定なしで terraform apply するだけ（main.tf の IAM ポリシー変更等を
-#              反映し忘れる事故 #488 を防ぐ）。
+#              反映し忘れる事故 #488 を防ぐ）。成功後、init と同じくバックアップを自動更新する。
 #   write    - terraform output の値を GitHub リポジトリ変数へ登録し、
 #              infra/env/*.backend.hcl / *.tfvars を .example から生成する
 #              （project名のプレースホルダ "devcon" は実際の project 名に置換する）。
@@ -33,18 +35,24 @@
 #              人力・ローカル state」参照）。リポジトリ変数（PROJECT_NAME /
 #              AWS_TF_STATE_BUCKET / AWS_PLAN_ROLE_ARN / AWS_DEPLOY_ROLE_ARN。`write` が
 #              登録済みのはず）を読み、現在のAWS認証情報に対して実リソース（state バケット・
-#              IAMロール2つ）が実在するか確認したうえで、infra/env/*.backend.hcl / *.tfvars を
-#              生成する。`update`/`destroy` はローカル state が要るため、引き続き `init` を
-#              実行した元のマシンから行うこと。
+#              IAMロール3つ ※ci_plan/ci_deployはARNから、agent-mcpは"<project>-<suffix>-agent-mcp"
+#              （suffixはci_plan/ci_deployのARNから逆算）という決定的な名前から判定 -- #571、
+#              agent-mcpのARNはリポジトリ変数に載せない）が実在するか
+#              確認したうえで、infra/env/*.backend.hcl / *.tfvars を生成する。`update`/`destroy`
+#              はローカル state が要るため、引き続き `init` を実行した元のマシンから行うこと。
 #   recover  - `init` を実行したマシン自体（＝ローカル state を持つ唯一のマシン）が失われた
-#              場合に、AWS上にまだ残っている実リソースから state を作り直す。`adopt` と同じ
-#              リポジトリ変数を読んで対象を特定・実在確認したあと、`terraform import` を
-#              main.tf の全 managed resource（S3 state バケット一式 + IAMロール/ポリシー/
-#              アタッチメント）に対して実行し、terraform.auto.tfvars も書く。OIDCプロバイダー
-#              は所有権がAWS側から判別できないため、既定では import しない
-#              （`--owns-oidc-provider` を指定した場合のみ）。既に import 済みのリソースは
-#              スキップするため、一部失敗しても再実行すれば再開できる。完了後は
-#              `terraform plan` で差分が無いことを確認すること。
+#              場合に state を作り直す。ローカルに state が無い場合、まず state バケット内の
+#              バックアップ（init/update/recover が自動更新）からの復元を試みる（S3から
+#              terraform.tfstate / terraform.auto.tfvars を取得するだけなので、import より
+#              高速・確実 -- apply時点のメタデータもそのまま復元できる）。バックアップが無い
+#              /壊れている場合（または --no-restore 指定時）は、`adopt` と同じリポジトリ変数を
+#              読んで対象を特定・実在確認したあと、`terraform import` を main.tf の全
+#              managed resource（S3 state バケット一式 + IAMロール/ポリシー/アタッチメント）
+#              に対して実行し、terraform.auto.tfvars も書く（このフォールバック経路のみ、
+#              完了後にバックアップも更新する）。OIDCプロバイダーは所有権がAWS側から判別
+#              できないため、既定では import しない（`--owns-oidc-provider` を指定した場合
+#              のみ）。既に import 済みのリソースはスキップするため、一部失敗しても再実行
+#              すれば再開できる。完了後は `terraform plan` で差分が無いことを確認すること。
 #
 # Usage:
 #   ./tools/script/bootstrap.sh init -p <project> [-o <org>] [-r <repo>] [-b <bucket>] [-y]
@@ -55,13 +63,17 @@
 #                                      [--deploy-role-arn <arn>] [-o <org>] [-r <repo>] [--force]
 #   ./tools/script/bootstrap.sh recover [-p <project>] [-b <bucket>] [--plan-role-arn <arn>]
 #                                        [--deploy-role-arn <arn>] [-o <org>] [-r <repo>]
-#                                        [--owns-oidc-provider] [-R <region>] [-y]
+#                                        [--owns-oidc-provider] [-R <region>] [--no-restore] [-y]
 #
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 BOOTSTRAP_DIR="infra/bootstrap"
 TFVARS_FILE="$BOOTSTRAP_DIR/terraform.auto.tfvars"
+# state バケット内でバックアップを置くキー接頭辞。アプリ層のstate key（"${project}/<env>/..."）
+# や ci_plan の読み取り許可プレフィックス（"${project}/dev/*"）と衝突しないよう、
+# プロジェクト名を含まない固定の別名前空間にする。
+BACKUP_PREFIX="_bootstrap-state-backup"
 
 usage() {
   cat <<'EOF'
@@ -106,10 +118,13 @@ Commands:
               --force                         Overwrite infra/env files that already exist
 
   recover   Rebuild local Terraform state when the machine that ran 'init' (and its local
-            state) was lost, by importing the still-existing AWS resources. Reads the same
-            repo variables as 'adopt' (override with the same flags), verifies they exist,
-            then runs 'terraform import' for every resource main.tf declares and writes
-            terraform.auto.tfvars. Safe to re-run -- already-imported resources are skipped.
+            state) was lost. First tries restoring terraform.tfstate / terraform.auto.tfvars
+            from the automatic backup inside the state bucket (fast, exact -- no import
+            needed). Falls back to importing the still-existing AWS resources if no backup
+            is found (or --no-restore is given): reads the same repo variables as 'adopt'
+            (override with the same flags), verifies they exist, then runs 'terraform import'
+            for every resource main.tf declares and writes terraform.auto.tfvars. Safe to
+            re-run -- already-imported resources are skipped.
               -p, --project <name>            Project name (default: repo var PROJECT_NAME)
               -b, --bucket-name <name>        State bucket (default: repo var AWS_TF_STATE_BUCKET)
               --plan-role-arn <arn>           (default: repo var AWS_PLAN_ROLE_ARN)
@@ -119,6 +134,9 @@ Commands:
                                                a sibling repo's bootstrap reusing it) -- also
                                                imports it. Default: false (looked up via data
                                                source, not imported -- the safe choice when unsure)
+              --no-restore                    Skip the S3 backup restore attempt and go
+                                               straight to the import-based fallback (use if
+                                               the backup is known stale/corrupt)
               -o, --org <org>                 GitHub org (auto-detected if omitted)
               -r, --repo <repo>               GitHub repo (auto-detected if omitted)
               -R, --region <region>           AWS region (default: ap-northeast-1)
@@ -131,6 +149,62 @@ EOF
 tf() { terraform -chdir="$BOOTSTRAP_DIR" "$@"; }
 
 has_state() { [[ -n "$(tf state list 2>/dev/null)" ]]; }
+
+# state バケット自身の中（BACKUP_PREFIX、main.tf管理外の名前空間）へ terraform.tfstate /
+# terraform.auto.tfvars をバックアップする。init/update成功後、recoverのimportフォールバック
+# 完了後に自動で呼ぶ。失敗してもバックアップだけの問題なので致命扱いにしない
+# （gh variable set失敗時と同じ方針 -- 権限不足等で失敗してもスクリプト自体は成功させる）。
+backup_state() {
+  local bucket
+  bucket="$(tf output -raw state_bucket_name 2>/dev/null)" || {
+    echo "WARN: state_bucket_name を取得できずバックアップをスキップしました。" >&2
+    return 0
+  }
+
+  echo "==> state を s3://${bucket}/${BACKUP_PREFIX}/ へバックアップします..."
+  if aws s3 cp "$BOOTSTRAP_DIR/terraform.tfstate" "s3://${bucket}/${BACKUP_PREFIX}/terraform.tfstate" >/dev/null \
+    && aws s3 cp "$TFVARS_FILE" "s3://${bucket}/${BACKUP_PREFIX}/terraform.auto.tfvars" >/dev/null; then
+    echo "==> バックアップ完了（バケットのバージョニングにより、上書きしても過去バージョンから復元可能）。"
+  else
+    echo "WARN: state のバックアップに失敗しました（S3への書き込み権限等を確認してください）。" >&2
+    echo "      apply/import 自体は成功しているので、このマシンでの作業は続行できる。" >&2
+  fi
+}
+
+# state バケット内のバックアップから terraform.tfstate / terraform.auto.tfvars を復元する。
+# 成功したら 0 を返し、呼び出し側（recover）は import 一式を丸ごとスキップできる。
+# バックアップが無い、またはダウンロードに失敗した場合は何もローカルに書かず 1 を返す
+# （呼び出し側は既存の import ベースの復旧にフォールバックする）。
+try_restore_from_backup() {
+  local bucket="$1"
+
+  if ! aws s3api head-object --bucket "$bucket" --key "${BACKUP_PREFIX}/terraform.tfstate" >/dev/null 2>&1; then
+    echo "==> S3バックアップが見つかりません（s3://${bucket}/${BACKUP_PREFIX}/terraform.tfstate）。"
+    return 1
+  fi
+
+  echo "==> S3バックアップが見つかりました: s3://${bucket}/${BACKUP_PREFIX}/ -- ダウンロードして復元します"
+  echo "    （importベースの復旧より高速・確実なので、こちらを優先します）。"
+
+  local tmp_state tmp_tfvars
+  tmp_state="$(mktemp)"
+  tmp_tfvars="$(mktemp)"
+  if ! aws s3 cp "s3://${bucket}/${BACKUP_PREFIX}/terraform.tfstate" "$tmp_state" >/dev/null \
+    || ! aws s3 cp "s3://${bucket}/${BACKUP_PREFIX}/terraform.auto.tfvars" "$tmp_tfvars" >/dev/null; then
+    echo "WARN: バックアップのダウンロードに失敗しました。importベースの復旧にフォールバックします。" >&2
+    rm -f "$tmp_state" "$tmp_tfvars"
+    return 1
+  fi
+
+  mv "$tmp_state" "$BOOTSTRAP_DIR/terraform.tfstate"
+  mv "$tmp_tfvars" "$TFVARS_FILE"
+  tf init
+
+  echo
+  echo "==> 復元完了。バックアップ後にAWS側だけ変更されていないか、必ず差分を確認すること:"
+  echo "      terraform -chdir=$BOOTSTRAP_DIR plan"
+  return 0
+}
 
 confirm() {
   local yes="$1" prompt="$2"
@@ -180,24 +254,28 @@ state_has_oidc_resource() {
 }
 
 write_tfvars() {
-  local project="$1" org="$2" repo="$3" bucket="$4" region="$5" create_oidc="$6"
+  local project="$1" org="$2" repo="$3" bucket="$4" region="$5" create_oidc="$6" suffix="$7"
   cat >"$TFVARS_FILE" <<EOF
-project              = "$project"
-github_org           = "$org"
-github_repo          = "$repo"
-state_bucket_name    = "$bucket"
-aws_region           = "$region"
-create_oidc_provider = $create_oidc
+project               = "$project"
+github_org            = "$org"
+github_repo           = "$repo"
+state_bucket_name     = "$bucket"
+aws_region            = "$region"
+create_oidc_provider  = $create_oidc
+resource_name_suffix  = "$suffix"
 EOF
 }
 
 # project 名は state から直接は取れない（project は output していない）ため、
-# 既存の ci_plan_role_arn（"<project>-ci-plan" 命名、main.tf）から逆算する。
+# 既存の ci_plan_role_arn（"<project>-<suffix>-ci-plan" 命名、main.tf の local.name_prefix、
+# #571）から逆算する。resource_name_suffix は output 済みなのでそちらから取り、
+# "-<suffix>-ci-plan" を丸ごと剥がした残りが project。
 project_from_state() {
-  local plan_arn role_name
+  local plan_arn role_name suffix
   plan_arn="$(tf output -raw ci_plan_role_arn 2>/dev/null)" || return 1
+  suffix="$(tf output -raw resource_name_suffix 2>/dev/null)" || return 1
   role_name="${plan_arn##*/}"
-  echo "${role_name%-ci-plan}"
+  echo "${role_name%-"$suffix"-ci-plan}"
 }
 
 # ============================================================
@@ -248,8 +326,15 @@ cmd_init() {
   fi
   echo "==> AWSアカウントID: $account_id"
 
+  # IAMロール/ポリシー名（"<project>-<suffix>-ci-plan"等、main.tf の local.name_prefix、
+  # #571）の一意化トークン。bucket が自動生成の場合は同じ値を使う（=「stateバケットと同じ
+  # ランダム接尾辞」）。-b で bucket 名を明示指定した場合でも、IAMリソース名の一意化自体は
+  # 引き続き必要なので suffix は常に新規生成する。
+  local suffix
+  suffix="$(random6)"
+
   if [[ -z "$bucket" ]]; then
-    bucket="terraform-${project}-${account_id}-$(random6)"
+    bucket="terraform-${project}-${account_id}-${suffix}"
     echo "==> state バケット名を生成: $bucket"
   fi
 
@@ -261,22 +346,24 @@ cmd_init() {
 
   echo
   echo "==> 以下の値で terraform apply します:"
-  echo "      project              = $project"
-  echo "      github_org           = $org"
-  echo "      github_repo          = $repo"
-  echo "      state_bucket_name    = $bucket"
-  echo "      aws_region           = $region"
-  echo "      create_oidc_provider = $create_oidc"
+  echo "      project               = $project"
+  echo "      github_org            = $org"
+  echo "      github_repo           = $repo"
+  echo "      state_bucket_name     = $bucket"
+  echo "      aws_region            = $region"
+  echo "      create_oidc_provider  = $create_oidc"
+  echo "      resource_name_suffix  = $suffix"
   echo
 
   confirm "$yes" "続行しますか？" || { echo "中止しました。"; exit 1; }
 
-  write_tfvars "$project" "$org" "$repo" "$bucket" "$region" "$create_oidc"
+  write_tfvars "$project" "$org" "$repo" "$bucket" "$region" "$create_oidc" "$suffix"
 
   tf init
   # -auto-approve: the confirm() above already gated this; terraform still prints
   # the full plan below, it just skips its own redundant "yes" prompt.
   tf apply -auto-approve
+  backup_state
 
   echo
   echo "==> 完了。次は './tools/script/bootstrap.sh write' でリポジトリ変数と infra/env/*.backend.hcl / *.tfvars を反映してください。"
@@ -306,9 +393,10 @@ cmd_update() {
   if [[ ! -f "$TFVARS_FILE" ]]; then
     echo "==> $TFVARS_FILE が無いため、既存の適用結果から復元します（$0 init を使わず手動 apply された環境向け）"
 
-    local project bucket
+    local project bucket suffix
     project="$(project_from_state)" || { echo "Error: project 名を state から復元できません。" >&2; exit 1; }
     bucket="$(tf output -raw state_bucket_name)"
+    suffix="$(tf output -raw resource_name_suffix)" || { echo "Error: resource_name_suffix を state から復元できません。" >&2; exit 1; }
 
     if [[ -z "$org" || -z "$repo" ]]; then
       detect_github_org_repo || {
@@ -322,13 +410,13 @@ cmd_update() {
     local create_oidc=true
     state_has_oidc_resource || create_oidc=false
 
-    echo "==> 復元した値: project=$project github_org=$org github_repo=$repo state_bucket_name=$bucket create_oidc_provider=$create_oidc"
-    write_tfvars "$project" "$org" "$repo" "$bucket" "ap-northeast-1" "$create_oidc"
+    echo "==> 復元した値: project=$project github_org=$org github_repo=$repo state_bucket_name=$bucket create_oidc_provider=$create_oidc resource_name_suffix=$suffix"
+    write_tfvars "$project" "$org" "$repo" "$bucket" "ap-northeast-1" "$create_oidc" "$suffix"
   elif [[ -n "$org" || -n "$repo" ]]; then
-    # 明示的な上書き指定があれば tfvars を書き換える（state_bucket_name/project は
-    # 変更するとバケット replace を招くため update では受け付けない -- 変えたいなら
-    # $TFVARS_FILE を直接編集すること）。
-    local cur_project cur_bucket cur_region cur_create_oidc cur_org cur_repo
+    # 明示的な上書き指定があれば tfvars を書き換える（state_bucket_name/project/
+    # resource_name_suffix は変更するとリソース replace を招くため update では受け付けない
+    # -- 変えたいなら $TFVARS_FILE を直接編集すること）。
+    local cur_project cur_bucket cur_region cur_create_oidc cur_org cur_repo cur_suffix
     tfvar() { grep -E "^$1[[:space:]]*=" "$TFVARS_FILE" | sed -E 's/^[^=]+=[[:space:]]*"?([^"]*)"?[[:space:]]*$/\1/'; }
     cur_project="$(tfvar project)"
     cur_org="$(tfvar github_org)"
@@ -336,17 +424,19 @@ cmd_update() {
     cur_bucket="$(tfvar state_bucket_name)"
     cur_region="$(tfvar aws_region)"
     cur_create_oidc="$(tfvar create_oidc_provider)"
+    cur_suffix="$(tfvar resource_name_suffix)"
 
     org="${org:-$cur_org}"
     repo="${repo:-$cur_repo}"
     echo "==> $TFVARS_FILE を更新します: github_org=$org github_repo=$repo（他の値は変更しません）"
-    write_tfvars "$cur_project" "$org" "$repo" "$cur_bucket" "$cur_region" "$cur_create_oidc"
+    write_tfvars "$cur_project" "$org" "$repo" "$cur_bucket" "$cur_region" "$cur_create_oidc" "$cur_suffix"
   fi
 
   echo "==> 既存の値（$TFVARS_FILE）を再利用して terraform apply します。"
   confirm "$yes" "続行しますか？" || { echo "中止しました。"; exit 1; }
 
   tf apply -auto-approve
+  backup_state
 }
 
 # infra/env/*.backend.hcl / *.tfvars を .example から生成する（write / adopt 共通）。
@@ -471,11 +561,11 @@ resolve_published_values() {
   RESOLVED_DEPLOY_ARN="$deploy_arn"
 }
 
-# state バケットと ci_plan/ci_deploy ロールが、現在のAWS認証情報から実際に見えるか確認する
-# （リポジトリ変数の値をそのまま信用しない -- 想定と違うAWSアカウントに繋いでいる事故を防ぐ）。
-# 問題があれば理由を表示して exit 1 する。adopt / recover 共通。
+# state バケットと ci_plan/ci_deploy/agent_mcp ロールが、現在のAWS認証情報から実際に見えるか
+# 確認する（リポジトリ変数の値をそのまま信用しない -- 想定と違うAWSアカウントに繋いでいる事故を
+# 防ぐ）。問題があれば理由を表示して exit 1 する。adopt / recover 共通。
 verify_aws_resources() {
-  local bucket="$1" plan_arn="$2" deploy_arn="$3" account_id="$4"
+  local bucket="$1" plan_arn="$2" deploy_arn="$3" account_id="$4" project="$5"
 
   echo
   echo "==> AWS環境を確認します..."
@@ -510,6 +600,23 @@ verify_aws_resources() {
       echo "  [OK] IAMロール '$deploy_role_name'（ci_deploy）が存在します"
     else
       problems="${problems}    - IAMロール '$deploy_role_name'（ci_deploy_role_arn）が見つかりません
+"
+    fi
+
+    # agent_mcp（#571）はCIから使わないためリポジトリ変数にARNを載せていない。名前は
+    # main.tfのlocal.name_prefix（"${project}-${resource_name_suffix}"）と同じ規則で決定的
+    # なので、project + suffix から直接組み立てる。suffixはresource_name_suffixとして
+    # output済みだが、adopt/recoverはこの時点でまだterraform stateを持たない（recoverはこれ
+    # から作る最中、adoptはそもそも作らない）ため output を読めない -- 代わりに
+    # plan_role_name（"<project>-<suffix>-ci-plan"）から逆算する（suffixはrandom6で常に
+    # 6文字固定）。
+    local plan_name_without_role="${plan_role_name%-ci-plan}"
+    local suffix="${plan_name_without_role: -6}"
+    local agent_mcp_role_name="${project}-${suffix}-agent-mcp"
+    if aws iam get-role --role-name "$agent_mcp_role_name" >/dev/null 2>&1; then
+      echo "  [OK] IAMロール '$agent_mcp_role_name'（agent_mcp）が存在します"
+    else
+      problems="${problems}    - IAMロール '$agent_mcp_role_name'（agent_mcp）が見つかりません
 "
     fi
   fi
@@ -570,7 +677,7 @@ cmd_adopt() {
   echo "    ci_plan_role_arn=$plan_arn"
   echo "    ci_deploy_role_arn=$deploy_arn"
 
-  verify_aws_resources "$bucket" "$plan_arn" "$deploy_arn" "$account_id"
+  verify_aws_resources "$bucket" "$plan_arn" "$deploy_arn" "$account_id" "$project"
 
   echo
   echo "==> AWS環境の確認が完了しました。infra/env/*.backend.hcl / *.tfvars を生成します。"
@@ -588,7 +695,7 @@ cmd_adopt() {
 # ============================================================
 cmd_recover() {
   local project="" org="" repo="" bucket="" plan_arn="" deploy_arn=""
-  local region="ap-northeast-1" owns_oidc=false yes=false
+  local region="ap-northeast-1" owns_oidc=false yes=false no_restore=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -599,6 +706,7 @@ cmd_recover() {
       --plan-role-arn) plan_arn="${2:-}"; shift 2 ;;
       --deploy-role-arn) deploy_arn="${2:-}"; shift 2 ;;
       --owns-oidc-provider) owns_oidc=true; shift ;;
+      --no-restore) no_restore=true; shift ;;
       -R | --region) region="${2:-}"; shift 2 ;;
       -y | --yes) yes=true; shift ;;
       -h | --help) usage; exit 0 ;;
@@ -632,11 +740,15 @@ cmd_recover() {
   echo "    ci_plan_role_arn=$plan_arn"
   echo "    ci_deploy_role_arn=$deploy_arn"
 
-  verify_aws_resources "$bucket" "$plan_arn" "$deploy_arn" "$account_id"
+  verify_aws_resources "$bucket" "$plan_arn" "$deploy_arn" "$account_id" "$project"
 
   if has_state; then
     echo
     echo "==> $BOOTSTRAP_DIR には既に local state があります。未インポート分だけ補います（再実行しても安全）。"
+  elif ! $no_restore && try_restore_from_backup "$bucket"; then
+    echo
+    echo "==> S3バックアップからの復元で完了しました（terraform import は実行していません）。"
+    return
   fi
 
   echo
@@ -662,10 +774,16 @@ cmd_recover() {
 
   confirm "$yes" "続行しますか？（terraform init と複数の terraform import を実行します）" || { echo "中止しました。"; exit 1; }
 
-  write_tfvars "$project" "$org" "$repo" "$bucket" "$region" "$owns_oidc"
+  local plan_role_name="${plan_arn##*/}" deploy_role_name="${deploy_arn##*/}"
+  # main.tf の local.name_prefix（"${project}-${resource_name_suffix}"）と同じ規則で決定的な
+  # ので、plan_role_name（"<project>-<suffix>-ci-plan"）から逆算する
+  # （verify_aws_resourcesと同じロジック、suffixはrandom6で常に6文字固定）。
+  local plan_name_without_role="${plan_role_name%-ci-plan}"
+  local suffix="${plan_name_without_role: -6}"
+
+  write_tfvars "$project" "$org" "$repo" "$bucket" "$region" "$owns_oidc" "$suffix"
   tf init
 
-  local plan_role_name="${plan_arn##*/}" deploy_role_name="${deploy_arn##*/}"
   local ro_policy_arn="arn:aws:iam::aws:policy/ReadOnlyAccess"
 
   # ci_deploy_* リソースのアドレス suffix → main.tf のポリシー名 suffix
@@ -704,10 +822,18 @@ cmd_recover() {
 
   addresses+=("aws_iam_role.ci_deploy"); ids+=("$deploy_role_name")
 
+  # agent_mcp（#571）: ARNをリポジトリ変数から読まず、project + suffixから決定的に名前を
+  # 組み立てる（verify_aws_resourcesの存在確認と同じロジック）。信頼ポリシーはaccount root
+  # principalなので、CI用ロールと違いOIDCプロバイダーとは無関係。
+  local agent_mcp_role_name="${project}-${suffix}-agent-mcp"
+  addresses+=("aws_iam_role.agent_mcp"); ids+=("$agent_mcp_role_name")
+  addresses+=("aws_iam_role_policy_attachment.agent_mcp_readonly"); ids+=("${agent_mcp_role_name}/${ro_policy_arn}")
+  addresses+=("aws_iam_role_policy.agent_mcp_guardrails"); ids+=("${agent_mcp_role_name}:mcp-guardrails")
+
   local key policy_arn
   for key in ci_deploy_state ci_deploy_network ci_deploy_compute ci_deploy_storage_cdn \
     ci_deploy_data ci_deploy_auth ci_deploy_observability ci_deploy_iam; do
-    policy_arn="arn:aws:iam::${account_id}:policy/${project}-${policy_suffix[$key]}"
+    policy_arn="arn:aws:iam::${account_id}:policy/${project}-${suffix}-${policy_suffix[$key]}"
     addresses+=("aws_iam_policy.${key}"); ids+=("$policy_arn")
     addresses+=("aws_iam_role_policy_attachment.${key}"); ids+=("${deploy_role_name}/${policy_arn}")
   done
@@ -748,6 +874,8 @@ cmd_recover() {
     exit 1
   fi
 
+  backup_state
+
   echo
   echo "==> 完了。次のコマンドで差分が無いことを確認してください"
   echo "    （差分がある場合、import ID の想定と main.tf の実際の定義がずれている可能性があります）:"
@@ -776,10 +904,13 @@ cmd_destroy() {
     exit 1
   fi
 
-  echo "==> state バケット・OIDCプロバイダー以外（ci_plan/ci_deployロールとそのポリシー）を破棄します。"
+  echo "==> state バケット・OIDCプロバイダー以外（ci_plan/ci_deploy/agent_mcpロールとそのポリシー）を破棄します。"
   confirm "$yes" "続行しますか？" || { echo "中止しました。"; exit 1; }
 
   local targets=(
+    aws_iam_role_policy.agent_mcp_guardrails
+    aws_iam_role_policy_attachment.agent_mcp_readonly
+    aws_iam_role.agent_mcp
     aws_iam_role_policy_attachment.ci_deploy_observability
     aws_iam_role_policy_attachment.ci_deploy_data
     aws_iam_role_policy_attachment.ci_deploy_auth

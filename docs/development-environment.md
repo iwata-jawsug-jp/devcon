@@ -144,6 +144,44 @@ make tf-lint
 - リモート state（S3 + ネイティブロック `use_lockfile`）は `infra/backend.tf` のコメント参照。
 - 環境別変数は `infra/env/*.tfvars`。コミットするのは `*.example` のみ。
 
+### MCP サーバー（Claude Code、`.mcp.json`）
+
+`docs/proposal/mcp-server-selection-proposal.md`（#566）の選定方針に基づき、project scope で
+`.mcp.json` にコミットする。現時点の常時導入対象:
+
+- **Terraform MCP Server**（HashiCorp 公式）— `infra/` での Terraform コード生成時に
+  Terraform Registry のプロバイダー/モジュール最新バージョン・仕様を参照する。Docker イメージ
+  （`hashicorp/terraform-mcp-server:1.1.0`、バージョンはタグ固定。`:latest` は使わない）を
+  devcontainer 組み込み済みの docker-in-docker feature 経由で起動する。追加インストール不要。
+  HCP Terraform/Enterprise 向けのワークスペース操作ツールは `TFE_TOKEN` 未設定のため無効
+  （本リポジトリでは公開 Registry の参照のみに使う）。バージョン更新は手動（`.mcp.json` の
+  タグを書き換える）。
+- **AWS MCP Server**（Agent Toolkit for AWS、AWS 公式、#572）— AWS ナレッジ検索・スキル参照・
+  read-only API 実行に使う。[`mcp-proxy-for-aws`](https://github.com/aws/mcp-proxy-for-aws)
+  （PyPI、バージョンタグ固定、devcontainer に導入済みの `uv` に同梱される `uvx` 経由で起動、
+  追加インストール不要）が SigV4 署名でエンドポイント（`https://aws-mcp.us-east-1.api.aws/mcp`
+  — AWS MCP Server の対応リージョンは `us-east-1`/`eu-central-1` のみで、これはプロジェクトの
+  実際の AWS リージョン `ap-northeast-1` とは無関係。実際の AWS 操作対象リージョンは
+  `--metadata AWS_REGION=ap-northeast-1` で指定）にプロキシする。
+  - **認証方式に注意**: AWS MCP Server は OAuth（ブラウザでのAWS Sign-in、ローカルの
+    AWS CLI クレデンシャルを経由しない）と SigV4（`mcp-proxy-for-aws` 経由、AWS CLI の
+    クレデンシャルチェーンを使う）の2方式がある。本リポジトリは
+    [#571](https://github.com/iwata-jawsug-jp/devcon/issues/571) で新設した
+    エージェント専用 IAM ロール（`ReadOnlyAccess` + guardrail Deny）を実際に経由させる
+    必要があるため **SigV4 方式のみを使う**（OAuth方式だとブラウザでサインインした
+    人間自身の権限で実行され、IAMロールのguardrailが意味を持たなくなる）。
+  - `--profile agent-mcp`: `docs/aws-temporary-credentials.md`
+    「`agent-mcp` ロールを引き受ける」節でセットアップする `~/.aws/config` プロファイル名と
+    一致させている。このプロファイルが未セットアップだと `aws` MCP サーバーは認証エラーで
+    動作しない。
+  - `--read-only`: プロキシ層で書き込み系ツール自体を非表示にする。IAM側の
+    `ReadOnlyAccess`+Denyと合わせた二重の防御。
+  - **`.claude/settings.json` の `ask`（`Bash(aws:*)`）はこの MCP サーバー経由の呼び出しには
+    適用されない**（MCP ツール呼び出しは Bash パターンベースの許可ルールの対象外 — Terraform
+    MCP Server のツールが確認プロンプト無しで呼べている実績どおり）。Bash 経由の `aws`
+    コマンドは都度確認できるが、MCP 経由は事前の IAM 側の絞り込み（上記 `agent-mcp` ロール）
+    が唯一のガードレールになる、という非対称性がある。
+
 ### Python（`services/backend/python/`）
 
 uv 管理。`python`/`pip` を直接使わず必ず `uv run` 経由で実行する。
@@ -273,14 +311,15 @@ GitHub Packages の npm パッケージは `@org` または `@user` のスコー
 
 ## 7. トラブルシューティング
 
-| 症状                                        | 対処                                                                                                                        |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| ツールのバージョンが出ない / コマンドが無い | **Rebuild Container** を実行。直らなければイメージをクリーンビルド。                                                        |
-| AWS が `ExpiredToken` 等で失敗              | `aws sso login` を再実行（トークン期限切れ）。                                                                              |
-| push が `GH007` で拒否される                | identity を GitHub noreply メールに切り替え、`git commit --amend --reset-author --no-edit`。詳細は README「Git 初期設定」。 |
-| `~/.aws` などが root 所有でアクセスできない | `bash .devcontainer/init-persist.sh` を手動実行（冪等）。                                                                   |
-| bash 履歴が残らない                         | `~/.history` ボリュームと `.bashrc` の履歴設定を確認。新規ターミナルから有効。                                              |
-| pre-commit が走らない                       | `make hooks`（= `pre-commit install`）を再実行。                                                                            |
+| 症状                                                                               | 対処                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ツールのバージョンが出ない / コマンドが無い                                        | **Rebuild Container** を実行。直らなければイメージをクリーンビルド。                                                                                                                                                                                                                                                                                                                                                                                                        |
+| AWS が `ExpiredToken` 等で失敗                                                     | `aws sso login` を再実行（トークン期限切れ）。                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| push が `GH007` で拒否される                                                       | identity を GitHub noreply メールに切り替え、`git commit --amend --reset-author --no-edit`。詳細は README「Git 初期設定」。                                                                                                                                                                                                                                                                                                                                                 |
+| `~/.aws` などが root 所有でアクセスできない                                        | `bash .devcontainer/init-persist.sh` を手動実行（冪等）。                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| bash 履歴が残らない                                                                | `~/.history` ボリュームと `.bashrc` の履歴設定を確認。新規ターミナルから有効。                                                                                                                                                                                                                                                                                                                                                                                              |
+| pre-commit が走らない                                                              | `make hooks`（= `pre-commit install`）を再実行。                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Docker 経由の MCP サーバー（Terraform 等）が動くがレジストリに到達できない（WSL2） | Codespaces では起きないが、WSL2 上に Docker デーモンを立てている環境では、その DNS 解決が壊れていて `registry.terraform.io` 等の外部ホストにコンテナから到達できないことがある（#570）。WSL2 側の Docker デーモンの `daemon.json` にフォールバック DNS（例: `"dns": ["1.1.1.1", "8.8.8.8"]`）を追加し、デーモンを再起動する。devcontainer 組み込みの docker-in-docker（`devcon-dind`）はこの外側デーモンの DNS 設定を引き継ぐため、devcontainer 側の追加設定は不要。 |
 
 ---
 
@@ -313,3 +352,4 @@ Terraform / tflint / trivy / checkov / uv / copier のバージョンは `.devco
 - [`README.md`](../README.md) — 構成・各種初期設定（Git / Claude Code / AWS SSO）の詳細
 - [`CLAUDE.md`](../CLAUDE.md) — Claude Code 向けのリポジトリガイドと規約
 - [sandbox.md](sandbox.md) — クラウド上での使い捨て検証・開発（`sandbox/*` 隔離ブランチ）
+  導入する MCP サーバーの選定方針・設計（#566）

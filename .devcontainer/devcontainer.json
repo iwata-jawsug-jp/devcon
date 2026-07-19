@@ -3,10 +3,7 @@
   "initializeCommand": "bash .devcontainer/initialize.sh",
   "build": {
     "dockerfile": "Dockerfile",
-    "cacheFrom": [
-      "ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest",
-      "ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache"
-    ]
+    "cacheFrom": ["ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache"]
   },
   "remoteUser": "vscode",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",

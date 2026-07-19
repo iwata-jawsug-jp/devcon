@@ -95,10 +95,18 @@ aws_region:
 # `ghcr.io/devcontainers/...` のような文字列を破壊する（#515 で実機確認）。他の3パターンは
 # 衝突がなく、\b を付けると逆に `ap-northeast-1_xxxxxxxxx`（CognitoユーザープールID）のような
 # 後続がアンダースコアの正当な一致を壊すため、意図的に付けない。
+#
+# `.copier-answers.yml`（`.copier-answers.yml.jinja` から copier が自動生成）はこのループから
+# 除外する: `_src_path` は `copier update` が参照する本物のテンプレート配布元（例:
+# `gh:iwata-jawsug-jp/devcon`）を指しており、他ファイルと同じ置換をかけると `devcon` /
+# `itouhi` を含む正当な値まで書き換わって `copier update` が別のリポジトリを指してしまう
+# （#298 で実機確認・修正）。この置換ループが救っているのはチェックイン済みファイル側の
+# 直書き文字列だけであり、`.copier-answers.yml` の各値は copier 自身が生成時点の回答で
+# 正しくレンダリング済みのため、そもそも置換の必要がない。
 _tasks:
   - >-
-    find . -path ./.git -prune -o -type f -print0 | xargs -0 grep -Il . 2>/dev/null | while IFS=
-    read -r f; do
+    find . -path ./.git -prune -o -name .copier-answers.yml -prune -o -type f -print0 | xargs -0
+    grep -Il . 2>/dev/null | while IFS= read -r f; do
     sed -i
     -e 's#iwata-jawsug-jp/devcon#{{ github_org }}/{{ github_repo }}#g'
     -e 's#itouhi#{{ github_org }}#g'

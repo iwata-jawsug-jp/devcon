@@ -100,6 +100,31 @@ copier copy gh:iwata-jawsug-jp/devcon <生成先ディレクトリ>
 生成物が CI で green になることは `make scaffold-verify`（`ci.yml` の `scaffold` ジョブ）で
 継続的に検証している。
 
+### 生成後にテンプレートの更新を取り込む（`copier update`）
+
+`copier copy` で生成したプロジェクトは、`git init` してコミットしておけば
+[`copier update`](https://copier.readthedocs.io/en/stable/updating/) で本テンプレート
+（`devcon`）側の更新を後から取り込める（#298 で実機検証済み。詳細は
+[`docs/scaffold-cli.md`](docs/scaffold-cli.md#copier-update下流追従298で判明した設計ギャップと対応)
+参照）。
+
+```bash
+cd <生成先ディレクトリ>
+copier update --trust
+```
+
+- 本テンプレートはリリースの度に `vX.Y.Z` タグを打つ運用（`docs/release.md`）
+  のため、`--vcs-ref` を省略すると**最新リリースタグ**に更新される（最新コミットではない）。
+  最新の未リリース変更まで取り込みたい場合は `copier update --trust --vcs-ref=HEAD`（自分の
+  `devcon` クローンを `_src_path` に指定して生成した場合のみ有効）。
+- 生成先で独自にカスタマイズした行が、同じ行でテンプレート側も変更されていた場合は
+  `<<<<<<< before updating` / `=======` / `>>>>>>> after updating` という git 風の
+  コンフリクトマーカーがファイル内に挿入される。通常の git マージ衝突と同じ要領で解決し、
+  コミットする。
+- 破壊的変更（`copier.yml` の変数追加・削除・改名、生成ファイル構成の変更等）は
+  [`CHANGELOG.md`](CHANGELOG.md) の該当リリースエントリに明記する運用にしている。
+  `copier update` の前に更新元リポジトリの CHANGELOG を確認することを推奨する。
+
 ## 本格セットアップ（自分の AWS で実開発）
 
 ローカルで動かすだけなら上記で十分。**コミットして開発を進め、CI/CD で自分の AWS へ
