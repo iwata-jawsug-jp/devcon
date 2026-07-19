@@ -1,3 +1,12 @@
+# aws_s3_bucket_server_side_encryption_configuration.web (web.tf) defaults to
+# this AWS-managed key with no kms_master_key_id set, so ci_deploy needs
+# explicit IAM permission on it too -- the key's own policy trusting the
+# account is not sufficient, same two-sided-permission gap as the RDS/
+# Secrets Manager default keys in iam-ci-deploy-data.tf (#587).
+data "aws_kms_alias" "s3" {
+  name = "alias/aws/s3"
+}
+
 # Storage + CDN (web.tf): the SPA's S3 bucket + CloudFront distribution.
 # S3 is scoped to this project's bucket names; CloudFront has no
 # resource-level ARN support for most management actions.
@@ -31,6 +40,8 @@ data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
       "s3:GetBucketObjectLockConfiguration",
       "s3:GetReplicationConfiguration",
       "s3:GetEncryptionConfiguration",
+      # aws_s3_bucket_server_side_encryption_configuration.web (#587).
+      "s3:PutEncryptionConfiguration",
       "s3:GetBucketOwnershipControls",
       # aws_s3_bucket_lifecycle_configuration.web (#303).
       "s3:GetLifecycleConfiguration",
@@ -97,6 +108,17 @@ data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
       "cloudfront:ListFunctions",
     ]
     resources = ["*"]
+  }
+  # cd-app.yml's `aws s3 sync dist/ s3://.../` (PutObject) against the
+  # SSE-KMS-by-default web bucket needs kms:GenerateDataKey on this key;
+  # kms:DescribeKey covers Terraform's own read of the key during apply.
+  # Starting point pending sandbox apply + CloudTrail confirmation, same as
+  # RdsDefaultKmsKeyDescribe's history (#334) -- trim/extend once verified (#587).
+  statement {
+    sid       = "S3DefaultKmsKey"
+    effect    = "Allow"
+    actions   = ["kms:DescribeKey", "kms:GenerateDataKey"]
+    resources = [data.aws_kms_alias.s3.target_key_arn]
   }
 }
 

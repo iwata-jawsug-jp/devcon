@@ -31,7 +31,9 @@ test_allow_connect_src_with_cognito if {
 }
 
 test_non_matching_resource_type_ignored if {
-	rc := {"address": "aws_s3_bucket.web", "type": "aws_s3_bucket", "change": {"after": {"tags_all": {"Project": "x", "Environment": "y"}}}}
+	# Not aws_s3_bucket -- see s3_security.rego (#296) -- so this can't also trip that
+	# policy's rules under the `package main` shared-input gotcha (ADR-0017).
+	rc := {"address": "aws_cloudwatch_log_group.app", "type": "aws_cloudwatch_log_group", "change": {"after": {"tags_all": {"Project": "x", "Environment": "y"}}}}
 	violations := deny with input as {"resource_changes": [rc]}
 	count(violations) == 0
 }

@@ -56,10 +56,11 @@ test_explicit_deny_statements_are_not_flagged if {
 test_non_iam_resource_type_is_ignored if {
 	# All infra/policy/*.rego files share `package main`, so `deny` here is the union of
 	# every policy's deny rule (not just this file's) -- give this fixture complete tags
-	# so it can't also trip tags.rego's rule.
+	# and a resource type no other policy inspects (not aws_s3_bucket -- see
+	# s3_security.rego, #296) so it can't also trip tags.rego's or s3_security.rego's rules.
 	violations := deny with input as {"resource_changes": [{
-		"address": "aws_s3_bucket.web",
-		"type": "aws_s3_bucket",
+		"address": "aws_cloudwatch_log_group.app",
+		"type": "aws_cloudwatch_log_group",
 		"change": {"after": {"tags_all": {"Project": "x", "Environment": "dev"}}},
 	}]}
 

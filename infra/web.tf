@@ -32,6 +32,24 @@ resource "aws_s3_bucket_versioning" "web" {
   }
 }
 
+# SSE-S3 (AES256), not SSE-KMS: CloudFront's Origin Access Control (OAC) can only
+# decrypt SSE-KMS objects encrypted with a customer-managed key (CMK), never the
+# AWS-managed key (alias/aws/s3) -- #587's SSE-KMS attempt used the latter, so
+# every CloudFront request to this origin got a 403 AccessDenied from S3 and the
+# SPA never loaded at all (#591). #280 already declined introducing a CMK, so
+# SSE-S3 is what's left. This leaves checkov's CKV_AWS_145 (S3 should use KMS) as
+# a known, already-accepted soft-fail finding (see the `security` target comment
+# in Makefile, #111) rather than a bug to fix again.
+resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
+  bucket = aws_s3_bucket.web.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 # Versioned SPA builds otherwise keep every noncurrent version forever (#303).
 # Built assets are reproducible from source, so a short retention is fine.
 resource "aws_s3_bucket_lifecycle_configuration" "web" {

@@ -1,9 +1,11 @@
 package main
 
 test_deny_missing_required_tag if {
+	# A resource type no other policy inspects (not aws_s3_bucket -- see s3_security.rego,
+	# #296) so only tags.rego's own rule can contribute a violation here.
 	violations := deny with input as {"resource_changes": [{
-		"address": "aws_s3_bucket.web",
-		"type": "aws_s3_bucket",
+		"address": "aws_cloudwatch_log_group.app",
+		"type": "aws_cloudwatch_log_group",
 		"change": {"after": {"tags_all": {"ManagedBy": "terraform"}}},
 	}]}
 
@@ -12,8 +14,8 @@ test_deny_missing_required_tag if {
 
 test_allow_with_required_tags if {
 	violations := deny with input as {"resource_changes": [{
-		"address": "aws_s3_bucket.web",
-		"type": "aws_s3_bucket",
+		"address": "aws_cloudwatch_log_group.app",
+		"type": "aws_cloudwatch_log_group",
 		"change": {"after": {"tags_all": {
 			"Project": "test01",
 			"Environment": "dev",
