@@ -198,6 +198,28 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
       }
     }
   }
+  # ECR pull-through cache rules (#3/#598) are registry-wide settings, not
+  # per-repository resources -- like EcrAuth's GetAuthorizationToken above,
+  # these actions have no resource-level ARN support and need Resource "*".
+  statement {
+    sid    = "EcrPullThroughCache"
+    effect = "Allow"
+    actions = [
+      "ecr:CreatePullThroughCacheRule",
+      "ecr:DeletePullThroughCacheRule",
+      "ecr:DescribePullThroughCacheRules",
+    ]
+    resources = ["*"]
+
+    dynamic "condition" {
+      for_each = [local.region_condition]
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
+    }
+  }
   # Application Auto Scaling has no resource-level ARN support either --
   # narrowed from `application-autoscaling:*` to only the actions the
   # ECS scalable-target/policy resources in api.tf need (#45).

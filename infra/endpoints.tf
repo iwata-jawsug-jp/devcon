@@ -87,3 +87,23 @@ resource "aws_vpc_endpoint" "interface" {
     Name = "${local.name_prefix}-${each.key}"
   }
 }
+
+# ECR pull-through cache for the ADOT collector image (#3): the collector's
+# upstream image lives on Amazon ECR Public (public.ecr.aws, CloudFront-
+# fronted), which is outside the ecr_api/ecr_dkr interface endpoints above --
+# those only cover *this account's* private ECR API. Without NAT, a task
+# referencing public.ecr.aws directly can't resolve/reach it and fails to
+# provision (CannotPullContainerError). A pull-through cache rule makes ECR
+# itself fetch and cache the upstream image on first pull, so the task can
+# pull it through the same private ecr.dkr endpoint instead -- no NAT needed.
+# api.tf's local.otel_collector_image rewrites var.otel_collector_image to
+# this mirror's address before it reaches the container definition.
+locals {
+  ecr_public_pull_through_prefix = "ecr-public"
+}
+
+resource "aws_ecr_pull_through_cache_rule" "ecr_public" {
+  count                 = var.otel_traces_enabled ? 1 : 0
+  ecr_repository_prefix = local.ecr_public_pull_through_prefix
+  upstream_registry_url = "public.ecr.aws"
+}

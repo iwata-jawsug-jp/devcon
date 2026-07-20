@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/vue-query';
 import { apiClient } from './client';
-import type { Ref } from 'vue';
 
 /**
  * TanStack Query composables for server state. Components use these instead
@@ -12,12 +11,5 @@ export function useHealthQuery() {
   return useQuery({
     queryKey: ['health'],
     queryFn: ({ signal }) => apiClient.getHealth({ signal }),
-  });
-}
-
-export function useGreetingQuery(name: Ref<string>) {
-  return useQuery({
-    queryKey: ['greeting', name],
-    queryFn: ({ signal }) => apiClient.getGreeting(name.value, { signal }),
   });
 }

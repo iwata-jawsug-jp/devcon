@@ -14,6 +14,8 @@ data "aws_iam_policy_document" "ci_deploy_observability" {
       "sns:SetTopicAttributes",
       "sns:Subscribe",
       "sns:Unsubscribe",
+      "sns:GetSubscriptionAttributes",
+      "sns:SetSubscriptionAttributes",
       "sns:ListSubscriptionsByTopic",
       "sns:TagResource",
       "sns:UntagResource",

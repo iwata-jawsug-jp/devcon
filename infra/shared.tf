@@ -61,6 +61,33 @@ resource "aws_iam_role_policy" "ecs_execution_secret" {
   policy = data.aws_iam_policy_document.ecs_execution_secret.json
 }
 
+# ECR pull-through cache (#3, endpoints.tf's aws_ecr_pull_through_cache_rule.
+# ecr_public): pulling through a cache rule for the first time makes ECR
+# create the destination repository and import the upstream image on the
+# execution role's behalf, which needs ecr:CreateRepository /
+# ecr:BatchImportUpstreamImage -- neither is in the
+# AmazonECSTaskExecutionRolePolicy managed policy attached above.
+data "aws_iam_policy_document" "ecs_execution_ecr_pull_through" {
+  count = var.otel_traces_enabled ? 1 : 0
+
+  statement {
+    sid    = "EcrPullThroughCache"
+    effect = "Allow"
+    actions = [
+      "ecr:CreateRepository",
+      "ecr:BatchImportUpstreamImage",
+    ]
+    resources = ["arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/${local.ecr_public_pull_through_prefix}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ecs_execution_ecr_pull_through" {
+  count  = var.otel_traces_enabled ? 1 : 0
+  name   = "ecr-pull-through-cache"
+  role   = aws_iam_role.ecs_execution.id
+  policy = data.aws_iam_policy_document.ecs_execution_ecr_pull_through[0].json
+}
+
 # Task role: the app runtime identity. No AWS API needs yet; kept for future use.
 resource "aws_iam_role" "ecs_task" {
   name               = "${local.name_prefix}-ecs-task"

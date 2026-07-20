@@ -42,8 +42,6 @@ export class ApiError extends Error {
  * `paths` is imported from the generated `schema.ts` so request/response types
  * can be tightened as the OpenAPI schema grows.
  */
-export type GreetingResponse = components['schemas']['Greeting'];
-
 export class ApiClient {
   constructor(private readonly baseUrl: string = API_BASE) {}
 
@@ -112,14 +110,6 @@ export class ApiClient {
    */
   getHealth(options?: { signal?: AbortSignal }): Promise<HealthResponse> {
     return this.request<HealthResponse>('/health', { skipAuth: true, signal: options?.signal });
-  }
-
-  getGreeting(name: string, options?: { signal?: AbortSignal }): Promise<GreetingResponse> {
-    const query = new URLSearchParams({ name }).toString();
-    return this.request<GreetingResponse>(`/greeting?${query}`, {
-      skipAuth: true,
-      signal: options?.signal,
-    });
   }
 }
 

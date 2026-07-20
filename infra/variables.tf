@@ -205,7 +205,7 @@ variable "otel_traces_enabled" {
 }
 
 variable "otel_collector_image" {
-  description = "ADOT (AWS Distro for OpenTelemetry) collector image, only scheduled when otel_traces_enabled is true."
+  description = "ADOT (AWS Distro for OpenTelemetry) collector image (upstream public.ecr.aws reference), only scheduled when otel_traces_enabled is true. This VPC has no NAT gateway, so the task never pulls this address directly -- api.tf's local.otel_collector_image rewrites it to the account's ECR pull-through cache mirror (endpoints.tf's aws_ecr_pull_through_cache_rule.ecr_public) before it reaches the container definition (#3)."
   type        = string
   default     = "public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0"
 }

@@ -994,12 +994,12 @@ cmd_destroy() {
     exit 1
   fi
 
-  local main_tf="$BOOTSTRAP_DIR/main.tf"
-  cp "$main_tf" "$main_tf.bak"
+  local state_tf="$BOOTSTRAP_DIR/state.tf"
+  cp "$state_tf" "$state_tf.bak"
   # lifecycle { prevent_destroy = true } を一時的にコメントアウトする。
-  sed -i.orig 's/prevent_destroy = true/prevent_destroy = false/' "$main_tf"
-  restore_main_tf() { mv "$main_tf.bak" "$main_tf"; rm -f "$main_tf.orig"; }
-  trap restore_main_tf EXIT
+  sed -i.orig 's/prevent_destroy = true/prevent_destroy = false/' "$state_tf"
+  restore_state_tf() { mv "$state_tf.bak" "$state_tf"; rm -f "$state_tf.orig"; }
+  trap restore_state_tf EXIT
 
   tf destroy \
     -target=aws_s3_bucket_policy.state \
@@ -1010,9 +1010,9 @@ cmd_destroy() {
     -target=aws_s3_bucket.state \
     -auto-approve
 
-  restore_main_tf
+  restore_state_tf
   trap - EXIT
-  echo "==> main.tf を復元しました。"
+  echo "==> state.tf を復元しました。"
 }
 
 # ============================================================

@@ -179,7 +179,18 @@ resource "aws_lb_listener_rule" "api_from_cloudfront" {
 
 # ADOT collector sidecar config (ADR-0007): OTLP-gRPC in, AWS X-Ray out. Passed
 # inline via AOT_CONFIG_CONTENT so no custom image/build is needed.
+#
+# otel_collector_image: rewrites var.otel_collector_image's public.ecr.aws
+# reference to this account's ECR pull-through cache mirror (endpoints.tf's
+# aws_ecr_pull_through_cache_rule.ecr_public) -- see #3, this VPC has no NAT
+# gateway so the task can't reach public.ecr.aws directly.
 locals {
+  otel_collector_image = var.otel_traces_enabled ? replace(
+    var.otel_collector_image,
+    "public.ecr.aws",
+    "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/${local.ecr_public_pull_through_prefix}"
+  ) : var.otel_collector_image
+
   adot_collector_config = yamlencode({
     receivers = {
       otlp = {
@@ -246,6 +257,12 @@ resource "aws_ecs_task_definition" "api" {
   execution_role_arn = aws_iam_role.ecs_execution.arn
   task_role_arn      = aws_iam_role.ecs_task.arn
 
+  # Not a hard runtime requirement (ECS resolves the pull-through cache lazily
+  # on first pull, after this task def already exists) -- but ties them
+  # together explicitly so `terraform destroy`/partial applies can't leave the
+  # rule gone while a revision still references its mirror address.
+  depends_on = [aws_ecr_pull_through_cache_rule.ecr_public]
+
   container_definitions = jsonencode(concat(
     [
       {
@@ -285,7 +302,7 @@ resource "aws_ecs_task_definition" "api" {
     var.otel_traces_enabled ? [
       {
         name      = "adot-collector"
-        image     = var.otel_collector_image
+        image     = local.otel_collector_image
         essential = false # tracing outage shouldn't take the api container down with it
         environment = [
           { name = "AOT_CONFIG_CONTENT", value = local.adot_collector_config },
