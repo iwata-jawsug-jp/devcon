@@ -107,15 +107,17 @@ gh variable set LIVE_SMOKE_ENABLED --body "true"
 gh variable delete LIVE_SMOKE_ENABLED
 ```
 
-### `INFRA_APPLY_ENABLED`（`cd-infra.yml` の `apply`）
+### `INFRA_APPLY_ENABLED`（`cd-infra.yml` の `apply-dev`/`apply-prod`）
 
-`apply` は既に `workflow_dispatch` 限定（`main` 以外からは実行不可、#301）だが、これに
-加えて `INFRA_APPLY_ENABLED` を `true` にしない限り実行されない**二重の鍵**にしている。
-`apply` は実際に本番インフラを変更する唯一のジョブで、`LIVE_SMOKE_ENABLED` の前提と
-なる Cognito 管理権限もここで反映される。`INFRA_ENABLED`（上記のエリア別スイッチ）は
-`ci.yml` の infra 静的チェックと `cd-infra.yml` の `plan` も含めて止めてしまうため、
-`apply` だけを対象にした別変数にしている（静的チェック・`plan` は AWS へ変更を加えない
-ため、既定どおり常時有効のままにする）。
+`apply-dev`/`apply-prod` は既に `workflow_dispatch` 限定（`main` 以外からは実行不可、#301）
+だが、これに加えて `INFRA_APPLY_ENABLED` を `true` にしない限り実行されない**二重の鍵**に
+している。`apply-dev`/`apply-prod`（実行対象は `workflow_dispatch` の `environment` 入力
+`dev`/`prod` で選択、デフォルト `dev`）は実際に AWS インフラを変更する唯一のジョブで、
+`apply-prod` では `LIVE_SMOKE_ENABLED` の前提となる Cognito 管理権限もここで反映される。
+`INFRA_ENABLED`（上記のエリア別スイッチ）は `ci.yml` の infra 静的チェックと
+`cd-infra.yml` の `plan` も含めて止めてしまうため、`apply-dev`/`apply-prod` だけを対象に
+した別変数にしている（静的チェック・`plan` は AWS へ変更を加えないため、既定どおり常時
+有効のままにする）。
 
 ```bash
 # 有効化（apply を実行する回だけ、実行前に設定）

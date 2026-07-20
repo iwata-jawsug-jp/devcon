@@ -1,18 +1,28 @@
 name: CD Infra
 
-# Terraform plan on PRs (posted as a PR comment); apply is run manually.
+# Terraform plan on PRs (posted as a PR comment); apply is run manually,
+# choosing dev (default) or prod via the workflow_dispatch `environment` input.
 # Auth is GitHub OIDC -> an IAM role assumed per job (NO long-lived AWS keys):
 #   - PRs assume the read-only PLAN role.
-#   - apply assumes the DEPLOY role. It is NOT triggered by merge to main:
-#     required-reviewer environment gating needs a paid plan on a private repo,
-#     so apply is gated behind a manual workflow_dispatch instead — prod is never
-#     provisioned without a deliberate human run.
+#   - apply-dev/apply-prod assume the DEPLOY role. Neither is triggered by
+#     merge to main: required-reviewer environment gating needs a paid plan on
+#     a private repo, so apply is gated behind a manual workflow_dispatch
+#     instead — nothing is provisioned without a deliberate human run.
 on:
   pull_request:
     paths:
       - 'infra/**'
       - '.github/workflows/cd-infra.yml'
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'apply対象の環境'
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - prod
 
 permissions:
   contents: read
@@ -23,7 +33,7 @@ concurrency:
 
 env:
   AWS_REGION: ap-northeast-1
-  # Plan against dev on PRs; the deploy job overrides to prod.
+  # Plan against dev on PRs; apply-dev/apply-prod each override this per job.
   TF_ENV: dev
 
 jobs:
@@ -140,23 +150,75 @@ jobs:
               });
             }
 
-  apply:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.INFRA_ENABLED != 'false' && vars.INFRA_APPLY_ENABLED == 'true' }}
+  # apply is split into apply-dev/apply-prod (rather than one job with a
+  # dynamic `environment:`) so the OIDC-trust trap stays impossible to hit by
+  # construction: `environment:` changes the OIDC token's `sub` claim to
+  # `repo:<org>/<repo>:environment:<name>`, and infra/bootstrap's deploy-role
+  # trust policy only grants that for the literal name `production` (plus
+  # `ref:refs/heads/main`, which both jobs already satisfy via the `github.ref`
+  # check below). A dynamically-named `environment: ${{ inputs.environment }}`
+  # would silently break dev applies the same way #392/#393 broke
+  # cd-app-sandbox.yml (see cd-infra-verify.yml for the same reasoning applied
+  # to golden-path-verify). apply-dev therefore declares no `environment:` at
+  # all; apply-prod keeps the existing `environment: production`.
+  apply-dev:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.INFRA_ENABLED != 'false' && vars.INFRA_APPLY_ENABLED == 'true' && github.event.inputs.environment == 'dev' }}
+    runs-on: ubuntu-latest
+    # Manual-only (workflow_dispatch) — this IS the gate. See apply-prod below
+    # for why no `environment:` is declared here.
+    #
+    # INFRA_APPLY_ENABLED is a second, narrower key on top of INFRA_ENABLED:
+    # opt-in (defaults to disabled), unlike INFRA_ENABLED's opt-out default
+    # (docs/ci-cd-area-switches.md). It only gates apply-dev/apply-prod —
+    # ci.yml's infra lint job and this workflow's `plan` job keep running by
+    # default via INFRA_ENABLED, since they make no AWS changes.
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      TF_ENV: dev
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Materialize backend + tfvars from committed examples
+        # See the plan job: render git-ignored backend.hcl / *.tfvars from the
+        # committed .example templates at runtime; no secrets in git or logs.
+        run: |
+          sed -e "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
+              -e "s|devcon|${{ vars.PROJECT_NAME }}|g" \
+            "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
+          sed "s|devcon|${{ vars.PROJECT_NAME }}|g" \
+            "env/${TF_ENV}.tfvars.example" > "env/${TF_ENV}.tfvars"
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: '1.13.0'
+      - name: Terraform init
+        run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
+      - name: Terraform apply
+        run: |
+          terraform apply -no-color -input=false -auto-approve \
+            -var-file=env/${{ env.TF_ENV }}.tfvars
+
+  apply-prod:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.INFRA_ENABLED != 'false' && vars.INFRA_APPLY_ENABLED == 'true' && github.event.inputs.environment == 'prod' }}
     runs-on: ubuntu-latest
     # Manual-only (workflow_dispatch) — this IS the gate. The `production`
     # environment records the deployment; required-reviewer gating would need a
     # paid plan on a private repo. The `ref` check is the only real guard: the
     # deploy role's OIDC trust also accepts `environment:production`, so without
     # it a workflow_dispatch from ANY branch could assume the deploy role (#301).
-    #
-    # INFRA_APPLY_ENABLED is a second, narrower key on top of INFRA_ENABLED:
-    # opt-in (defaults to disabled), unlike INFRA_ENABLED's opt-out default
-    # (docs/ci-cd-area-switches.md). It only gates this `apply` job — ci.yml's
-    # infra lint job and this workflow's `plan` job keep running by default via
-    # INFRA_ENABLED, since they make no AWS changes. `apply` provisions real
-    # prod infra, including the IAM permissions cd-app.yml's smoke-test job
-    # depends on (LIVE_SMOKE_ENABLED), so a stray/rehearsed workflow_dispatch
-    # shouldn't apply until someone deliberately flips this too.
+    # `apply` provisions real prod infra, including the IAM permissions
+    # cd-app.yml's smoke-test job depends on (LIVE_SMOKE_ENABLED), so a
+    # stray/rehearsed workflow_dispatch shouldn't apply until someone
+    # deliberately flips INFRA_APPLY_ENABLED too.
     environment: production
     permissions:
       id-token: write # OIDC

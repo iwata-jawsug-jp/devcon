@@ -642,19 +642,21 @@ rule`）を返し設定できないので、上記のとおり apply を手動 `
    # reviewers は Team も可: { "type": "Team", "id": <TEAM_ID> }
    ```
 
-2. `.github/workflows/cd-infra.yml` の `apply` を「main push で起動」に戻す:
+2. `.github/workflows/cd-infra.yml` の `apply-prod` を「main push で起動」に戻す
+   （`apply-dev` は dev 環境なので対象外、引き続き手動 `workflow_dispatch` のまま）:
    - `on:` に `push: { branches: [main], paths: ['infra/**', '.github/workflows/cd-infra.yml'] }`
      を復活（`workflow_dispatch` は残しても良い）。
-   - `apply` ジョブの `if:` を
+   - `apply-prod` ジョブの `if:` を
      `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}` に戻す。
-   - `apply` ジョブの `environment: production` は既にあるので、保護ルールが効けば
+   - `apply-prod` ジョブの `environment: production` は既にあるので、保護ルールが効けば
      **マージで apply がキューされ、承認されるまで待機**する（無承認の自動 provision は起きない）。
 
-3. 動作確認: infra 変更を含む PR をマージ → cd-infra の `apply` が「Waiting / Review required」で
+3. 動作確認: infra 変更を含む PR をマージ → cd-infra の `apply-prod` が「Waiting / Review required」で
    停止 → 承認で初めて `terraform apply` が走ることを確認する。
 
 > 注: 移行するまでは手動 `workflow_dispatch` がゲート。prod を立てる時は Actions →
-> **CD Infra** → **Run workflow** で apply を起動する。
+> **CD Infra** → **Run workflow** → `environment` に `prod` を指定して apply-prod を起動する
+> （`dev` を指定すると `apply-dev` が動く）。
 
 > **bootstrap 適用前の CI 挙動（重要）**
 >
