@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import HealthBadge from '../components/HealthBadge.vue';
+import GreetingCard from '../components/GreetingCard.vue';
 import { useCounterStore } from '../stores/counter';
 import { useHead } from '@unhead/vue';
 
@@ -40,6 +41,7 @@ useHead({
   <section>
     <h2>Home</h2>
     <HealthBadge />
+    <GreetingCard />
     <p>
       Count: {{ counter.count }} (doubled: {{ counter.doubled }})
       <button type="button" @click="counter.increment()">Increment</button>

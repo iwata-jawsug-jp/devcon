@@ -7,7 +7,7 @@ from api.config import get_settings, warn_if_cognito_config_missing
 from api.exception_handlers import unhandled_exception_handler
 from api.logging_config import configure_logging
 from api.middleware import CorrelationIdMiddleware
-from api.routers import health, items
+from api.routers import greeting, health, items
 from api.tracing import configure_tracing
 
 
@@ -21,6 +21,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CorrelationIdMiddleware)
     app.add_exception_handler(Exception, unhandled_exception_handler)
     app.include_router(health.router)
+    app.include_router(greeting.router)
     app.include_router(items.router)
     return app
 
