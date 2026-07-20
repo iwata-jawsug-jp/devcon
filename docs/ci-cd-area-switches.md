@@ -4,6 +4,10 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 リポジトリ変数（Repository Variables）で切り替える手順。仕組みの背景・設計判断は
 [infrastructure.md](infrastructure.md) の「エリア別スイッチ」を参照。
 
+> このリポジトリが使う全リポジトリ変数（bootstrap 配線・本番/sandbox アプリ用も含む）の
+> 一覧は [repository-variables.md](repository-variables.md) を参照。本書はスイッチ系5個の
+> 詳しい設定手順に特化している。
+
 ## 仕組み（要点）
 
 - GitHub Actions の仕様上 `on:` トリガーでは `vars` を参照できないため、

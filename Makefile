@@ -5,7 +5,7 @@ INFRA_DIR     := infra
 BACKEND_DIR   := services/backend/python
 FRONTEND_DIR  := services/frontend
 
-.PHONY: help setup hooks check-setup claude-setup dev gen-types gen-design-tokens fmt lint test security perf-test ci-frontend \
+.PHONY: help setup hooks check-setup check-repo-vars claude-setup dev gen-types gen-design-tokens fmt lint test security perf-test ci-frontend \
         db-up db-down migrate makemigration \
         tf-init tf-fmt tf-validate tf-plan tf-lint policy-test \
         backend-setup backend-dev backend-test backend-lint \
@@ -25,6 +25,9 @@ hooks: ## Install pre-commit git hooks
 
 check-setup: ## Check dev environment initial setup (tools, logins, make setup)
 	bash tools/script/check-devenv-setup.sh
+
+check-repo-vars: ## Cross-check repository variables: workflow refs vs docs vs actually registered
+	bash tools/script/check-repo-vars.sh
 
 claude-setup: ## GitHub Codespaces: Claude Code のオンボーディング/信頼ダイアログを事前承認（新規 Codespace 作成直後、初回 claude 起動前に実行）
 	bash tools/script/claude-codespaces-setup.sh

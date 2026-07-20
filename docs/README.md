@@ -7,6 +7,7 @@
 | [development-environment.md](development-environment.md)     | 開発環境（Dev Container）の使い方 — 起動・初回セットアップ・日々のワークフロー・永続化・トラブルシュート                                                                        |
 | [app-development.md](app-development.md)                     | アプリ開発 — バックエンド（FastAPI）/ フロントエンド（Vite + Vue 3）の構造・手順・規約・型生成                                                                                  |
 | [infrastructure.md](infrastructure.md)                       | インフラ・CI/CD — Terraform 2 層構成（bootstrap / アプリ層）と GitHub Actions・OIDC                                                                                             |
+| [repository-variables.md](repository-variables.md)           | リポジトリ変数一覧 — CI/CD が参照する全リポジトリ変数（`vars.*`）を横断でまとめた一覧表                                                                                         |
 | [ci-cd-area-switches.md](ci-cd-area-switches.md)             | CI/CD エリア別スイッチ — frontend / backend / infra ごとに実行可否をリポジトリ変数で切り替える設定手順                                                                          |
 | [aws-temporary-credentials.md](aws-temporary-credentials.md) | IAM Identity Center を使わない一時クレデンシャル発行手順 — IAM ユーザー + get-session-token / assume-role・IAM Roles Anywhere・CloudShell 経由の 4 手法                         |
 | [issues.md](issues.md)                                       | Issue から実装するときのフロー — ブランチ・所見の記録・1 issue 1 PR・CI green の確認                                                                                            |

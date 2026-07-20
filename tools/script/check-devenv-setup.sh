@@ -21,10 +21,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 # GitHub Rulesets / リポジトリ変数の確認は admin/maintain 相当の権限が要る（#516）。
 # GitHub Codespaces の既定認証（Codespaces注入の GITHUB_TOKEN）は API によって権限が
 # 異なり、Rulesets は読めても Actions Variables は読めない、といったケースがある。
-# .env.check-setup（任意・.gitignore済み、.env.check-setup.example参照）に確認専用の
-# 最小権限トークンがあれば、該当コマンドだけそのトークンを使う（シェル全体には export しない）。
-GH_CHECK_SETUP_TOKEN=""
-if [[ -f .env.check-setup ]]; then
+# 確認専用の最小権限トークンがあれば、該当コマンドだけそのトークンを使う（シェル全体には
+# export しない）。優先順位（ADR-0021）: 1) 既に環境変数 GH_CHECK_SETUP_TOKEN がセット
+# 済み（GitHub Codespaces のユーザーシークレットからの自動注入を想定）ならそれを使う。
+# 2) 無ければ .env.check-setup（任意・.gitignore済み、.env.check-setup.example参照、
+# 非Codespaces向けフォールバック）を読む。
+GH_CHECK_SETUP_TOKEN="${GH_CHECK_SETUP_TOKEN:-}"
+if [[ -z "$GH_CHECK_SETUP_TOKEN" && -f .env.check-setup ]]; then
   GH_CHECK_SETUP_TOKEN="$(grep -m1 '^GH_CHECK_SETUP_TOKEN=' .env.check-setup | cut -d= -f2-)"
 fi
 gh_verify() {
@@ -32,6 +35,16 @@ gh_verify() {
     GH_TOKEN="$GH_CHECK_SETUP_TOKEN" gh "$@"
   else
     gh "$@"
+  fi
+}
+
+# 環境変数も .env.check-setup も無いときの案内文（ADR-0021: Codespaces上ならユーザー
+# シークレットを、そうでなければ .env.check-setup.example の手順を案内する）。
+token_setup_hint() {
+  if [[ "${CODESPACES:-}" == "true" ]]; then
+    echo "GitHub Codespaces を使用中: github.com/settings/codespaces でユーザーシークレット GH_CHECK_SETUP_TOKEN（対象リポジトリ: このリポジトリ）を設定すると次回以降のCodespaceで自動判定できる（ADR-0021）。既存Codespaceには反映されないことがあり、その場合は再起動/再作成が必要"
+  else
+    echo ".env.check-setup.example を参照して確認用トークンを設定すると判定できる"
   fi
 }
 
@@ -237,7 +250,7 @@ done
 if gh auth status >/dev/null 2>&1; then
   if vars_raw="$(gh_verify variable list 2>&1)"; then
     vars="$(awk '{print $1}' <<<"$vars_raw")"
-    for v in AWS_TF_STATE_BUCKET AWS_PLAN_ROLE_ARN AWS_DEPLOY_ROLE_ARN; do
+    for v in AWS_TF_STATE_BUCKET AWS_PLAN_ROLE_ARN AWS_DEPLOY_ROLE_ARN PROJECT_NAME; do
       if grep -qx "$v" <<<"$vars"; then
         ok "$v 登録済み"
       else
@@ -246,7 +259,7 @@ if gh auth status >/dev/null 2>&1; then
     done
   else
     info "リポジトリ変数の取得に失敗（権限不足の可能性 — GitHub Codespaces の既定認証には Actions Variables の読み取り権限が無いことがある）" \
-      "AWS_TF_STATE_BUCKET / AWS_PLAN_ROLE_ARN / AWS_DEPLOY_ROLE_ARN の登録有無はここでは判定できない。.env.check-setup.example を参照して確認用トークンを設定すると判定できる"
+      "AWS_TF_STATE_BUCKET / AWS_PLAN_ROLE_ARN / AWS_DEPLOY_ROLE_ARN / PROJECT_NAME の登録有無はここでは判定できない。$(token_setup_hint)"
   fi
 else
   info "gh 未ログインのためリポジトリ変数の確認をスキップ"
@@ -300,7 +313,7 @@ if [[ -z "$repo_slug" ]]; then
   info "リポジトリを特定できないためスキップ（gh repo view 失敗）"
 elif ! gh_verify api "repos/$repo_slug/rulesets" >/dev/null 2>&1; then
   info "rulesets の取得に失敗（gh 未ログイン、または admin/maintain 権限が必要）— スキップ" \
-    ".env.check-setup.example を参照して確認用トークンを設定すると判定できる"
+    "$(token_setup_hint)"
 else
   ruleset_names="$(gh_verify api "repos/$repo_slug/rulesets" --jq '.[].name' 2>/dev/null)"
 

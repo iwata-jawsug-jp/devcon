@@ -22,7 +22,7 @@ the app-infra layer, which depends on the resources created here.
   `docs/aws-temporary-credentials.md` for how to assume it from the devcontainer.
 
 Every IAM role/policy name above is actually `<project>-<suffix>-...` (`local.name_prefix`,
-main.tf, #571) — `<suffix>` is a random 6-char token (`var.resource_name_suffix`, the same
+locals.tf, #571) — `<suffix>` is a random 6-char token (`var.resource_name_suffix`, the same
 one `bootstrap.sh init` uses for the state bucket name). It exists so that re-running `init`
 after the local state that tracked a prior apply was lost/discarded always gets a fresh,
 unclaimed name instead of hitting `EntityAlreadyExists` against the still-existing AWS-side
@@ -40,7 +40,7 @@ recreated:
 
 ```bash
 tools/script/bootstrap.sh init -p <project>   # first time (org/repo/bucket/region auto-detected or overridable)
-tools/script/bootstrap.sh update              # re-apply after changing main.tf (no parameters needed)
+tools/script/bootstrap.sh update              # re-apply after changing infra/bootstrap/*.tf (no parameters needed)
 tools/script/bootstrap.sh write                # push outputs to repo variables + generate infra/env/*.backend.hcl / *.tfvars
 tools/script/bootstrap.sh destroy              # tear down (state bucket kept unless --include-state-bucket)
 ```
@@ -93,7 +93,7 @@ if one exists, this is all `recover` does (fast, and exact: no import-ID guessin
 backup is found (or `--no-restore` is passed) does it fall back to rebuilding state from AWS
 directly: like `adopt`, it reads the repo variables `write` published (or explicit `-p`/`-b`/
 `--plan-role-arn`/`--deploy-role-arn` overrides), verifies the referenced AWS resources exist,
-then runs `terraform init` and `terraform import` for every resource `main.tf` declares (the S3
+then runs `terraform init` and `terraform import` for every resource this layer declares (the S3
 state bucket and its sub-resources, all IAM roles, policies, and attachments) and writes
 `terraform.auto.tfvars`, so `update`/`write`/`destroy` work again from this machine. It's safe to
 re-run: already-imported resources are skipped, so a partial failure (e.g. one wrong assumption
@@ -111,7 +111,7 @@ mismatched import ID would otherwise show up there as spurious diffs, not as an 
 Verified end-to-end against a real applied environment: `terraform plan` reported no changes
 after a full `recover` from a deleted `terraform.tfstate`.
 
-> **Brand-new AWS account/region prerequisite**: `main.tf` reads the account's
+> **Brand-new AWS account/region prerequisite**: `iam-ci-deploy-data.tf` reads the account's
 > default AWS-managed KMS keys via `data "aws_kms_alias"` (`alias/aws/rds`,
 > `alias/aws/secretsmanager`) to scope the `ci_deploy` IAM policy. Those aliases
 > are created lazily by AWS the first time each service is actually used with
