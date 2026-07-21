@@ -78,7 +78,8 @@ the frontend's types are generated from it (`make gen-types`) — never hand-wri
   strategy, and when a change needs `sandbox/*` verification before merging to `main`.
 - `docs/development-environment.md` — Dev Container usage.
 - `docs/aws-temporary-credentials.md` — issuing short-lived AWS credentials without IAM
-  Identity Center (IAM user + get-session-token / assume-role, IAM Roles Anywhere, CloudShell).
+  Identity Center; recommended: `aws login`, also IAM user + get-session-token / assume-role,
+  IAM Roles Anywhere, CloudShell.
 - `docs/sandbox.md` — `sandbox/*` disposable real-AWS verification; a dead end, never merged into a non-sandbox branch.
 - `docs/frontend-frameworks-demo.md` — (planned) multi-framework frontend comparison demo on a
   dedicated sandbox branch, `services/frontend/` (production Vue) untouched.

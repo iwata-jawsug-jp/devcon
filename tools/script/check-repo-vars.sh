@@ -63,6 +63,14 @@ SANDBOX_VARS=(SANDBOX_ECR_REPOSITORY SANDBOX_ECS_TASK_FAMILY SANDBOX_ECS_CLUSTER
   SANDBOX_PRIVATE_SUBNET_IDS SANDBOX_APP_SECURITY_GROUP_ID SANDBOX_WEB_BUCKET \
   SANDBOX_CLOUDFRONT_DISTRIBUTION_ID SANDBOX_CLOUDFRONT_DOMAIN_NAME SANDBOX_COGNITO_USER_POOL_ID \
   SANDBOX_COGNITO_CLIENT_ID SANDBOX_COGNITO_DOMAIN)
+# カテゴリ5（docs/repository-variables.md）: write-cd-app-vars.sh dev で登録できるが、
+# これを消費する workflow（cd-app-dev.yml 相当）はまだ存在しない予定枠。他カテゴリと
+# 違い「workflowが参照していなくて当然」なので、#4の「workflow参照⇔ドキュメント記載」
+# のstale判定と#6のorphan判定から明示的に除外する（DEV_VARS_EXCLUDE、下記参照）。
+DEV_VARS=(DEV_ECR_REPOSITORY DEV_ECS_TASK_FAMILY DEV_ECS_CLUSTER DEV_ECS_SERVICE \
+  DEV_PRIVATE_SUBNET_IDS DEV_APP_SECURITY_GROUP_ID DEV_WEB_BUCKET \
+  DEV_CLOUDFRONT_DISTRIBUTION_ID DEV_CLOUDFRONT_DOMAIN_NAME DEV_COGNITO_USER_POOL_ID \
+  DEV_COGNITO_CLIENT_ID DEV_COGNITO_DOMAIN)
 
 contains() {
   local needle="$1" x
@@ -122,9 +130,10 @@ else
   done <<<"$missing_in_doc"
 fi
 
-stale_in_doc="$(comm -13 <(echo "$workflow_vars") <(echo "$doc_vars"))"
+# DEV_* はカテゴリ5（予定枠、消費する workflow がまだ無いことが正常）なので除外する。
+stale_in_doc="$(comm -13 <(echo "$workflow_vars") <(echo "$doc_vars") | grep -vFxf <(printf '%s\n' "${DEV_VARS[@]}") || true)"
 if [[ -z "$stale_in_doc" ]]; then
-  ok "$DOC_FILE に記載があってworkflowが参照していない変数は無い"
+  ok "$DOC_FILE に記載があってworkflowが参照していない変数は無い（DEV_*除く）"
 else
   while IFS= read -r v; do
     [[ -z "$v" ]] && continue
@@ -180,11 +189,26 @@ if [[ "$registered_available" == true ]]; then
       "未登録分: $(for v in "${SANDBOX_VARS[@]}"; do grep -qx "$v" <<<"$registered_vars" || echo -n "$v "; done)"
   fi
 
+  section "登録状況（dev用・任意12個、消費する workflow はまだ無い予定枠）"
+  dev_registered=0
+  for v in "${DEV_VARS[@]}"; do
+    grep -qx "$v" <<<"$registered_vars" && dev_registered=$((dev_registered + 1))
+  done
+  if [[ "$dev_registered" -eq ${#DEV_VARS[@]} ]]; then
+    ok "12個中12個すべて登録済み（write-cd-app-vars.sh dev 実行済み）"
+  elif [[ "$dev_registered" -eq 0 ]]; then
+    info "12個中0個登録（dev環境のアプリ層を使っていなければ想定どおり）"
+  else
+    warn "12個中${dev_registered}個のみ登録（全部か0個かのどちらかを想定。中途半端な状態は設定ミスの可能性）" \
+      "未登録分: $(for v in "${DEV_VARS[@]}"; do grep -qx "$v" <<<"$registered_vars" || echo -n "$v "; done)"
+  fi
+
   # ---- 6. 登録済みだがworkflowが参照していない変数（orphan）----
-  section "登録済み ⇔ workflow参照（orphan検出）"
-  orphan="$(comm -23 <(echo "$registered_vars") <(echo "$workflow_vars"))"
+  # DEV_* はカテゴリ5（予定枠）なので除外する。
+  section "登録済み ⇔ workflow参照（orphan検出、DEV_*除く）"
+  orphan="$(comm -23 <(echo "$registered_vars") <(echo "$workflow_vars") | grep -vFxf <(printf '%s\n' "${DEV_VARS[@]}") || true)"
   if [[ -z "$orphan" ]]; then
-    ok "登録済みでworkflowが参照していない変数は無い"
+    ok "登録済みでworkflowが参照していない変数は無い（DEV_*除く）"
   else
     while IFS= read -r v; do
       [[ -z "$v" ]] && continue

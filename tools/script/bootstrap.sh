@@ -520,18 +520,36 @@ cmd_write() {
     #
     # Codespaces上では gh auth login で再ログインしても解決しない（gh の認証優先順位は
     # GH_TOKEN > GITHUB_TOKEN > 保存済み認証情報で、Codespaces既定の GITHUB_TOKEN が常に
-    # 保存済み認証情報より優先されるため）。書き込み権限のある PAT を GH_TOKEN として明示的に
-    # 渡す必要がある。
-    if gh variable set AWS_TF_STATE_BUCKET --body "$bucket" \
-      && gh variable set AWS_PLAN_ROLE_ARN --body "$plan_arn" \
-      && gh variable set AWS_DEPLOY_ROLE_ARN --body "$deploy_arn" \
-      && gh variable set PROJECT_NAME --body "$project"; then
+    # 保存済み認証情報より優先されるため）。resolve_published_values と同じ
+    # GH_CHECK_SETUP_TOKEN の発見ロジック（環境変数 → .env.check-setup、ADR-0021/ADR-0022）
+    # を再利用し、書き込み権限のある PAT（Variables: Read and write）が設定済みなら自動で
+    # それを使う。未設定なら従来どおり gh の既定認証（≒ GH_TOKEN=<token> の明示指定）を使う。
+    local gh_check_setup_token="${GH_CHECK_SETUP_TOKEN:-}"
+    if [[ -z "$gh_check_setup_token" && -f .env.check-setup ]]; then
+      gh_check_setup_token="$(grep -m1 '^GH_CHECK_SETUP_TOKEN=' .env.check-setup | cut -d= -f2-)"
+    fi
+    gh_write() {
+      if [[ -n "$gh_check_setup_token" ]]; then
+        GH_TOKEN="$gh_check_setup_token" gh "$@"
+      else
+        gh "$@"
+      fi
+    }
+    if gh_write variable set AWS_TF_STATE_BUCKET --body "$bucket" \
+      && gh_write variable set AWS_PLAN_ROLE_ARN --body "$plan_arn" \
+      && gh_write variable set AWS_DEPLOY_ROLE_ARN --body "$deploy_arn" \
+      && gh_write variable set PROJECT_NAME --body "$project"; then
       echo "==> リポジトリ変数を設定しました: AWS_TF_STATE_BUCKET / AWS_PLAN_ROLE_ARN / AWS_DEPLOY_ROLE_ARN / PROJECT_NAME"
     else
       echo "==> リポジトリ変数の設定に失敗しました（権限不足の可能性）。GitHub Codespaces の既定認証には" >&2
-      echo "    Actions Variables への書き込み権限が無いことがある。書き込み権限のある個人アクセストークンを" >&2
-      echo "    GH_TOKEN=<token> ./tools/script/bootstrap.sh write のように指定して再実行するか、" >&2
-      echo "    GitHub UI（Settings > Secrets and variables > Actions）から手動で登録してください。" >&2
+      echo "    Actions Variables への書き込み権限が無いことがある。GH_CHECK_SETUP_TOKEN（ADR-0022、" >&2
+      echo "    Variables: Read and write の PAT。github.com/settings/codespaces のユーザーシークレット" >&2
+      echo "    か .env.check-setup から取得）が設定済みなら自動で使われるので、未設定なら" >&2
+      echo "    docs/adr/0022-widen-check-setup-token-scope-for-bootstrap-write.md か" >&2
+      echo "    .env.check-setup.example を参照して用意してください。それも無い場合は" >&2
+      echo "    GH_TOKEN=<token> ./tools/script/bootstrap.sh write のように書き込み権限のある" >&2
+      echo "    個人アクセストークンを指定して再実行するか、GitHub UI（Settings > Secrets and" >&2
+      echo "    variables > Actions）から手動で登録してください。" >&2
     fi
   else
     echo "==> gh 未ログインのためリポジトリ変数の設定をスキップしました（gh auth login 後に再実行してください）" >&2
@@ -554,11 +572,33 @@ resolve_published_values() {
       exit 2
     fi
     echo "==> $org/$repo のリポジトリ変数から未指定分を取得します..."
-    gh_var() { gh variable get "$1" --repo "$org/$repo" 2>/dev/null; }
-    [[ -z "$project" ]] && project="$(gh_var PROJECT_NAME)"
-    [[ -z "$bucket" ]] && bucket="$(gh_var AWS_TF_STATE_BUCKET)"
-    [[ -z "$plan_arn" ]] && plan_arn="$(gh_var AWS_PLAN_ROLE_ARN)"
-    [[ -z "$deploy_arn" ]] && deploy_arn="$(gh_var AWS_DEPLOY_ROLE_ARN)"
+    # GitHub Codespaces の既定認証（Codespaces注入の GITHUB_TOKEN）は Actions Variables
+    # の読み取り権限を持たないことがある（#516/#520、HTTP 403）。check-devenv-setup.sh /
+    # check-repo-vars.sh と同じ確認用トークンの仕組み(ADR-0021/ADR-0022)を再利用し、
+    # GH_CHECK_SETUP_TOKEN（Variables: Read and write の fine-grained PAT。Codespaces
+    # ユーザーシークレットや .env.check-setup から供給される）があれば読み取りをそれに
+    # 切り替える。cmd_write（書き込み）でも同じトークンを使う（ADR-0022）。
+    local gh_check_setup_token="${GH_CHECK_SETUP_TOKEN:-}"
+    if [[ -z "$gh_check_setup_token" && -f .env.check-setup ]]; then
+      gh_check_setup_token="$(grep -m1 '^GH_CHECK_SETUP_TOKEN=' .env.check-setup | cut -d= -f2-)"
+    fi
+    gh_var() {
+      if [[ -n "$gh_check_setup_token" ]]; then
+        GH_TOKEN="$gh_check_setup_token" gh variable get "$1" --repo "$org/$repo" 2>/dev/null
+      else
+        gh variable get "$1" --repo "$org/$repo" 2>/dev/null
+      fi
+    }
+    # gh variable get は失敗時に非ゼロを返す。`[[ ... ]] && x="$(...)"` という書き方だと
+    # 代入コマンドが && リストの最後のコマンドになり、失敗時に set -e がここで即座に
+    # スクリプトを終了させてしまう（#516/#520と同じ403系の権限不足時に、この下の
+    # missing チェック／案内メッセージが一切表示されないまま黙って exit 1 する不具合）。
+    # 各行を独立した if 文にし、失敗を `|| true` で吸収してから空文字のまま後段の
+    # missing チェックに委ねる。
+    if [[ -z "$project" ]]; then project="$(gh_var PROJECT_NAME)" || true; fi
+    if [[ -z "$bucket" ]]; then bucket="$(gh_var AWS_TF_STATE_BUCKET)" || true; fi
+    if [[ -z "$plan_arn" ]]; then plan_arn="$(gh_var AWS_PLAN_ROLE_ARN)" || true; fi
+    if [[ -z "$deploy_arn" ]]; then deploy_arn="$(gh_var AWS_DEPLOY_ROLE_ARN)" || true; fi
   fi
 
   local missing=""
@@ -570,6 +610,15 @@ resolve_published_values() {
     echo "Error: 値を決定できませんでした:$missing" >&2
     echo "       bootstrap を適用した側のマシンで '$0 write' を実行してリポジトリ変数へ登録するか、" >&2
     echo "       このコマンドに値を直接指定してください。" >&2
+    echo "       GitHub Codespaces の既定認証（GITHUB_TOKEN）は Actions Variables の読み取り権限を" >&2
+    echo "       持たないことがある（HTTP 403）。GH_CHECK_SETUP_TOKEN（ADR-0022、Variables:" >&2
+    echo "       Read and write のトークン。github.com/settings/codespaces のユーザーシークレット" >&2
+    echo "       か .env.check-setup から取得）が設定済みなら自動で使われるので、未設定なら" >&2
+    echo "       docs/adr/0022-widen-check-setup-token-scope-for-bootstrap-write.md か" >&2
+    echo "       .env.check-setup.example を参照して用意してください。それも無い場合は" >&2
+    echo "       GH_TOKEN=<token> ./tools/script/bootstrap.sh recover のように書き込み権限のある" >&2
+    echo "       トークンを指定して再実行するか、GitHub UI（Settings > Secrets and variables >" >&2
+    echo "       Actions）で値を確認してください。" >&2
     exit 1
   fi
 

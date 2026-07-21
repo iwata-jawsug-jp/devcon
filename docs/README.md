@@ -9,7 +9,7 @@
 | [infrastructure.md](infrastructure.md)                       | インフラ・CI/CD — Terraform 2 層構成（bootstrap / アプリ層）と GitHub Actions・OIDC                                                                                             |
 | [repository-variables.md](repository-variables.md)           | リポジトリ変数一覧 — CI/CD が参照する全リポジトリ変数（`vars.*`）を横断でまとめた一覧表                                                                                         |
 | [ci-cd-area-switches.md](ci-cd-area-switches.md)             | CI/CD エリア別スイッチ — frontend / backend / infra ごとに実行可否をリポジトリ変数で切り替える設定手順                                                                          |
-| [aws-temporary-credentials.md](aws-temporary-credentials.md) | IAM Identity Center を使わない一時クレデンシャル発行手順 — IAM ユーザー + get-session-token / assume-role・IAM Roles Anywhere・CloudShell 経由の 4 手法                         |
+| [aws-temporary-credentials.md](aws-temporary-credentials.md) | IAM Identity Center を使わない一時クレデンシャル発行手順 — 推奨は `aws login`、ほか IAM ユーザー + get-session-token / assume-role・IAM Roles Anywhere・CloudShell 経由         |
 | [issues.md](issues.md)                                       | Issue から実装するときのフロー — ブランチ・所見の記録・1 issue 1 PR・CI green の確認                                                                                            |
 | [development-process.md](development-process.md)             | アプリケーション開発プロセス・ブランチ戦略 — 要件定義〜リリースの全体フロー、sandbox 検証要否の判定基準                                                                         |
 | [sdd.md](sdd.md)                                             | 仕様駆動開発（SDD）ワークフロー — cc-sdd `/kiro-*` スキル・`.kiro/` 構成・spec→`docs/` 昇格・CLAUDE.md 保護                                                                     |

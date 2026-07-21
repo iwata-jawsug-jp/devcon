@@ -1,6 +1,6 @@
 # ADR-0021: 確認スクリプト用トークンは GitHub Codespaces のユーザーシークレットを優先する
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0022](0022-widen-check-setup-token-scope-for-bootstrap-write.md)
 - **Date:** 2026-07-20
 - **Deciders:** itouhi
 - **Related:** #516, [development-environment.md](../development-environment.md)「GitHub

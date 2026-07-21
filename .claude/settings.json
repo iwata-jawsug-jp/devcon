@@ -44,7 +44,9 @@
       "Bash(aws s3 ls:*)",
       "Bash(aws s3api list-:*)",
       "Bash(aws s3api head-:*)",
-      "Bash(aws s3api get-bucket-:*)"
+      "Bash(aws s3api get-bucket-:*)",
+      "Read(./**/.env.*.example)",
+      "Edit(./**/.env.*.example)"
     ],
     "ask": [
       "Bash(terraform apply:*)",

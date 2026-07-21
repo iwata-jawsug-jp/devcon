@@ -109,10 +109,13 @@ GitHub Codespaces では、Codespaces が自動で注入する既定の `gh` 認
 API によって権限が異なり、GitHub Rulesets は読めても Actions のリポジトリ変数
 （`AWS_TF_STATE_BUCKET` 等）は読めない、といったケースがある（#516）。この場合 `make
 check-setup`（および `make check-repo-vars`）は該当項目を「未登録」ではなく「権限不足で
-確認できない」旨のスキップ表示にする（誤って未登録扱いにはしない）。正確に判定したい場合は、
-`Administration: Read-only` + `Variables: Read-only`（対象リポジトリ限定・短期の有効期限）の
-確認専用 Fine-grained PAT を発行し、以下のいずれかで `GH_CHECK_SETUP_TOKEN` として渡す
-（[ADR-0021](adr/0021-codespaces-user-secrets-for-check-setup-token.md)）:
+確認できない」旨のスキップ表示にする（誤って未登録扱いにはしない）。また
+`tools/script/bootstrap.sh write` がリポジトリ変数へ書き込む際も、同じ既定認証では
+書き込み権限が無いことがある。正確に判定・書き込みしたい場合は、
+`Administration: Read-only` + `Variables: Read and write`（対象リポジトリ限定・短期の
+有効期限）の Fine-grained PAT を発行し、以下のいずれかで `GH_CHECK_SETUP_TOKEN` として渡す
+（[ADR-0021](adr/0021-codespaces-user-secrets-for-check-setup-token.md)、
+[ADR-0022](adr/0022-widen-check-setup-token-scope-for-bootstrap-write.md)）:
 
 - **GitHub Codespaces を使っている場合（推奨）**: `github.com/settings/codespaces` で
   ユーザーシークレット `GH_CHECK_SETUP_TOKEN`（対象リポジトリ: このリポジトリ）を設定する。
@@ -124,9 +127,10 @@ check-setup`（および `make check-repo-vars`）は該当項目を「未登録
   `.env.check-setup.example` の手順に従って `.env.check-setup`（git-ignored）に
   `GH_CHECK_SETUP_TOKEN=...` を用意する。
 
-どちらも用意しなくても `make check-setup` / `make check-repo-vars` 自体は動く
-（該当項目がスキップ表示になるだけ）。両方が存在する場合は環境変数（Codespacesシークレット）
-側が優先される。
+`make check-setup` / `make check-repo-vars` は用意しなくても動く（該当項目がスキップ表示に
+なるだけ）。`bootstrap.sh write` は用意しなければ従来どおり gh の既定認証（≒
+`GH_TOKEN=<token>` の明示指定）で書き込みを試みる。複数の経路が存在する場合は環境変数
+（Codespacesシークレット）側が優先される。
 
 ---
 
