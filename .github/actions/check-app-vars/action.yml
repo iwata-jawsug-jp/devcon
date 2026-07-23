@@ -1,0 +1,76 @@
+name: Check app-layer vars
+description: >
+  Check that the app-layer repository variables (ECR/ECS/network/S3/CloudFront/
+  Cognito identifiers) needed to deploy are all set; report which are missing
+  instead of failing, so callers can skip the deploy (not fail it) until the
+  infra layer has been applied and its outputs registered. Extracted from
+  cd-app.yml / cd-app-sandbox.yml, which each carried an identical bash loop
+  over a different (unprefixed vs SANDBOX_-prefixed) set of variable names
+  (#617, ADR-0023).
+
+inputs:
+  aws_deploy_role_arn:
+    required: true
+  ecr_repository:
+    required: true
+  ecs_task_family:
+    required: true
+  ecs_cluster:
+    required: true
+  ecs_service:
+    required: true
+  private_subnet_ids:
+    required: true
+  app_security_group_id:
+    required: true
+  web_bucket:
+    required: true
+  cloudfront_distribution_id:
+    required: true
+  cognito_user_pool_id:
+    required: true
+  cognito_client_id:
+    required: true
+  cognito_domain:
+    required: true
+  hint:
+    description: 'Doc pointer shown in the warning when one or more inputs are empty (e.g. "#145 / docs/infrastructure.md").'
+    required: true
+
+outputs:
+  configured:
+    description: '"true" if every input above is non-empty, "false" otherwise.'
+    value: ${{ steps.check.outputs.configured }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        AWS_DEPLOY_ROLE_ARN: ${{ inputs.aws_deploy_role_arn }}
+        ECR_REPOSITORY: ${{ inputs.ecr_repository }}
+        ECS_TASK_FAMILY: ${{ inputs.ecs_task_family }}
+        ECS_CLUSTER: ${{ inputs.ecs_cluster }}
+        ECS_SERVICE: ${{ inputs.ecs_service }}
+        PRIVATE_SUBNET_IDS: ${{ inputs.private_subnet_ids }}
+        APP_SECURITY_GROUP_ID: ${{ inputs.app_security_group_id }}
+        WEB_BUCKET: ${{ inputs.web_bucket }}
+        CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront_distribution_id }}
+        COGNITO_USER_POOL_ID: ${{ inputs.cognito_user_pool_id }}
+        COGNITO_CLIENT_ID: ${{ inputs.cognito_client_id }}
+        COGNITO_DOMAIN: ${{ inputs.cognito_domain }}
+        HINT: ${{ inputs.hint }}
+      run: |
+        missing=()
+        for v in AWS_DEPLOY_ROLE_ARN ECR_REPOSITORY ECS_TASK_FAMILY ECS_CLUSTER ECS_SERVICE \
+                 PRIVATE_SUBNET_IDS APP_SECURITY_GROUP_ID WEB_BUCKET CLOUDFRONT_DISTRIBUTION_ID \
+                 COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_DOMAIN; do
+          [ -n "${!v}" ] || missing+=("$v")
+        done
+        if [ "${#missing[@]}" -eq 0 ]; then
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::Skipping deploy — repository variables not set: ${missing[*]}. $HINT"
+        fi

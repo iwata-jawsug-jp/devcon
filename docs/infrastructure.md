@@ -563,6 +563,11 @@ Web UI での設定・動作確認・注意事項の詳細は
 
 ### `cd-infra.yml`
 
+> `infra/env/*.backend.hcl`/`*.tfvars` を `.example` テンプレートから生成する処理は
+> `cd-infra.yml`/`cd-infra-sandbox.yml`/`cd-infra-verify.yml`/`cd-sandbox-cycle.yml` の
+> 全9箇所で `.github/actions/materialize-tfvars`（composite action）を共通で使う
+> （[ADR-0023](adr/0023-cd-app-deploy-reusable-workflow-and-tfvars-materialize.md)、#617）。
+
 - **PR**: `terraform plan` を実行し、結果を PR にコメント（plan ロール）。`terraform show -json`
   の結果（`plan.json`）を以下の2つの検証に渡す:
   1. [`check_iam_policies.py`](../.github/scripts/check_iam_policies.py)
@@ -675,6 +680,13 @@ rule`）を返し設定できないので、上記のとおり apply を手動 `
 > なっていたら、まず bootstrap とロール ARN 変数の登録状況を確認すること。
 
 ### `cd-app.yml`（インフラ作成後に有効化）
+
+> `build`→`migrate`→`deploy-api`→`frontend` の実体は `cd-app.yml`/`cd-app-sandbox.yml`/
+> `cd-app-verify.yml`/`cd-sandbox-cycle.yml` の4ワークフロー共通で
+> `.github/workflows/reusable-app-deploy.yml` に集約されている
+> （[ADR-0023](adr/0023-cd-app-deploy-reusable-workflow-and-tfvars-materialize.md)、#617）。
+> 各ワークフローの `app-deploy` ジョブが呼び出す形になるため、Actions 上のジョブ名は
+> `app-deploy / build` のように1段深くなる。
 
 - **api**: `build`（ECR へ push, tag=SHA）→ **`migrate`（専用ジョブ）** → `deploy-api`（ECS 更新）。
   - `migrate` は、ビルドした image で **api タスク定義の新リビジョンを register** し、その

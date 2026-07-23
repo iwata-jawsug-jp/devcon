@@ -57,16 +57,14 @@ jobs:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Materialize backend + tfvars from committed examples
-        # backend.hcl / *.tfvars are git-ignored, so render them at runtime from the
-        # committed .example templates. No secrets enter git or the logs: the bucket
-        # name is a repo variable, and the RDS master password is RDS-managed
-        # (Secrets Manager), never present in tfvars or state.
-        run: |
-          sed -e "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
-              -e "s|devcon|${{ vars.PROJECT_NAME }}|g" \
-            "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
-          sed "s|devcon|${{ vars.PROJECT_NAME }}|g" \
-            "env/${TF_ENV}.tfvars.example" > "env/${TF_ENV}.tfvars"
+        uses: ./.github/actions/materialize-tfvars
+        with:
+          tf_env: ${{ env.TF_ENV }}
+          state_bucket: ${{ vars.AWS_TF_STATE_BUCKET }}
+          project_name: ${{ vars.PROJECT_NAME }}
+      # Version pinned to match .devcontainer/Dockerfile's TERRAFORM_VERSION — the
+      # single source of truth (same convention as TFLINT_VERSION/TRIVY_VERSION/
+      # CONFTEST_VERSION below); update both together.
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
@@ -80,7 +78,7 @@ jobs:
             -var-file=env/${{ env.TF_ENV }}.tfvars \
             -out=tfplan | tee plan.txt
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.14'
       # Render the plan as JSON once; both the IAM check below and conftest (#296) consume it.
@@ -188,14 +186,14 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Materialize backend + tfvars from committed examples
-        # See the plan job: render git-ignored backend.hcl / *.tfvars from the
-        # committed .example templates at runtime; no secrets in git or logs.
-        run: |
-          sed -e "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
-              -e "s|devcon|${{ vars.PROJECT_NAME }}|g" \
-            "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
-          sed "s|devcon|${{ vars.PROJECT_NAME }}|g" \
-            "env/${TF_ENV}.tfvars.example" > "env/${TF_ENV}.tfvars"
+        uses: ./.github/actions/materialize-tfvars
+        with:
+          tf_env: ${{ env.TF_ENV }}
+          state_bucket: ${{ vars.AWS_TF_STATE_BUCKET }}
+          project_name: ${{ vars.PROJECT_NAME }}
+      # Version pinned to match .devcontainer/Dockerfile's TERRAFORM_VERSION — the
+      # single source of truth (same convention as TFLINT_VERSION/TRIVY_VERSION/
+      # CONFTEST_VERSION); update both together.
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
@@ -236,14 +234,14 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Materialize backend + tfvars from committed examples
-        # See the plan job: render git-ignored backend.hcl / *.tfvars from the
-        # committed .example templates at runtime; no secrets in git or logs.
-        run: |
-          sed -e "s|REPLACE-ME-tfstate|${{ vars.AWS_TF_STATE_BUCKET }}|" \
-              -e "s|devcon|${{ vars.PROJECT_NAME }}|g" \
-            "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
-          sed "s|devcon|${{ vars.PROJECT_NAME }}|g" \
-            "env/${TF_ENV}.tfvars.example" > "env/${TF_ENV}.tfvars"
+        uses: ./.github/actions/materialize-tfvars
+        with:
+          tf_env: ${{ env.TF_ENV }}
+          state_bucket: ${{ vars.AWS_TF_STATE_BUCKET }}
+          project_name: ${{ vars.PROJECT_NAME }}
+      # Version pinned to match .devcontainer/Dockerfile's TERRAFORM_VERSION — the
+      # single source of truth (same convention as TFLINT_VERSION/TRIVY_VERSION/
+      # CONFTEST_VERSION); update both together.
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:

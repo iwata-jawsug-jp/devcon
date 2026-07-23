@@ -32,6 +32,40 @@ end-to-end で試す（`cd-app-sandbox` で build→migrate→deploy）。機能
 | `.github/workflows/cd-infra-sandbox.yml` | cd-infra apply のミラー（TF_ENV=sandbox・deploy ロール・production ゲートなし）。`workflow_dispatch` での destroy も持つ（[teardown](#teardown後始末)参照） |
 | `.github/workflows/cd-app-sandbox.yml`   | cd-app のミラー（build→migrate→deploy-api / web）。app 基盤（ECS 等）が存在する前提                                                                         |
 
+## workflow_dispatch実行時の必須条件（OIDCのref制約、重要）
+
+上記3ワークフロー（と `cd-sandbox-cycle.yml`）が assume する deploy ロールの OIDC 信頼ポリシー
+（`infra/bootstrap/locals.tf` の `deploy_subjects`）は、**`ref:refs/heads/main` または
+`ref:refs/heads/sandbox/*` からの `AssumeRoleWithWebIdentity` しか許可しない**
+（[infrastructure.md](infrastructure.md)）。`workflow_dispatch` は GitHub 上どのブランチからでも
+起動できてしまう（トリガー自体に `ref` の制限はない）ため、それ以外のブランチ
+（例: `feat/*`・`fix/*`・`infra/*`・`test/*`）を `--ref` に指定して実行すると、
+**コードは何も間違っていないのに** 以下の手順で確実に失敗する:
+
+1. `Configure AWS credentials (deploy role)` ステップが `Not authorized to perform
+sts:AssumeRoleWithWebIdentity` を約12回（指数バックオフ、合計 2 分強）リトライしたのち失敗。
+2. これは Terraform が実行される **前** の段階なので、AWS リソースは何も作成・変更されない
+   （後片付けは不要）。`cd-sandbox-cycle.yml` の `apply` がこの形で失敗した場合、後続の
+   `teardown` も同じ理由で失敗するのが正常な挙動（`if: always()` で走るが、同じ deploy
+   ロールを assume できないため、こちらもリトライ後に失敗する）。
+
+**実際に複数回発生している既知のパターン**（2026-07-19・2026-07-23、`cd-sandbox-cycle.yml`/
+`test/*`・`infra/*` ブランチからの `workflow_dispatch`）。エラーメッセージから「バグでは」と
+早合点しがちだが、原因は常にこの `ref` 制約であり、ワークフロー実装の欠陥ではない。
+
+**対処**: まだ `main` にマージしていない変更（`.github/workflows/cd-*.yml` 自体の変更を含む）を
+sandbox 実機で検証したい場合は、検証専用の一時的な `sandbox/*` ブランチへ push してから、
+そのブランチを `--ref` に指定する。
+
+```bash
+git switch -c sandbox/<検証用の名前>
+git push -u origin sandbox/<検証用の名前>
+gh workflow run cd-sandbox-cycle.yml --ref sandbox/<検証用の名前>
+```
+
+`main` から直接検証してよい場合（変更が既に `main` にマージ済み）は `--ref main` のままでよい
+（[週次エフェメラルサイクル](#週次エフェメラルサイクル376-pr④)の例を参照）。
+
 ## `infra/bootstrap/`（state バケット / OIDC / IAM ロール層）は検証対象外
 
 `cd-infra(-sandbox).yml` はどちらも `working-directory: infra`（アプリ層: VPC/ECS/RDS 等）にのみ
@@ -177,6 +211,11 @@ gh workflow run cd-sandbox-cycle.yml --ref main
 # 環境を調査用に残したい場合:
 gh workflow run cd-sandbox-cycle.yml --ref main -f skip_teardown=true
 ```
+
+> `--ref` は必ず `main` か `sandbox/*` にすること。それ以外のブランチを指定すると
+> OIDC の `ref` 制約により `AssumeRoleWithWebIdentity` が失敗する
+> （[workflow_dispatch実行時の必須条件](#workflow_dispatch実行時の必須条件oidcのref制約重要)参照）。
+> 未マージの変更を検証したい場合は一時的な `sandbox/*` ブランチを使う。
 
 ## teardown（後始末）
 

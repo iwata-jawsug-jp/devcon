@@ -1,0 +1,36 @@
+name: Materialize tfvars
+description: >
+  Render infra/env/<env>.backend.hcl and infra/env/<env>.tfvars from the committed
+  .example templates at runtime (they're git-ignored so a fresh checkout never has
+  them). Extracted from cd-infra.yml / cd-infra-sandbox.yml / cd-infra-verify.yml /
+  cd-sandbox-cycle.yml, which each carried an identical copy of this sed script
+  (#617). No secrets involved: the state bucket name and project name are
+  non-secret repository variables; the RDS master password is RDS-managed
+  (Secrets Manager) and never appears in tfvars or state.
+
+inputs:
+  tf_env:
+    description: 'Environment name (dev / prod / sandbox) — selects env/<tf_env>.*'
+    required: true
+  state_bucket:
+    description: 'vars.AWS_TF_STATE_BUCKET — a composite action cannot read the vars context itself, so the caller passes it through.'
+    required: true
+  project_name:
+    description: 'vars.PROJECT_NAME — same reason as state_bucket.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: infra
+      env:
+        TF_ENV: ${{ inputs.tf_env }}
+        AWS_TF_STATE_BUCKET: ${{ inputs.state_bucket }}
+        PROJECT_NAME: ${{ inputs.project_name }}
+      run: |
+        sed -e "s|REPLACE-ME-tfstate|${AWS_TF_STATE_BUCKET}|" \
+            -e "s|devcon|${PROJECT_NAME}|g" \
+          "env/${TF_ENV}.backend.hcl.example" > "env/${TF_ENV}.backend.hcl"
+        sed "s|devcon|${PROJECT_NAME}|g" \
+          "env/${TF_ENV}.tfvars.example" > "env/${TF_ENV}.tfvars"

@@ -3,11 +3,9 @@ name: CD App
 # Runs after infra exists. Builds & ships the application:
 #   preflight  -> check the app-layer repository variables; if any are unset
 #                 (infra not applied yet), skip every deploy job explicitly (#145)
-#   build      -> build backend (services/backend/python) image & push to ECR (tag = commit SHA)
-#   migrate    -> register a new api task-def revision with that image, then run
-#                 Alembic as a one-off Fargate task on it (gated before the roll)
-#   deploy-api -> roll the ECS service to the new revision
-#   frontend   -> npm run build, sync dist/ to S3, invalidate CloudFront
+#   app-deploy -> build (ECR push) -> migrate (Alembic, one-off Fargate task) ->
+#                 deploy-api (ECS roll) -> frontend (S3 sync + CloudFront
+#                 invalidation), via reusable-app-deploy.yml (#617, ADR-0023)
 # Auth is GitHub OIDC -> the DEPLOY role (NO long-lived AWS keys).
 on:
   push:
@@ -23,9 +21,6 @@ permissions:
 concurrency:
   group: cd-app-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  AWS_REGION: ap-northeast-1
 
 jobs:
   # 0) Deploys need repository variables that only exist once the infra layer has
@@ -45,197 +40,51 @@ jobs:
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
-      - name: Check that the app-layer repository variables are set
-        id: check
-        env:
-          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY }}
-          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
-          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
-          PRIVATE_SUBNET_IDS: ${{ vars.PRIVATE_SUBNET_IDS }}
-          APP_SECURITY_GROUP_ID: ${{ vars.APP_SECURITY_GROUP_ID }}
-          WEB_BUCKET: ${{ vars.WEB_BUCKET }}
-          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
-          COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
-          COGNITO_CLIENT_ID: ${{ vars.COGNITO_CLIENT_ID }}
-          COGNITO_DOMAIN: ${{ vars.COGNITO_DOMAIN }}
-        run: |
-          missing=()
-          for v in AWS_DEPLOY_ROLE_ARN ECR_REPOSITORY ECS_TASK_FAMILY ECS_CLUSTER ECS_SERVICE \
-                   PRIVATE_SUBNET_IDS APP_SECURITY_GROUP_ID WEB_BUCKET CLOUDFRONT_DISTRIBUTION_ID \
-                   COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_DOMAIN; do
-            [ -n "${!v}" ] || missing+=("$v")
-          done
-          if [ "${#missing[@]}" -eq 0 ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Skipping deploy — repository variables not set: ${missing[*]}. Apply the infra layer and register its outputs (see #145 / docs/infrastructure.md)."
-          fi
+      - id: check
+        uses: ./.github/actions/check-app-vars
+        with:
+          aws_deploy_role_arn: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          ecr_repository: ${{ vars.ECR_REPOSITORY }}
+          ecs_task_family: ${{ vars.ECS_TASK_FAMILY }}
+          ecs_cluster: ${{ vars.ECS_CLUSTER }}
+          ecs_service: ${{ vars.ECS_SERVICE }}
+          private_subnet_ids: ${{ vars.PRIVATE_SUBNET_IDS }}
+          app_security_group_id: ${{ vars.APP_SECURITY_GROUP_ID }}
+          web_bucket: ${{ vars.WEB_BUCKET }}
+          cloudfront_distribution_id: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+          cognito_user_pool_id: ${{ vars.COGNITO_USER_POOL_ID }}
+          cognito_client_id: ${{ vars.COGNITO_CLIENT_ID }}
+          cognito_domain: ${{ vars.COGNITO_DOMAIN }}
+          hint: 'Apply the infra layer and register its outputs (see #145 / docs/infrastructure.md).'
 
-  # 1) Build & push the api image to ECR.
-  # BACKEND_ENABLED / FRONTEND_ENABLED are the same per-area kill switches as in
-  # ci.yml: unset defaults to enabled; only an explicit 'false' skips the area.
-  build:
+  # 1) build -> migrate -> deploy-api -> frontend (reusable-app-deploy.yml,
+  #    #617/ADR-0023). BACKEND_ENABLED/FRONTEND_ENABLED are the same per-area
+  #    kill switches as in ci.yml: unset defaults to enabled; only an explicit
+  #    'false' skips the area. No `if:` on this job itself (ADR-0012): the
+  #    should_run_* inputs gate the reusable workflow's internal jobs instead.
+  app-deploy:
     needs: preflight
-    if: ${{ needs.preflight.outputs.configured == 'true' && vars.BACKEND_ENABLED != 'false' }}
-    runs-on: ubuntu-latest
-    environment: production
     permissions:
       id-token: write # OIDC
       contents: read
-    steps:
-      - uses: actions/checkout@v7
-      - name: Configure AWS credentials (deploy role)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Log in to Amazon ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-      - name: Build & push backend image
-        uses: docker/build-push-action@v7
-        with:
-          context: services/backend/python
-          push: true
-          tags: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    uses: ./.github/workflows/reusable-app-deploy.yml
+    with:
+      should_run_backend: ${{ needs.preflight.outputs.configured == 'true' && vars.BACKEND_ENABLED != 'false' }}
+      should_run_frontend: ${{ needs.preflight.outputs.configured == 'true' && vars.FRONTEND_ENABLED != 'false' }}
+      ecr_repository: ${{ vars.ECR_REPOSITORY }}
+      ecs_cluster: ${{ vars.ECS_CLUSTER }}
+      ecs_service: ${{ vars.ECS_SERVICE }}
+      ecs_task_family: ${{ vars.ECS_TASK_FAMILY }}
+      private_subnet_ids: ${{ vars.PRIVATE_SUBNET_IDS }}
+      app_security_group_id: ${{ vars.APP_SECURITY_GROUP_ID }}
+      web_bucket: ${{ vars.WEB_BUCKET }}
+      cloudfront_distribution_id: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+      cognito_user_pool_id: ${{ vars.COGNITO_USER_POOL_ID }}
+      cognito_client_id: ${{ vars.COGNITO_CLIENT_ID }}
+      cognito_domain: ${{ vars.COGNITO_DOMAIN }}
+      environment: production
 
-  # 2) Register a new task-def revision with the built image, then run DB
-  #    migrations as a one-off Fargate task on it. Gated BEFORE the service roll.
-  #    (ECR tags are IMMUTABLE, so a new revision per build is how the new image
-  #    actually rolls out — `force-new-deployment` alone would not pick it up.)
-  migrate:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      id-token: write # OIDC
-      contents: read
-    outputs:
-      revision: ${{ steps.reg.outputs.revision }}
-    steps:
-      - name: Configure AWS credentials (deploy role)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Login to ECR (for registry URL)
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Register new task definition revision with the built image
-        id: reg
-        env:
-          FAMILY: ${{ vars.ECS_TASK_FAMILY }}
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          image="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
-          aws ecs describe-task-definition --task-definition "$FAMILY" \
-            --query 'taskDefinition' > taskdef.json
-          jq --arg IMG "$image" '
-            .containerDefinitions[0].image = $IMG
-            | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
-          ' taskdef.json > newdef.json
-          rev=$(aws ecs register-task-definition --cli-input-json file://newdef.json \
-            --query 'taskDefinition.taskDefinitionArn' --output text)
-          echo "revision=$rev" >> "$GITHUB_OUTPUT"
-          echo "registered: $rev"
-      - name: Run Alembic migrations (one-off Fargate task)
-        env:
-          CLUSTER: ${{ vars.ECS_CLUSTER }}
-          REV: ${{ steps.reg.outputs.revision }}
-          SUBNETS: ${{ vars.PRIVATE_SUBNET_IDS }}
-          SG: ${{ vars.APP_SECURITY_GROUP_ID }}
-        run: |
-          set -euo pipefail
-          task_arn=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$REV" \
-            --launch-type FARGATE --count 1 \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
-            --overrides '{"containerOverrides":[{"name":"api","command":["uv","run","--no-sync","alembic","upgrade","head"]}]}' \
-            --query 'tasks[0].taskArn' --output text)
-          echo "migration task: $task_arn"
-          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
-          code=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task_arn" \
-            --query 'tasks[0].containers[0].exitCode' --output text)
-          echo "migration exit code: $code"
-          test "$code" = "0"
-
-  # 3) Roll the ECS service onto the new revision (only after migrations succeed).
-  deploy-api:
-    needs: migrate
-    runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      id-token: write # OIDC
-      contents: read
-    steps:
-      - name: Configure AWS credentials (deploy role)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Roll the ECS service to the new revision
-        env:
-          CLUSTER: ${{ vars.ECS_CLUSTER }}
-          SERVICE: ${{ vars.ECS_SERVICE }}
-          REV: ${{ needs.migrate.outputs.revision }}
-        run: |
-          set -euo pipefail
-          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
-            --task-definition "$REV" >/dev/null
-          aws ecs wait services-stable --cluster "$CLUSTER" --service "$SERVICE"
-          echo "service rolled to $REV"
-
-  frontend:
-    needs: preflight
-    if: ${{ needs.preflight.outputs.configured == 'true' && vars.FRONTEND_ENABLED != 'false' }}
-    runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      id-token: write # OIDC
-      contents: read
-    defaults:
-      run:
-        working-directory: services/frontend
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: services/frontend/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Build
-        env:
-          VITE_COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
-          VITE_COGNITO_REGION: ${{ env.AWS_REGION }}
-          VITE_COGNITO_CLIENT_ID: ${{ vars.COGNITO_CLIENT_ID }}
-          VITE_COGNITO_DOMAIN: ${{ vars.COGNITO_DOMAIN }}
-        run: npm run build
-      - name: Configure AWS credentials (deploy role)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Sync dist/ to S3
-        run: aws s3 sync dist/ "s3://${{ vars.WEB_BUCKET }}/" --delete
-      - name: Invalidate CloudFront
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
-            --paths '/*'
-
-  # 5) Real-browser post-deploy smoke test, the "4th gate" (#373/#376,
+  # 2) Real-browser post-deploy smoke test, the "4th gate" (#373/#376,
   #    ADR-0008), rolled out to main. See cd-app-sandbox.yml's smoke-test job
   #    for the full rationale -- this mirrors it, plus files an issue
   #    (labeled e2e-live) on failure instead of just failing quietly, since a
@@ -250,7 +99,7 @@ jobs:
   #    confirmed would just fail every main deploy. Set the repository
   #    variable to the string 'true' once ready.
   smoke-test:
-    needs: [deploy-api, frontend]
+    needs: app-deploy
     permissions:
       id-token: write # OIDC, for the disposable Cognito user create/delete
       contents: read

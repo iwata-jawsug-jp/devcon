@@ -1,0 +1,242 @@
+name: reusable-app-deploy
+
+# build -> migrate -> deploy-api -> frontend, extracted from cd-app.yml /
+# cd-app-sandbox.yml / cd-app-verify.yml / cd-sandbox-cycle.yml, which had each
+# grown their own copy of this AWS CLI logic (#617; the same drift
+# ADR-0012/ADR-0015 stopped for CI and the live-smoke gate, this time for the
+# app deploy pipeline itself). See ADR-0023.
+#
+# Mechanism only, same principle as reusable-live-smoke.yml: this workflow
+# builds the image, runs migrations, rolls the ECS service, and ships the
+# frontend. Policy that differs per caller (area kill switches, GitHub
+# Environment, whether the ECS service needs a fixed desired-count) is passed
+# in as inputs rather than hardcoded here.
+
+on:
+  workflow_call:
+    inputs:
+      ecr_repository:
+        required: true
+        type: string
+      ecs_cluster:
+        required: true
+        type: string
+      ecs_service:
+        required: true
+        type: string
+      ecs_task_family:
+        required: true
+        type: string
+      private_subnet_ids:
+        required: true
+        type: string
+      app_security_group_id:
+        required: true
+        type: string
+      web_bucket:
+        required: true
+        type: string
+      cloudfront_distribution_id:
+        required: true
+        type: string
+      cognito_user_pool_id:
+        required: true
+        type: string
+      cognito_client_id:
+        required: true
+        type: string
+      cognito_domain:
+        required: true
+        type: string
+      desired_count:
+        description: 'ECS desired-count to pass to update-service. Empty (default) omits --desired-count entirely, letting Application Auto Scaling / the existing value stand (cd-app.yml). Sandbox-like callers with no autoscaling pass a fixed value (e.g. "1").'
+        type: string
+        required: false
+        default: ''
+      environment:
+        description: 'GitHub Environment for protection rules / OIDC sub claim; "" = none. See reusable-live-smoke.yml for the same convention.'
+        type: string
+        required: false
+        default: ''
+      should_run_backend:
+        description: 'Gates the build/migrate/deploy-api jobs. See ADR-0012 for why this is an input rather than an `if:` on the calling job.'
+        type: boolean
+        required: false
+        default: true
+      should_run_frontend:
+        description: 'Gates the frontend job. Same rationale as should_run_backend.'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+
+jobs:
+  # Build & push the api image to ECR.
+  build:
+    if: inputs.should_run_backend
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Build & push backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: services/backend/python
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ inputs.ecr_repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Register a new task-def revision with the built image, then run DB
+  # migrations as a one-off Fargate task on it. Gated BEFORE the service roll.
+  # (ECR tags are IMMUTABLE, so a new revision per build is how the new image
+  # actually rolls out -- `force-new-deployment` alone would not pick it up.)
+  #
+  # No `if:` here -- if `build` is skipped (should_run_backend == false), this
+  # job auto-cascades to skipped via `needs: build` without an explicit check.
+  migrate:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    outputs:
+      revision: ${{ steps.reg.outputs.revision }}
+    steps:
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to ECR (for registry URL)
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Register new task definition revision with the built image
+        id: reg
+        env:
+          FAMILY: ${{ inputs.ecs_task_family }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ inputs.ecr_repository }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          image="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition' > taskdef.json
+          jq --arg IMG "$image" '
+            .containerDefinitions[0].image = $IMG
+            | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+          ' taskdef.json > newdef.json
+          rev=$(aws ecs register-task-definition --cli-input-json file://newdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "revision=$rev" >> "$GITHUB_OUTPUT"
+          echo "registered: $rev"
+      - name: Run Alembic migrations (one-off Fargate task)
+        env:
+          CLUSTER: ${{ inputs.ecs_cluster }}
+          REV: ${{ steps.reg.outputs.revision }}
+          SUBNETS: ${{ inputs.private_subnet_ids }}
+          SG: ${{ inputs.app_security_group_id }}
+        run: |
+          set -euo pipefail
+          task_arn=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$REV" \
+            --launch-type FARGATE --count 1 \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"api","command":["uv","run","--no-sync","alembic","upgrade","head"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migration task: $task_arn"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
+          code=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migration exit code: $code"
+          test "$code" = "0"
+
+  # Roll the ECS service onto the new revision (only after migrations succeed).
+  deploy-api:
+    needs: migrate
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    steps:
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Roll the ECS service to the new revision
+        env:
+          CLUSTER: ${{ inputs.ecs_cluster }}
+          SERVICE: ${{ inputs.ecs_service }}
+          REV: ${{ needs.migrate.outputs.revision }}
+          DESIRED_COUNT: ${{ inputs.desired_count }}
+        run: |
+          set -euo pipefail
+          extra_args=()
+          if [ -n "$DESIRED_COUNT" ]; then
+            extra_args+=(--desired-count "$DESIRED_COUNT")
+          fi
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$REV" "${extra_args[@]}" >/dev/null
+          aws ecs wait services-stable --cluster "$CLUSTER" --service "$SERVICE"
+          echo "service rolled to $REV"
+
+  frontend:
+    if: inputs.should_run_frontend
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    defaults:
+      run:
+        working-directory: services/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        env:
+          VITE_COGNITO_USER_POOL_ID: ${{ inputs.cognito_user_pool_id }}
+          VITE_COGNITO_REGION: ${{ env.AWS_REGION }}
+          VITE_COGNITO_CLIENT_ID: ${{ inputs.cognito_client_id }}
+          VITE_COGNITO_DOMAIN: ${{ inputs.cognito_domain }}
+        run: npm run build
+      - name: Configure AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Sync dist/ to S3
+        run: aws s3 sync dist/ "s3://${{ inputs.web_bucket }}/" --delete
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ inputs.cloudfront_distribution_id }}" \
+            --paths '/*'

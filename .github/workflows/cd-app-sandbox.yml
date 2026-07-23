@@ -2,16 +2,13 @@ name: CD App (sandbox)
 
 # Sandbox app deploy on sandbox/** (no production gate). Verifies the app delivery
 # path against sandbox infra:
-#   preflight -> check the app-layer repository variables; if any are unset
-#                (sandbox infra not applied yet), skip every deploy job explicitly (#185)
-#   build    -> build & push the backend (services/backend/python) image to ECR (tag = commit SHA)
-#   deploy   -> register a new api task-def revision with that image, run Alembic as
-#               a one-off Fargate task, then roll the ECS service to the new revision
-#   frontend -> npm build, sync dist/ to S3, invalidate CloudFront
+#   preflight  -> check the app-layer repository variables; if any are unset
+#                 (sandbox infra not applied yet), skip every deploy job explicitly (#185)
+#   app-deploy -> build (ECR push) -> migrate (Alembic, one-off Fargate task) ->
+#                 deploy-api (ECS roll, desired_count=1 since sandbox has no
+#                 autoscaling) -> frontend (S3 sync + CloudFront invalidation),
+#                 via reusable-app-deploy.yml (#617, ADR-0023)
 #
-# NOTE: this fixes a gap in cd-app.yml — its deploy-api uses only
-# `update-service --force-new-deployment`, which (with IMMUTABLE ECR tags) never
-# rolls out a newly built image. Here we register a new revision per build.
 # Excluded from the public mirror (see release.md). Prereqs: docs/sandbox.md.
 #
 # Resource-identifying variables are registered under a `SANDBOX_` prefix
@@ -41,9 +38,6 @@ concurrency:
   group: cd-app-sandbox-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  AWS_REGION: ap-northeast-1
-
 jobs:
   # 0) Deploys need repository variables that only exist once the sandbox infra
   #    layer has been applied and its outputs registered. Until then, skip
@@ -53,191 +47,68 @@ jobs:
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
-      - name: Check that the app-layer repository variables are set
-        id: check
-        env:
-          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          SANDBOX_ECR_REPOSITORY: ${{ vars.SANDBOX_ECR_REPOSITORY }}
-          SANDBOX_ECS_TASK_FAMILY: ${{ vars.SANDBOX_ECS_TASK_FAMILY }}
-          SANDBOX_ECS_CLUSTER: ${{ vars.SANDBOX_ECS_CLUSTER }}
-          SANDBOX_ECS_SERVICE: ${{ vars.SANDBOX_ECS_SERVICE }}
-          SANDBOX_PRIVATE_SUBNET_IDS: ${{ vars.SANDBOX_PRIVATE_SUBNET_IDS }}
-          SANDBOX_APP_SECURITY_GROUP_ID: ${{ vars.SANDBOX_APP_SECURITY_GROUP_ID }}
-          SANDBOX_WEB_BUCKET: ${{ vars.SANDBOX_WEB_BUCKET }}
-          SANDBOX_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.SANDBOX_CLOUDFRONT_DISTRIBUTION_ID }}
-          SANDBOX_COGNITO_USER_POOL_ID: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
-          SANDBOX_COGNITO_CLIENT_ID: ${{ vars.SANDBOX_COGNITO_CLIENT_ID }}
-          SANDBOX_COGNITO_DOMAIN: ${{ vars.SANDBOX_COGNITO_DOMAIN }}
-        run: |
-          missing=()
-          for v in AWS_DEPLOY_ROLE_ARN SANDBOX_ECR_REPOSITORY SANDBOX_ECS_TASK_FAMILY \
-                   SANDBOX_ECS_CLUSTER SANDBOX_ECS_SERVICE SANDBOX_PRIVATE_SUBNET_IDS \
-                   SANDBOX_APP_SECURITY_GROUP_ID SANDBOX_WEB_BUCKET \
-                   SANDBOX_CLOUDFRONT_DISTRIBUTION_ID SANDBOX_COGNITO_USER_POOL_ID \
-                   SANDBOX_COGNITO_CLIENT_ID SANDBOX_COGNITO_DOMAIN; do
-            [ -n "${!v}" ] || missing+=("$v")
-          done
-          if [ "${#missing[@]}" -eq 0 ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Skipping deploy — repository variables not set: ${missing[*]}. Apply the sandbox infra layer and register its outputs (see #185 / docs/sandbox.md)."
-          fi
+      - id: check
+        uses: ./.github/actions/check-app-vars
+        with:
+          aws_deploy_role_arn: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          ecr_repository: ${{ vars.SANDBOX_ECR_REPOSITORY }}
+          ecs_task_family: ${{ vars.SANDBOX_ECS_TASK_FAMILY }}
+          ecs_cluster: ${{ vars.SANDBOX_ECS_CLUSTER }}
+          ecs_service: ${{ vars.SANDBOX_ECS_SERVICE }}
+          private_subnet_ids: ${{ vars.SANDBOX_PRIVATE_SUBNET_IDS }}
+          app_security_group_id: ${{ vars.SANDBOX_APP_SECURITY_GROUP_ID }}
+          web_bucket: ${{ vars.SANDBOX_WEB_BUCKET }}
+          cloudfront_distribution_id: ${{ vars.SANDBOX_CLOUDFRONT_DISTRIBUTION_ID }}
+          cognito_user_pool_id: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
+          cognito_client_id: ${{ vars.SANDBOX_COGNITO_CLIENT_ID }}
+          cognito_domain: ${{ vars.SANDBOX_COGNITO_DOMAIN }}
+          hint: 'Apply the sandbox infra layer and register its outputs under the SANDBOX_ prefix (see #185 / docs/sandbox.md).'
 
-  build:
+  app-deploy:
     needs: preflight
-    if: needs.preflight.outputs.configured == 'true'
-    runs-on: ubuntu-latest
     permissions:
-      id-token: write
+      id-token: write # OIDC
       contents: read
-    steps:
-      - uses: actions/checkout@v7
-      - name: Configure AWS credentials (deploy role)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Log in to Amazon ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-      - name: Build & push backend image
-        uses: docker/build-push-action@v7
-        with:
-          context: services/backend/python
-          push: true
-          tags: ${{ steps.ecr.outputs.registry }}/${{ vars.SANDBOX_ECR_REPOSITORY }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    uses: ./.github/workflows/reusable-app-deploy.yml
+    with:
+      should_run_backend: ${{ needs.preflight.outputs.configured == 'true' }}
+      should_run_frontend: ${{ needs.preflight.outputs.configured == 'true' }}
+      ecr_repository: ${{ vars.SANDBOX_ECR_REPOSITORY }}
+      ecs_cluster: ${{ vars.SANDBOX_ECS_CLUSTER }}
+      ecs_service: ${{ vars.SANDBOX_ECS_SERVICE }}
+      ecs_task_family: ${{ vars.SANDBOX_ECS_TASK_FAMILY }}
+      private_subnet_ids: ${{ vars.SANDBOX_PRIVATE_SUBNET_IDS }}
+      app_security_group_id: ${{ vars.SANDBOX_APP_SECURITY_GROUP_ID }}
+      web_bucket: ${{ vars.SANDBOX_WEB_BUCKET }}
+      cloudfront_distribution_id: ${{ vars.SANDBOX_CLOUDFRONT_DISTRIBUTION_ID }}
+      cognito_user_pool_id: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
+      cognito_client_id: ${{ vars.SANDBOX_COGNITO_CLIENT_ID }}
+      cognito_domain: ${{ vars.SANDBOX_COGNITO_DOMAIN }}
+      # sandbox has no Application Auto Scaling (dev-sized, min==max==1), so a
+      # fixed desired-count is required -- unlike cd-app.yml, which omits it to
+      # respect the autoscaled value.
+      desired_count: '1'
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Configure AWS credentials (deploy role)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Login to ECR (for registry URL)
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Register new task definition revision with the built image
-        id: reg
-        env:
-          FAMILY: ${{ vars.SANDBOX_ECS_TASK_FAMILY }}
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          REPOSITORY: ${{ vars.SANDBOX_ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          image="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
-          aws ecs describe-task-definition --task-definition "$FAMILY" \
-            --query 'taskDefinition' > taskdef.json
-          jq --arg IMG "$image" '
-            .containerDefinitions[0].image = $IMG
-            | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
-          ' taskdef.json > newdef.json
-          rev=$(aws ecs register-task-definition --cli-input-json file://newdef.json \
-            --query 'taskDefinition.taskDefinitionArn' --output text)
-          echo "revision=$rev" >> "$GITHUB_OUTPUT"
-          echo "registered: $rev"
-      - name: Run Alembic migrations (one-off Fargate task)
-        env:
-          CLUSTER: ${{ vars.SANDBOX_ECS_CLUSTER }}
-          REV: ${{ steps.reg.outputs.revision }}
-          SUBNETS: ${{ vars.SANDBOX_PRIVATE_SUBNET_IDS }}
-          SG: ${{ vars.SANDBOX_APP_SECURITY_GROUP_ID }}
-        run: |
-          set -euo pipefail
-          task_arn=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$REV" \
-            --launch-type FARGATE --count 1 \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
-            --overrides '{"containerOverrides":[{"name":"api","command":["uv","run","--no-sync","alembic","upgrade","head"]}]}' \
-            --query 'tasks[0].taskArn' --output text)
-          echo "migration task: $task_arn"
-          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
-          code=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task_arn" \
-            --query 'tasks[0].containers[0].exitCode' --output text)
-          echo "migration exit code: $code"
-          test "$code" = "0"
-      - name: Roll the ECS service to the new revision
-        env:
-          CLUSTER: ${{ vars.SANDBOX_ECS_CLUSTER }}
-          SERVICE: ${{ vars.SANDBOX_ECS_SERVICE }}
-          REV: ${{ steps.reg.outputs.revision }}
-        run: |
-          set -euo pipefail
-          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
-            --task-definition "$REV" --desired-count 1 >/dev/null
-          aws ecs wait services-stable --cluster "$CLUSTER" --service "$SERVICE"
-          echo "service rolled to $REV"
-
-  frontend:
-    needs: preflight
-    if: needs.preflight.outputs.configured == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    defaults:
-      run:
-        working-directory: services/frontend
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: services/frontend/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Build
-        env:
-          VITE_COGNITO_USER_POOL_ID: ${{ vars.SANDBOX_COGNITO_USER_POOL_ID }}
-          VITE_COGNITO_REGION: ${{ env.AWS_REGION }}
-          VITE_COGNITO_CLIENT_ID: ${{ vars.SANDBOX_COGNITO_CLIENT_ID }}
-          VITE_COGNITO_DOMAIN: ${{ vars.SANDBOX_COGNITO_DOMAIN }}
-        run: npm run build
-      - name: Configure AWS credentials (deploy role)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Sync dist/ to S3
-        run: aws s3 sync dist/ "s3://${{ vars.SANDBOX_WEB_BUCKET }}/" --delete
-      - name: Invalidate CloudFront
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id "${{ vars.SANDBOX_CLOUDFRONT_DISTRIBUTION_ID }}" \
-            --paths '/*'
-
-  # 5) Real-browser post-deploy smoke test (#373, now the "4th gate" -- #376,
-  #    ADR-0008): a whole class of real-environment-only defects (#365 CSP,
-  #    #367 missing VITE_COGNITO_*, #369 missing VPC endpoint / backend
-  #    Cognito env vars) broke the actual login -> authenticated-API-call
-  #    path while every existing gate (unit/integration tests, all of which
-  #    mock auth) stayed green. This job exercises that exact path against
-  #    the just-deployed sandbox environment with a real headless-Chromium
-  #    Cognito Hosted UI login, via the Playwright `live-smoke` project
-  #    (services/frontend/e2e/live-smoke/).
+  # Real-browser post-deploy smoke test (#373, now the "4th gate" -- #376,
+  # ADR-0008): a whole class of real-environment-only defects (#365 CSP,
+  # #367 missing VITE_COGNITO_*, #369 missing VPC endpoint / backend
+  # Cognito env vars) broke the actual login -> authenticated-API-call
+  # path while every existing gate (unit/integration tests, all of which
+  # mock auth) stayed green. This job exercises that exact path against
+  # the just-deployed sandbox environment with a real headless-Chromium
+  # Cognito Hosted UI login, via the Playwright `live-smoke` project
+  # (services/frontend/e2e/live-smoke/).
   #
-  #    Uses a per-run disposable Cognito user (admin-create-user ->
-  #    admin-set-user-password -> run the test -> admin-delete-user, always)
-  #    instead of a fixed pre-provisioned one -- no more manual
-  #    re-registration every time sandbox infra is rebuilt. Requires the
-  #    ci_deploy_auth policy's CognitoAdminUsers statement
-  #    (infra/bootstrap/main.tf), which is a separate, human-applied layer
-  #    (docs/sandbox.md) -- this job stays "skip with warning" if it's not
-  #    granted yet.
+  # Uses a per-run disposable Cognito user (admin-create-user ->
+  # admin-set-user-password -> run the test -> admin-delete-user, always)
+  # instead of a fixed pre-provisioned one -- no more manual
+  # re-registration every time sandbox infra is rebuilt. Requires the
+  # ci_deploy_auth policy's CognitoAdminUsers statement
+  # (infra/bootstrap/main.tf), which is a separate, human-applied layer
+  # (docs/sandbox.md) -- this job stays "skip with warning" if it's not
+  # granted yet.
   smoke-test:
-    needs: [deploy, frontend]
+    needs: app-deploy
     permissions:
       id-token: write # OIDC, for the disposable Cognito user create/delete
       contents: read

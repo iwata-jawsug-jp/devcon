@@ -29,6 +29,9 @@ jobs:
         working-directory: infra
     steps:
       - uses: actions/checkout@v7
+      # Version pinned to match .devcontainer/Dockerfile's TERRAFORM_VERSION — the
+      # single source of truth (same convention as TFLINT_VERSION/TRIVY_VERSION/
+      # CONFTEST_VERSION below); update both together.
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
@@ -67,7 +70,7 @@ jobs:
       # that action has no version input and hardcodes its own checkov release per action
       # tag (v12 currently bundles 3.3.6, not this repo's pinned CHECKOV_VERSION) — #153, #272.
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.14'
       - name: Checkov

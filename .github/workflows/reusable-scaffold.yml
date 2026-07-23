@@ -35,6 +35,9 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: services/frontend/package-lock.json
+      # Version pinned to match .devcontainer/Dockerfile's TERRAFORM_VERSION — the
+      # single source of truth (same convention as COPIER_VERSION below); update
+      # both together.
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
