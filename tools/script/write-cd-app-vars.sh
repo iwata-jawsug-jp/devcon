@@ -2,7 +2,10 @@
 #
 # cd-app.yml / cd-app-sandbox.yml が必要とするアプリ層のリポジトリ変数を、対象環境
 # （dev/prod/sandbox）の infra/（アプリ層。infra/bootstrap/ ではない）terraform output
-# から自動登録する。
+# から自動登録する。--clear を付けると逆に該当環境の12変数を削除する（#631: teardown後も
+# 変数が残ると、実在しないAWSリソースを指したまま cd-app(-sandbox).yml の preflight が
+# `configured=true` と誤判定し、build/frontend 段階の分かりにくいエラーで初めて気づく
+# 事故が実際に起きた）。
 #
 # 対応表（docs/repository-variables.md「3. 本番アプリ用」「4. sandbox用」参照）:
 #   prod    -> 接頭辞なし（例: ECR_REPOSITORY）  … cd-app.yml が消費
@@ -33,6 +36,7 @@
 #
 # Usage:
 #   ./tools/script/write-cd-app-vars.sh <dev|prod|sandbox> [-o org] [-r repo] [-y]
+#   ./tools/script/write-cd-app-vars.sh <dev|prod|sandbox> --clear [-o org] [-r repo] [-y]
 #
 set -euo pipefail
 
@@ -45,19 +49,23 @@ Usage: write-cd-app-vars.sh <dev|prod|sandbox> [options]
 
 対象環境の infra/（アプリ層）terraform output から、cd-app.yml / cd-app-sandbox.yml
 （および将来の cd-app-dev.yml）が必要とするリポジトリ変数12個を登録する。
+--clear を付けると、登録の代わりに該当環境の12変数を削除する（infra/env/ の terraform
+output は読まない・AWS認証も不要）。terraform destroy 後に実行し、実在しないリソースを
+指したままの変数が cd-app(-sandbox).yml の preflight を誤って通過させる事故（#631）を防ぐ。
 
 Arguments:
-  dev       DEV_ 接頭辞で登録（現時点でどの workflow も消費しない予定枠）
-  prod      接頭辞なしで登録（cd-app.yml が消費）
-  sandbox   SANDBOX_ 接頭辞で登録（cd-app-sandbox.yml が消費）
+  dev       DEV_ 接頭辞（現時点でどの workflow も消費しない予定枠）
+  prod      接頭辞なし（cd-app.yml が消費）
+  sandbox   SANDBOX_ 接頭辞（cd-app-sandbox.yml が消費）
 
 Options:
+  --clear             登録ではなく削除する（destroy後の後片付け用）
   -o, --org <org>     GitHub org（省略時は自動検出）
   -r, --repo <repo>   GitHub repo（省略時は自動検出）
   -y, --yes           確認プロンプトをスキップ
   -h, --help          このヘルプを表示
 
-前提:
+前提（登録時のみ、--clear では不要）:
   - 対象環境の infra/ が terraform apply 済みであること。
   - 実行環境に対象AWSアカウントへの有効な認証情報があること
     （docs/aws-temporary-credentials.md 参照）。
@@ -75,6 +83,7 @@ env_name=""
 org=""
 repo=""
 yes=false
+clear_mode=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -86,6 +95,7 @@ while [[ $# -gt 0 ]]; do
       env_name="$1"
       shift
       ;;
+    --clear) clear_mode=true; shift ;;
     -o | --org) org="${2:-}"; shift 2 ;;
     -r | --repo) repo="${2:-}"; shift 2 ;;
     -y | --yes) yes=true; shift ;;
@@ -155,6 +165,59 @@ gh_t() {
   fi
 }
 
+# terraform output -> リポジトリ変数名のマッピング（登録・削除の両方で使う）。
+# "変数名サフィックス|terraform output名|変換方法（raw/ecr_name/csv）"
+# infra/outputs.tf の各 output に対応。定義を変更したら outputs.tf 側も更新すること。
+MAPPINGS=(
+  "ECR_REPOSITORY|ecr_repository_url|ecr_name"
+  "ECS_TASK_FAMILY|ecs_task_family|raw"
+  "ECS_CLUSTER|ecs_cluster_name|raw"
+  "ECS_SERVICE|ecs_service_name|raw"
+  "PRIVATE_SUBNET_IDS|private_subnet_ids|csv"
+  "APP_SECURITY_GROUP_ID|app_security_group_id|raw"
+  "WEB_BUCKET|web_bucket|raw"
+  "CLOUDFRONT_DISTRIBUTION_ID|cloudfront_distribution_id|raw"
+  "CLOUDFRONT_DOMAIN_NAME|cloudfront_domain_name|raw"
+  "COGNITO_USER_POOL_ID|cognito_user_pool_id|raw"
+  "COGNITO_CLIENT_ID|cognito_user_pool_client_id|raw"
+  "COGNITO_DOMAIN|cognito_hosted_ui_domain_prefix|raw"
+)
+VAR_SUFFIXES=()
+for entry in "${MAPPINGS[@]}"; do
+  VAR_SUFFIXES+=("${entry%%|*}")
+done
+
+if $clear_mode; then
+  echo
+  echo "==> 環境: $env_name  接頭辞: '${PREFIX:-(なし)}'"
+  echo "    ${org}/${repo} から以下の${#VAR_SUFFIXES[@]}個のリポジトリ変数を削除します"
+  echo "    （terraform output は読まない・AWS認証は不要）:"
+  printf '      - %s\n' "${VAR_SUFFIXES[@]/#/$PREFIX}"
+  if ! $yes; then
+    read -r -p "続行しますか？ [y/N] " ans
+    [[ "$ans" =~ ^[Yy]$ ]] || {
+      echo "中止しました。"
+      exit 1
+    }
+  fi
+
+  deleted_count=0
+  for suffix in "${VAR_SUFFIXES[@]}"; do
+    var_name="${PREFIX}${suffix}"
+    if gh_t variable delete "$var_name" --repo "$org/$repo" >/dev/null 2>&1; then
+      echo "  [deleted] $var_name"
+      deleted_count=$((deleted_count + 1))
+    else
+      # 既に未登録なら削除は失敗するが、目的（未登録状態）は既に満たされているので
+      # 冪等に成功扱いとする。
+      echo "  [skip] $var_name（既に未登録）"
+    fi
+  done
+  echo
+  echo "==> 完了: ${deleted_count}/${#VAR_SUFFIXES[@]}件 削除（残りは既に未登録でした）"
+  exit 0
+fi
+
 # ---- 1. bootstrap配線変数（PROJECT_NAME / AWS_TF_STATE_BUCKET）を読む ----
 # infra/（アプリ層）の backend.hcl をレンダリングするために必要
 # （cd-infra.yml の「Materialize backend + tfvars from committed examples」と同じ）。
@@ -198,24 +261,7 @@ tf() { terraform -chdir="$INFRA_DIR" "$@"; }
 tf init -backend-config="env/${env_name}.backend.hcl" -reconfigure -input=false >/dev/null
 echo "==> terraform init 完了。output を読み取ります..."
 
-# ---- 3. terraform output -> リポジトリ変数名のマッピング ----
-# "変数名サフィックス|terraform output名|変換方法（raw/ecr_name/csv）"
-# infra/outputs.tf の各 output に対応。定義を変更したら outputs.tf 側も更新すること。
-MAPPINGS=(
-  "ECR_REPOSITORY|ecr_repository_url|ecr_name"
-  "ECS_TASK_FAMILY|ecs_task_family|raw"
-  "ECS_CLUSTER|ecs_cluster_name|raw"
-  "ECS_SERVICE|ecs_service_name|raw"
-  "PRIVATE_SUBNET_IDS|private_subnet_ids|csv"
-  "APP_SECURITY_GROUP_ID|app_security_group_id|raw"
-  "WEB_BUCKET|web_bucket|raw"
-  "CLOUDFRONT_DISTRIBUTION_ID|cloudfront_distribution_id|raw"
-  "CLOUDFRONT_DOMAIN_NAME|cloudfront_domain_name|raw"
-  "COGNITO_USER_POOL_ID|cognito_user_pool_id|raw"
-  "COGNITO_CLIENT_ID|cognito_user_pool_client_id|raw"
-  "COGNITO_DOMAIN|cognito_hosted_ui_domain_prefix|raw"
-)
-
+# ---- 3. terraform output をリポジトリ変数へ登録（MAPPINGS は冒頭で定義済み）----
 failed=()
 set_count=0
 for entry in "${MAPPINGS[@]}"; do

@@ -47,6 +47,10 @@ jobs:
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
+      # Local actions (`uses: ./...`) need the repo on disk first -- without
+      # this, the step fails with "Can't find 'action.yml'..." before it even
+      # runs (#617 regression, caught on main after PR #625 merged).
+      - uses: actions/checkout@v7
       - id: check
         uses: ./.github/actions/check-app-vars
         with:

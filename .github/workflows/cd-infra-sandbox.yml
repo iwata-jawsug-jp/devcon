@@ -117,3 +117,27 @@ jobs:
         run: |
           terraform destroy -no-color -input=false -auto-approve \
             -var-file=env/${{ env.TF_ENV }}.tfvars
+      # The SANDBOX_* repository variables (ECR/ECS/S3/CloudFront/Cognito
+      # identifiers) now point to nothing -- cd-app-sandbox.yml's preflight only
+      # checks that they're non-empty, not that the resources still exist, so it
+      # would report "configured=true" and fail deep in build/frontend with a
+      # confusing NoSuchBucket/repository-does-not-exist error instead of a clear
+      # skip (#631, actually hit). Unsetting is a separate, human-run step
+      # (./tools/script/write-cd-app-vars.sh sandbox --clear) rather than
+      # automated here: GITHUB_TOKEN has no permission to write repository
+      # variables (deliberately, to stop a workflow from being able to rotate its
+      # own secrets/variables), so doing this from CI would need a new
+      # Variables:Read-and-write PAT registered as a repository secret --
+      # a bigger security footprint than reusing the existing local
+      # GH_CHECK_SETUP_TOKEN flow (ADR-0021/ADR-0022).
+      - name: Remind to clear stale SANDBOX_* repository variables
+        if: always()
+        run: |
+          {
+            echo "### sandbox destroyed — SANDBOX_* repository variables are now stale"
+            echo
+            echo 'Run this locally to unset them (uses the same GH_CHECK_SETUP_TOKEN as write-cd-app-vars.sh, #631):'
+            echo '```bash'
+            echo './tools/script/write-cd-app-vars.sh sandbox --clear'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
