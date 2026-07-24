@@ -17,6 +17,35 @@ name: CD Sandbox Cycle (weekly ephemeral)
 # hand at least once, its duration/cost is understood, and nothing else is
 # relying on a long-lived sandbox at the time.
 #
+# Mechanical guard against exactly that accident (#631 problem 2, ADR-0025):
+# the `apply` job runs `terraform state list` before the real apply. A
+# non-empty state means the shared `sandbox` state already has resources in
+# it from something else (a human's docs/sandbox.md verification, or a stuck
+# previous run) -- proceeding would silently adopt/modify that environment
+# and then `teardown` would destroy it without warning. The job stops there
+# unless re-run with `-f confirm_shared_state=proceed`, same "typed
+# confirmation, not just workflow_dispatch itself" pattern as
+# cd-infra-sandbox.yml's `confirm_destroy`. Critically, `teardown` only runs
+# when `apply` actually reached a real `terraform apply` (its `applied`
+# output) -- see `teardown`'s `if:` comment for why this matters.
+#
+# The check deliberately uses "state is non-empty" rather than "terraform
+# plan has no diff" (sandbox verification of an earlier revision of this
+# guard): api.tf's `data.external.api_current_image` looks up the image tag
+# the ECS service is actually running so infra-only applies don't clobber a
+# real deploy's task-def revision with the ":bootstrap" placeholder (#374) --
+# which means a real, currently-in-use environment (deployed via
+# cd-app-sandbox.yml/reusable-app-deploy.yml, same as this workflow's own
+# `app-deploy` job) *always* shows a task-definition diff on the next plan.
+# A "no diff" check would essentially never fire for the actual "someone is
+# using this" scenario it exists to catch -- a false negative in exactly the
+# case that matters, found only by running the full cycle for real. "State
+# is non-empty" trades a coarser check (it can't tell a fully-healthy
+# environment from a partially-failed previous run) for one that reliably
+# catches the real danger; given the asymmetry -- a false positive costs a
+# human 30 seconds to confirm, a false negative destroys someone's
+# environment -- that trade is the right one.
+#
 # The `apply`/`teardown` steps still duplicate cd-infra-sandbox.yml's Terraform
 # steps (tfvars materialization is shared via materialize-tfvars, #617/ADR-0023,
 # but init/apply/destroy themselves are not extracted here). The app delivery
@@ -35,6 +64,11 @@ on:
         required: false
         type: boolean
         default: false
+      confirm_shared_state:
+        description: 'Type "proceed" only if you have confirmed nothing else is using sandbox right now AND still want to continue when terraform plan finds the shared sandbox state already fully provisioned (see docs/sandbox.md)'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -67,6 +101,9 @@ jobs:
     # (#482: relying on the stale vars caused deploy-api/frontend to fail with
     # InvalidSubnetID.NotFound / NoSuchDistribution).
     outputs:
+      # Set only after a real `terraform apply` ran (i.e. the shared-state guard
+      # above did not block). `teardown` gates on this -- see its `if:` comment.
+      applied: ${{ steps.mark_applied.outputs.applied }}
       ecr_repository: ${{ steps.tf_outputs.outputs.ecr_repository }}
       ecs_cluster_name: ${{ steps.tf_outputs.outputs.ecs_cluster_name }}
       ecs_service_name: ${{ steps.tf_outputs.outputs.ecs_service_name }}
@@ -99,16 +136,52 @@ jobs:
       # Version pinned to match .devcontainer/Dockerfile's TERRAFORM_VERSION — the
       # single source of truth (same convention as TFLINT_VERSION/TRIVY_VERSION/
       # CONFTEST_VERSION); update both together.
+      #
+      # terraform_wrapper: false -- the default wrapper captures stdout/stderr
+      # into step outputs, but to do so it ALWAYS exits 0 itself regardless of
+      # the real terraform exit code, breaking any check below that reads a
+      # terraform command's real exit status via `$?`/pipefail (caught via
+      # sandbox verification against an earlier, `-detailed-exitcode`-based
+      # revision of this guard, #631 problem 2 / ADR-0025).
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: '1.13.0'
+          terraform_wrapper: false
       - name: Terraform init
         run: terraform init -backend-config=env/${{ env.TF_ENV }}.backend.hcl
+      # Detect a pre-existing shared state before mutating it (#631 problem 2,
+      # ADR-0025). A non-empty `terraform state list` means the shared state
+      # already has resources in it -- see the guard rationale in this file's
+      # header comment for why this checks state emptiness rather than
+      # `terraform plan` having no diff.
+      - name: Check for pre-existing shared sandbox state
+        id: check_shared_state
+        run: |
+          set -o pipefail
+          if ! resource_count=$(terraform state list | wc -l); then
+            echo "::error::terraform state list failed while checking for a pre-existing shared sandbox state."
+            exit 1
+          fi
+          echo "resource_count=$resource_count" >> "$GITHUB_OUTPUT"
+      - name: Guard against overwriting an already-provisioned shared sandbox state
+        if: steps.check_shared_state.outputs.resource_count != '0'
+        env:
+          CONFIRM: ${{ inputs.confirm_shared_state }}
+          RESOURCE_COUNT: ${{ steps.check_shared_state.outputs.resource_count }}
+        run: |
+          if [ "$CONFIRM" != "proceed" ]; then
+            echo "::error::terraform state already has $RESOURCE_COUNT resource(s) -- the shared 'sandbox' Terraform state (TF_ENV=sandbox) is not empty, most likely because someone's manual docs/sandbox.md verification or a stuck previous run left it populated. Continuing would silently adopt/modify that environment and the teardown job would then destroy it without warning. Confirm nothing else is using sandbox right now, then re-run with -f confirm_shared_state=proceed. See docs/sandbox.md."
+            exit 1
+          fi
+          echo "::warning::Proceeding despite a non-empty shared sandbox state ($RESOURCE_COUNT resource(s), confirm_shared_state=proceed)."
       - name: Terraform apply
         run: |
           terraform apply -no-color -input=false -auto-approve \
             -var-file=env/${{ env.TF_ENV }}.tfvars
+      - name: Mark that a real apply happened
+        id: mark_applied
+        run: echo "applied=true" >> "$GITHUB_OUTPUT"
       - name: Export terraform outputs for downstream jobs
         id: tf_outputs
         run: |
@@ -212,9 +285,21 @@ jobs:
   #    regardless of smoke-test outcome (alerting, not blocking, per the
   #    Count -> Block note above) unless the human explicitly asked to keep
   #    the environment up for investigation.
+  #
+  #    `needs.apply.outputs.applied == 'true'` is required, not optional: this
+  #    job only `needs: smoke-test`, and `if: always()` runs regardless of
+  #    whether jobs in its transitive needs chain (apply, app-deploy,
+  #    smoke-test) succeeded, failed, OR were skipped -- so without this extra
+  #    check, a shared-state guard trip in `apply` (this run never actually
+  #    applied anything) would still let this job authenticate independently
+  #    and run `terraform destroy` against whatever is currently in the shared
+  #    state, i.e. exactly the accident the guard exists to prevent (#631
+  #    problem 2, ADR-0025). Same reasoning applies to any other reason `apply`
+  #    fails before reaching its real `terraform apply` step (e.g. the OIDC ref
+  #    constraint below): teardown is now skipped rather than attempted.
   teardown:
     needs: smoke-test
-    if: always() && inputs.skip_teardown != true
+    if: always() && inputs.skip_teardown != true && needs.apply.outputs.applied == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write

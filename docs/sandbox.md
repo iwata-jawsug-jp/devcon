@@ -46,8 +46,9 @@ end-to-end で試す（`cd-app-sandbox` で build→migrate→deploy）。機能
 sts:AssumeRoleWithWebIdentity` を約12回（指数バックオフ、合計 2 分強）リトライしたのち失敗。
 2. これは Terraform が実行される **前** の段階なので、AWS リソースは何も作成・変更されない
    （後片付けは不要）。`cd-sandbox-cycle.yml` の `apply` がこの形で失敗した場合、後続の
-   `teardown` も同じ理由で失敗するのが正常な挙動（`if: always()` で走るが、同じ deploy
-   ロールを assume できないため、こちらもリトライ後に失敗する）。
+   `teardown` は実行されず `skipped` になるのが正常な挙動（`apply` が実際に
+   `terraform apply` まで到達したかどうかを示す `applied` output で gate されている、
+   [ADR-0025](adr/0025-cd-sandbox-cycle-shared-state-guard.md)）。
 
 **実際に複数回発生している既知のパターン**（2026-07-19・2026-07-23、`cd-sandbox-cycle.yml`/
 `test/*`・`infra/*` ブランチからの `workflow_dispatch`）。エラーメッセージから「バグでは」と
@@ -197,6 +198,14 @@ gh variable set CLOUDFRONT_DOMAIN_NAME --body "$(terraform -chdir=infra output -
      その時点で他に sandbox を使っていないことを確認できてから。
 - **実行前に必ず、他に sandbox を使っていないか確認すること。** このワークフローは
   実行時点の sandbox 環境をまるごと apply → 差し替え → 破棄する。
+- **機械的なガードも入っている**（#631 問題2、[ADR-0025](adr/0025-cd-sandbox-cycle-shared-state-guard.md)）:
+  `apply` ジョブは実際の apply の前に `terraform state list` を実行する。共有 state
+  （`TF_ENV=sandbox`）に resource が 1 件でもあれば、誰か（人間の手動検証や、完走しな
+  かった前回実行）によって既に何か入っていることを意味する。この場合ワークフローは
+  そこで停止し、`-f confirm_shared_state=proceed` を明示的に指定して再実行しない限り
+  先に進まない（`cd-infra-sandbox.yml` の `confirm_destroy` と同じ「タイプ入力による
+  誤操作防止」パターン）。上記の目視確認を代替するものではなく、確認を怠った場合の
+  最終防御線として位置づける。
 - 判定は **alerting**（live-smoke 失敗時に `e2e-live` ラベルで issue 自動起票、ワークフロー
   自体は fail させない）。teardown は smoke-test の成否に関わらず実行される
   （`workflow_dispatch` の `skip_teardown: true` で調査用に環境を残せる、`if: always()`
@@ -210,6 +219,9 @@ gh variable set CLOUDFRONT_DOMAIN_NAME --body "$(terraform -chdir=infra output -
 gh workflow run cd-sandbox-cycle.yml --ref main
 # 環境を調査用に残したい場合:
 gh workflow run cd-sandbox-cycle.yml --ref main -f skip_teardown=true
+# apply前チェックが「共有stateが空でない」で停止した場合、他に誰も
+# sandboxを使っていないことを確認した上でのみ:
+gh workflow run cd-sandbox-cycle.yml --ref main -f confirm_shared_state=proceed
 ```
 
 > `--ref` は必ず `main` か `sandbox/*` にすること。それ以外のブランチを指定すると
