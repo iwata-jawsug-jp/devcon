@@ -34,11 +34,17 @@ def _iso_week_key(dt: datetime) -> str:
 
 class GitHubClient:
     def __init__(
-        self, owner: str, repo: str, token: str | None = None, api_root: str = API_ROOT
+        self,
+        owner: str,
+        repo: str,
+        token: str | None = None,
+        branch: str = "main",
+        api_root: str = API_ROOT,
     ):
         self.owner = owner
         self.repo = repo
         self.token = token
+        self.branch = branch
         self.api_root = api_root
 
     def _get_page(self, url: str):
@@ -78,7 +84,7 @@ class GitHubClient:
         return self._get_all(
             f"/repos/{self.owner}/{self.repo}/actions/workflows/{DEPLOY_WORKFLOW_FILE}/runs",
             {
-                "branch": "main",
+                "branch": self.branch,
                 "event": "push",
                 "created": created,
                 "status": "success",
@@ -92,7 +98,7 @@ class GitHubClient:
 
     def list_merged_pulls(self, since: datetime, until: datetime) -> list:
         q = (
-            f"repo:{self.owner}/{self.repo} is:pr is:merged base:main "
+            f"repo:{self.owner}/{self.repo} is:pr is:merged base:{self.branch} "
             f"merged:{since.date().isoformat()}..{until.date().isoformat()}"
         )
         return self._get_all(
@@ -241,9 +247,10 @@ def collect(
     since: datetime,
     until: datetime,
     token: str | None = None,
+    branch: str = "main",
     client_cls=GitHubClient,
 ) -> dict:
-    client = client_cls(owner, repo, token)
+    client = client_cls(owner, repo, token, branch=branch)
 
     runs = client.list_workflow_runs(since, until)
     runs_with_jobs = [{**run, "jobs": client.list_run_jobs(run["id"])} for run in runs]
@@ -322,6 +329,11 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--since", required=True, help="YYYY-MM-DD, inclusive")
     parser.add_argument("--until", required=True, help="YYYY-MM-DD, inclusive")
     parser.add_argument(
+        "--branch",
+        default="main",
+        help="Base branch deploys/PRs are measured against (repo default branch)",
+    )
+    parser.add_argument(
         "--token", default=None, help="GitHub token; falls back to $GITHUB_TOKEN"
     )
     parser.add_argument(
@@ -339,7 +351,7 @@ def main(argv=None) -> int:
     )
 
     try:
-        weekly = collect(args.owner, args.repo, since, until, token)
+        weekly = collect(args.owner, args.repo, since, until, token, branch=args.branch)
     except urllib.error.HTTPError as exc:
         print(f"GitHub API error: {exc.code} {exc.reason}", file=sys.stderr)
         return 1

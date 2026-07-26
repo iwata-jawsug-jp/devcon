@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-26
+
+### Changed
+
+- **`BACKEND_GO_ENABLED` を他のエリア別スイッチとは逆極性のオプトイン方式に変更**: `services/backend/go`（ADR-0024）はまだ CD 未実装（Phase 3、#640）の実験的エリアのため、`ci.yml` の `backend-go` を `vars.BACKEND_GO_ENABLED != 'false'`（未設定＝有効）から `== 'true'`（未設定＝無効）に変更した。`INFRA_APPLY_ENABLED`/`LIVE_SMOKE_ENABLED` と同じ方式。`docs/ci-cd-area-switches.md`/`docs/repository-variables.md` も追従し、あわせて `ci-sandbox.yml` も対象という誤記（実際は同ファイルが全エリア無条件実行のため対象外）を修正した（#673）。
+
+### Fixed
+
+- **GitHub Actions のワークフロー内でリポジトリのデフォルトブランチ名 `main` をハードコードしていた箇所を `github.event.repository.default_branch` ベースに置き換え**: `on:` トリガー条件（`branches: [main]`）は仕様上 expression 非対応のためリテラルのまま残し、動的評価が可能な job/step レベルの `if:`・`env:`・スクリプト引数のみを対象にした。`dora_metrics.py`/`metrics-dora.yml`/`metrics-scorecard.yml` の DORA 集計・スナップショット PR の compare URL 生成、`cd-infra.yml` の `apply-dev`/`apply-prod` の `if:` を変更（AWS 側 OIDC 信頼ポリシーは `infra/bootstrap/locals.tf` に `refs/heads/main` のリテラルを持つため、実際のセキュリティ境界はこの変更では動かない）（#672）。
+- **`write-cd-app-vars.sh --clear` を固定リスト方式から接頭辞の列挙方式に変更（dev/sandbox）**: `MAPPINGS`（`infra/outputs.tf` 対応の固定12件）を名指しで削除する実装だったため、このスクリプト以外の経路で登録された変数（#640 の worker 用に手で登録した `SANDBOX_WORKER_ECR_REPOSITORY`/`_LAMBDA_FUNCTION_NAME`/`_SQS_QUEUE_URL`）を `--clear` が消せず、teardown 後も残り続けていた。dev/sandbox はリポジトリに実在する `<接頭辞>*` を列挙して全削除する方式に変更し、prod は影響範囲を保守的に従来どおり `MAPPINGS` の名指しのままにした。実機で3件の残存変数の削除・冪等性・prod の挙動不変を確認済み（#670, #671）。
+
 ## [0.7.0] - 2026-07-26
 
 ### Security
@@ -1390,7 +1401,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.7...v0.6.8

@@ -19,17 +19,18 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 
 ## 変数一覧
 
-| 変数                 | 停止する範囲                                                                                           |
-| -------------------- | ------------------------------------------------------------------------------------------------------ |
-| `BACKEND_ENABLED`    | `ci.yml` の backend / `cd-app.yml` の build → migrate → deploy-api                                     |
-| `BACKEND_GO_ENABLED` | `ci.yml`/`ci-sandbox.yml` の backend-go（services/backend/go、ADR-0024）。CD は未実装（Phase 3、#640） |
-| `FRONTEND_ENABLED`   | `ci.yml` の frontend / `cd-app.yml` の frontend                                                        |
-| `INFRA_ENABLED`      | `ci.yml` の infra / `cd-infra.yml` の plan・apply（手動 dispatch 含む）                                |
+| 変数               | 停止する範囲                                                            |
+| ------------------ | ----------------------------------------------------------------------- |
+| `BACKEND_ENABLED`  | `ci.yml` の backend / `cd-app.yml` の build → migrate → deploy-api      |
+| `FRONTEND_ENABLED` | `ci.yml` の frontend / `cd-app.yml` の frontend                         |
+| `INFRA_ENABLED`    | `ci.yml` の infra / `cd-infra.yml` の plan・apply（手動 dispatch 含む） |
 
 対象外: `ci.yml` の `scripts` ジョブ・`scaffold` ジョブ（#294。どのエリアにも属さない）・
 `gen-types` ジョブ（#638。backend/backend-go/frontend 横断のため、いずれかが変更された
 ときに実行——専用スイッチではなく3エリアの変更検知の OR で `should_run` を決めている）、
 sandbox 系ワークフロー（`ci-sandbox.yml` / `cd-app-sandbox.yml` / `cd-infra-sandbox.yml`）。
+`ci.yml` の backend-go は `BACKEND_GO_ENABLED` で止めるが、これは極性が逆（オプトイン）
+——下記「オプトイン方式のスイッチ」を参照。
 
 ## 前提
 
@@ -42,7 +43,6 @@ sandbox 系ワークフロー（`ci-sandbox.yml` / `cd-app-sandbox.yml` / `cd-in
 ```bash
 # 停止（値は文字列 "false" — これ以外の値はすべて「有効」扱い）
 gh variable set BACKEND_ENABLED --body "false"
-gh variable set BACKEND_GO_ENABLED --body "false"
 gh variable set FRONTEND_ENABLED --body "false"
 gh variable set INFRA_ENABLED --body "false"
 
@@ -85,7 +85,7 @@ gh variable delete BACKEND_ENABLED
 
 ## オプトイン方式のスイッチ（別方式・デフォルト無効）
 
-以下の2つは、上記のエリア別スイッチとは**極性が逆**の専用スイッチ。混同しないよう
+以下の3つは、上記のエリア別スイッチとは**極性が逆**の専用スイッチ。混同しないよう
 区別して扱うこと。
 
 | 項目           | エリア別スイッチ（本書冒頭）                              | オプトイン方式                                                   |
@@ -129,6 +129,22 @@ gh variable set INFRA_APPLY_ENABLED --body "true"
 
 # 無効化に戻す（apply 後は速やかに戻すことを推奨）
 gh variable delete INFRA_APPLY_ENABLED
+```
+
+### `BACKEND_GO_ENABLED`（`ci.yml` の `backend-go`）
+
+services/backend/go（Lambda-only、ADR-0024）はまだ Phase 3（#640）で CD 未実装の実験的
+エリアなので、他のエリア別スイッチ（デフォルト有効）とは逆に、使う作業ブランチ／PR で
+明示的に `true` を設定したときだけ CI が走るオプトインにしている。未設定・削除時は
+無効（skip）。`ci-sandbox.yml` の `backend-go` はこのスイッチの対象外（同ファイルは
+全エリア無条件実行、#153 finding 7 の設計）。
+
+```bash
+# 有効化（backend-go に変更を入れて検証したい間だけ）
+gh variable set BACKEND_GO_ENABLED --body "true"
+
+# 無効化に戻す（既定に戻すだけなら削除でよい）
+gh variable delete BACKEND_GO_ENABLED
 ```
 
 ## 関連ドキュメント

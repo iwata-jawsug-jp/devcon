@@ -2,10 +2,17 @@
 #
 # cd-app.yml / cd-app-sandbox.yml が必要とするアプリ層のリポジトリ変数を、対象環境
 # （dev/prod/sandbox）の infra/（アプリ層。infra/bootstrap/ ではない）terraform output
-# から自動登録する。--clear を付けると逆に該当環境の12変数を削除する（#631: teardown後も
+# から自動登録する。--clear を付けると逆に該当環境の変数を削除する（#631: teardown後も
 # 変数が残ると、実在しないAWSリソースを指したまま cd-app(-sandbox).yml の preflight が
 # `configured=true` と誤判定し、build/frontend 段階の分かりにくいエラーで初めて気づく
 # 事故が実際に起きた）。
+#
+# --clear の対象は環境で決め方が違う（#670）:
+#   dev / sandbox -> リポジトリに実在する "<接頭辞>*" を列挙して全て削除。このスクリプト
+#                    以外の経路で手で登録された変数（#640 の SANDBOX_WORKER_* が実例）も
+#                    確実に消せる。使い捨て環境では接頭辞付き = その環境の持ち物と言い切れる
+#   prod          -> 下の MAPPINGS の12個だけを名指しで削除。接頭辞が無いため列挙方式だと
+#                    AWS_DEPLOY_ROLE_ARN / PROJECT_NAME 等まで巻き込む
 #
 # 対応表（docs/repository-variables.md「3. 本番アプリ用」「4. sandbox用」参照）:
 #   prod    -> 接頭辞なし（例: ECR_REPOSITORY）  … cd-app.yml が消費
@@ -49,9 +56,14 @@ Usage: write-cd-app-vars.sh <dev|prod|sandbox> [options]
 
 対象環境の infra/（アプリ層）terraform output から、cd-app.yml / cd-app-sandbox.yml
 （および将来の cd-app-dev.yml）が必要とするリポジトリ変数12個を登録する。
---clear を付けると、登録の代わりに該当環境の12変数を削除する（infra/env/ の terraform
+--clear を付けると、登録の代わりに該当環境の変数を削除する（infra/env/ の terraform
 output は読まない・AWS認証も不要）。terraform destroy 後に実行し、実在しないリソースを
 指したままの変数が cd-app(-sandbox).yml の preflight を誤って通過させる事故（#631）を防ぐ。
+削除対象の決め方は環境で異なる（#670）:
+  dev / sandbox  リポジトリに実在する「接頭辞つきの変数」を全て列挙して削除する。
+                 このスクリプト以外で手で登録された変数も確実に消える。
+  prod           接頭辞が無く列挙すると無関係な変数を巻き込むため、上記12個だけを
+                 名指しで削除する。
 
 Arguments:
   dev       DEV_ 接頭辞（現時点でどの workflow も消費しない予定枠）
@@ -188,11 +200,47 @@ for entry in "${MAPPINGS[@]}"; do
 done
 
 if $clear_mode; then
+  # 削除対象の決め方は環境で変える（#670）。
+  #
+  #   dev / sandbox（接頭辞あり）: リポジトリに実在する "<PREFIX>*" を列挙して全て消す。
+  #   prod（接頭辞なし）:          MAPPINGS の12個だけを名指しで消す。
+  #
+  # 上の MAPPINGS は infra/outputs.tf に対応する12個の固定リストなので、**このスクリプト
+  # 以外の経路で登録された変数を知らない**。実際 SANDBOX_WORKER_ECR_REPOSITORY /
+  # _LAMBDA_FUNCTION_NAME / _SQS_QUEUE_URL の3つは、#640 の worker（main にはまだ無く
+  # sandbox ブランチにしかない）のために手で登録され、teardown 後も --clear をすり抜けて
+  # 残り続けた。--clear が防ぐはずだった #631 の事故（実在しないリソースを指す変数が残り、
+  # cd-app-sandbox.yml の preflight が configured=true と誤判定して分かりにくい
+  # NoSuchBucket / repository does not exist で初めて気づく）と同型の残骸を、事故防止機構
+  # 自身が取りこぼしていた。
+  #
+  # 使い捨て環境では「接頭辞が付いているものは全部その環境の持ち物」と言い切れるので、
+  # 列挙方式なら手で足された変数も確実に消える。prod で同じことをすると接頭辞が無いため
+  # AWS_DEPLOY_ROLE_ARN / PROJECT_NAME / エリア別スイッチまで巻き込むので、そちらは
+  # 保守的に名指しのままにする（prod で --clear を使うのは本番インフラを畳むときだけで、
+  # 稀な操作ほど明示的な方が安全）。
+  clear_targets=()
+  if [[ -n "$PREFIX" ]]; then
+    clear_strategy="接頭辞 '${PREFIX}' で実在する変数を列挙"
+    while IFS= read -r var_name; do
+      [[ -n "$var_name" ]] && clear_targets+=("$var_name")
+    done < <(gh_t variable list --repo "$org/$repo" --json name --jq \
+      ".[] | select(.name | startswith(\"${PREFIX}\")) | .name" 2>/dev/null || true)
+  else
+    clear_strategy="MAPPINGS の固定リスト（prod は接頭辞が無く、列挙すると無関係な変数を巻き込むため）"
+    clear_targets=("${VAR_SUFFIXES[@]}")
+  fi
+
   echo
   echo "==> 環境: $env_name  接頭辞: '${PREFIX:-(なし)}'"
-  echo "    ${org}/${repo} から以下の${#VAR_SUFFIXES[@]}個のリポジトリ変数を削除します"
+  echo "    対象の決め方: ${clear_strategy}"
+  if [[ ${#clear_targets[@]} -eq 0 ]]; then
+    echo "    削除対象はありません（既に未登録）。"
+    exit 0
+  fi
+  echo "    ${org}/${repo} から以下の${#clear_targets[@]}個のリポジトリ変数を削除します"
   echo "    （terraform output は読まない・AWS認証は不要）:"
-  printf '      - %s\n' "${VAR_SUFFIXES[@]/#/$PREFIX}"
+  printf '      - %s\n' "${clear_targets[@]}"
   if ! $yes; then
     read -r -p "続行しますか？ [y/N] " ans
     [[ "$ans" =~ ^[Yy]$ ]] || {
@@ -202,19 +250,19 @@ if $clear_mode; then
   fi
 
   deleted_count=0
-  for suffix in "${VAR_SUFFIXES[@]}"; do
-    var_name="${PREFIX}${suffix}"
+  for var_name in "${clear_targets[@]}"; do
     if gh_t variable delete "$var_name" --repo "$org/$repo" >/dev/null 2>&1; then
       echo "  [deleted] $var_name"
       deleted_count=$((deleted_count + 1))
     else
       # 既に未登録なら削除は失敗するが、目的（未登録状態）は既に満たされているので
-      # 冪等に成功扱いとする。
+      # 冪等に成功扱いとする。列挙方式では通常ここには来ない（実在するものだけを対象に
+      # しているため）が、列挙と削除の間に他者が消した場合に備えて残す。
       echo "  [skip] $var_name（既に未登録）"
     fi
   done
   echo
-  echo "==> 完了: ${deleted_count}/${#VAR_SUFFIXES[@]}件 削除（残りは既に未登録でした）"
+  echo "==> 完了: ${deleted_count}/${#clear_targets[@]}件 削除（残りは既に未登録でした）"
   exit 0
 fi
 

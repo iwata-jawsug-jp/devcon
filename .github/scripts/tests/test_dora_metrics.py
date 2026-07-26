@@ -102,7 +102,7 @@ class CollectIntegrationTests(unittest.TestCase):
         commit_lookups = []
 
         class FakeClient:
-            def __init__(self, owner, repo, token):
+            def __init__(self, owner, repo, token, branch="main"):
                 pass
 
             def list_workflow_runs(self, since, until):
@@ -137,7 +137,7 @@ class CollectIntegrationTests(unittest.TestCase):
         run2_frontend_completed = _dt("2026-06-09T11:00:00Z")
 
         class FakeClient:
-            def __init__(self, owner, repo, token):
+            def __init__(self, owner, repo, token, branch="main"):
                 pass
 
             def list_workflow_runs(self, since, until):

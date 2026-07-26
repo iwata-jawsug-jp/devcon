@@ -166,14 +166,17 @@ jobs:
   # construction: `environment:` changes the OIDC token's `sub` claim to
   # `repo:<org>/<repo>:environment:<name>`, and infra/bootstrap's deploy-role
   # trust policy only grants that for the literal name `production` (plus
-  # `ref:refs/heads/main`, which both jobs already satisfy via the `github.ref`
-  # check below). A dynamically-named `environment: ${{ inputs.environment }}`
+  # `ref:refs/heads/main` — a Terraform-side literal, infra/bootstrap/locals.tf —
+  # which both jobs currently satisfy via the default-branch check below since
+  # main is this repo's default branch; renaming it needs that literal updated
+  # too, the `if:` check alone can't widen what AWS actually trusts). A
+  # dynamically-named `environment: ${{ inputs.environment }}`
   # would silently break dev applies the same way #392/#393 broke
   # cd-app-sandbox.yml (see cd-infra-verify.yml for the same reasoning applied
   # to golden-path-verify). apply-dev therefore declares no `environment:` at
   # all; apply-prod keeps the existing `environment: production`.
   apply-dev:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.INFRA_ENABLED != 'false' && vars.INFRA_APPLY_ENABLED == 'true' && github.event.inputs.environment == 'dev' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch && vars.INFRA_ENABLED != 'false' && vars.INFRA_APPLY_ENABLED == 'true' && github.event.inputs.environment == 'dev' }}
     runs-on: ubuntu-latest
     # Manual-only (workflow_dispatch) — this IS the gate. See apply-prod below
     # for why no `environment:` is declared here.
@@ -219,7 +222,7 @@ jobs:
             -var-file=env/${{ env.TF_ENV }}.tfvars
 
   apply-prod:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.INFRA_ENABLED != 'false' && vars.INFRA_APPLY_ENABLED == 'true' && github.event.inputs.environment == 'prod' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch && vars.INFRA_ENABLED != 'false' && vars.INFRA_APPLY_ENABLED == 'true' && github.event.inputs.environment == 'prod' }}
     runs-on: ubuntu-latest
     # Manual-only (workflow_dispatch) — this IS the gate. The `production`
     # environment records the deployment; required-reviewer gating would need a

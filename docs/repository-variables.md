@@ -31,14 +31,14 @@ GitHub Actions の各ワークフロー（`ci.yml` / `cd-infra*.yml` / `cd-app*.
 CI/CD の一部ジョブを一時停止/有効化するキルスイッチ。**極性が2種類ある**ので注意（下表の
 「極性」列）。
 
-| 変数名                | 参照する workflow・job                                            | 用途                                                                                                                      | 極性                         | 未設定時の挙動                                              |
-| --------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------- |
-| `BACKEND_ENABLED`     | `ci.yml`（backend）/ `cd-app.yml`（build → migrate → deploy-api） | backend エリアの一時停止                                                                                                  | オプトアウト（`!= 'false'`） | 有効（デフォルト実行）                                      |
-| `BACKEND_GO_ENABLED`  | `ci.yml`/`ci-sandbox.yml`（backend-go）                           | backend-go（services/backend/go、ADR-0024）エリアの一時停止。CD は未実装（Phase 3、#640）                                 | オプトアウト                 | 有効                                                        |
-| `FRONTEND_ENABLED`    | `ci.yml`（frontend）/ `cd-app.yml`（frontend）                    | frontend エリアの一時停止                                                                                                 | オプトアウト                 | 有効                                                        |
-| `INFRA_ENABLED`       | `ci.yml`（infra）/ `cd-infra.yml`（plan、手動 dispatch 含む）     | infra エリアの一時停止                                                                                                    | オプトアウト                 | 有効                                                        |
-| `INFRA_APPLY_ENABLED` | `cd-infra.yml`（`apply-dev`/`apply-prod`）                        | apply 実行の二重鍵（`workflow_dispatch` 限定に加えて、対象は `environment` 入力で `dev`/`prod` を選択・デフォルト `dev`） | オプトイン（`== 'true'`）    | 無効（`apply-dev`/`apply-prod` スキップ）                   |
-| `LIVE_SMOKE_ENABLED`  | `cd-app.yml`（`smoke-test`、第4のゲート）                         | 実ブラウザ E2E スモークテストの実行可否                                                                                   | オプトイン（`== 'true'`）    | 無効（`smoke-test` スキップ、デプロイ自体はブロックしない） |
+| 変数名                | 参照する workflow・job                                            | 用途                                                                                                                                       | 極性                         | 未設定時の挙動                                              |
+| --------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ----------------------------------------------------------- |
+| `BACKEND_ENABLED`     | `ci.yml`（backend）/ `cd-app.yml`（build → migrate → deploy-api） | backend エリアの一時停止                                                                                                                   | オプトアウト（`!= 'false'`） | 有効（デフォルト実行）                                      |
+| `BACKEND_GO_ENABLED`  | `ci.yml`（backend-go）                                            | backend-go（services/backend/go、ADR-0024）エリアの実行可否。CD は未実装（Phase 3、#640）。`ci-sandbox.yml` は対象外（全エリア無条件実行） | オプトイン（`== 'true'`）    | 無効（`backend-go` スキップ）                               |
+| `FRONTEND_ENABLED`    | `ci.yml`（frontend）/ `cd-app.yml`（frontend）                    | frontend エリアの一時停止                                                                                                                  | オプトアウト                 | 有効                                                        |
+| `INFRA_ENABLED`       | `ci.yml`（infra）/ `cd-infra.yml`（plan、手動 dispatch 含む）     | infra エリアの一時停止                                                                                                                     | オプトアウト                 | 有効                                                        |
+| `INFRA_APPLY_ENABLED` | `cd-infra.yml`（`apply-dev`/`apply-prod`）                        | apply 実行の二重鍵（`workflow_dispatch` 限定に加えて、対象は `environment` 入力で `dev`/`prod` を選択・デフォルト `dev`）                  | オプトイン（`== 'true'`）    | 無効（`apply-dev`/`apply-prod` スキップ）                   |
+| `LIVE_SMOKE_ENABLED`  | `cd-app.yml`（`smoke-test`、第4のゲート）                         | 実ブラウザ E2E スモークテストの実行可否                                                                                                    | オプトイン（`== 'true'`）    | 無効（`smoke-test` スキップ、デプロイ自体はブロックしない） |
 
 詳細（設定手順・動作確認・注意事項）: [ci-cd-area-switches.md](ci-cd-area-switches.md)
 
@@ -78,12 +78,21 @@ CI/CD の一部ジョブを一時停止/有効化するキルスイッチ。**�
 `write-cd-app-vars.sh` は環境ごとに接頭辞を切り替えるのでこの誤登録が起きない
 （sandbox 実行時に接頭辞なしの名前へ書き込むことはない）。
 
-**sandbox を `cd-infra-sandbox.yml` の `destroy` で teardown したら、この12個の変数も
-`./tools/script/write-cd-app-vars.sh sandbox --clear` で削除すること。** 変数を残したまま
-にすると、実在しないリソースを指したまま `cd-app-sandbox.yml` の `preflight` が
+**sandbox を `cd-infra-sandbox.yml` の `destroy` で teardown したら、
+`./tools/script/write-cd-app-vars.sh sandbox --clear` で変数も削除すること。** 変数を残した
+ままにすると、実在しないリソースを指したまま `cd-app-sandbox.yml` の `preflight` が
 `configured=true` と誤判定し、`build`/`frontend` 段階で `NoSuchBucket`/
 `repository does not exist` のような分かりにくいエラーとして失敗する（#631で実際に発生）。
 `destroy` ジョブの job summary にもこのコマンドを実行するよう促すリマインダーが出る。
+
+> **`--clear` は下表の12個ではなく、`SANDBOX_` で始まる変数を実際に列挙して全て消す**
+> （dev も同様、#670）。ブランチ固有の機能のために手で登録された変数も対象に含めるため。
+> 実例として、#640 の worker（`worker.tf` は main に無く sandbox ブランチにしか存在しない）
+> のために手動登録された `SANDBOX_WORKER_ECR_REPOSITORY` /
+> `SANDBOX_WORKER_LAMBDA_FUNCTION_NAME` / `SANDBOX_WORKER_SQS_QUEUE_URL` の3つが、
+> 固定リスト方式だった頃の `--clear` をすり抜けて teardown 後も残り続けた。
+> **prod だけは接頭辞が無いため列挙方式が使えず**（`AWS_DEPLOY_ROLE_ARN` / `PROJECT_NAME` /
+> エリア別スイッチまで巻き込む）、カテゴリ3の12個を名指しで削除する従来どおりの挙動。
 
 | 変数名                               | 対応する本番用変数（カテゴリ3） |
 | ------------------------------------ | ------------------------------- |

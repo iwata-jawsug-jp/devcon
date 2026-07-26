@@ -30,9 +30,10 @@ jobs:
   changes:
     uses: ./.github/workflows/reusable-changes.yml
 
-  # Per-area kill switches: repository variables BACKEND_ENABLED / BACKEND_GO_ENABLED /
-  # FRONTEND_ENABLED / INFRA_ENABLED gate both CI and CD jobs for that area. Compared with
-  # `!= 'false'` so an unset variable (e.g. on the public mirror / forks) defaults to enabled.
+  # Per-area kill switches: repository variables BACKEND_ENABLED / FRONTEND_ENABLED /
+  # INFRA_ENABLED gate both CI and CD jobs for that area. Compared with `!= 'false'` so an
+  # unset variable (e.g. on the public mirror / forks) defaults to enabled. BACKEND_GO_ENABLED
+  # below is the odd one out — opt-in, default disabled (docs/ci-cd-area-switches.md).
   backend:
     needs: changes
     uses: ./.github/workflows/reusable-backend.yml
@@ -41,11 +42,13 @@ jobs:
 
   # services/backend/go (Lambda-only, ADR-0024) — separate switch from BACKEND_ENABLED
   # (the Python backend) since the two are independent services with independent CI cost.
+  # Opt-in, not opt-out like the other area switches: default disabled, enable explicitly with
+  # `gh variable set BACKEND_GO_ENABLED --body true` per docs/ci-cd-area-switches.md.
   backend-go:
     needs: changes
     uses: ./.github/workflows/reusable-backend-go.yml
     with:
-      should_run: ${{ needs.changes.outputs.backend_go == 'true' && vars.BACKEND_GO_ENABLED != 'false' }}
+      should_run: ${{ needs.changes.outputs.backend_go == 'true' && vars.BACKEND_GO_ENABLED == 'true' }}
 
   frontend:
     needs: changes
