@@ -23,6 +23,7 @@ Python / Node / セキュリティツールがすべて揃った状態になり�
 | ベース           | Ubuntu                                    | 22.04            |
 | 言語             | Python                                    | 3.14             |
 | 言語             | Node.js                                   | 24（major 固定） |
+| 言語             | Go（services/backend/go、ADR-0024）       | 1.26.5           |
 | Python 管理      | uv                                        | 0.11.24          |
 | スキャフォールド | copier（#294）                            | 9.17.0           |
 | IaC              | Terraform / tflint                        | 1.13.0 / 0.64.0  |
@@ -360,6 +361,12 @@ Terraform / tflint / trivy / checkov / uv / copier のバージョンは `.devco
 
 - Node.js は CI（`node-version: 24`）と同じく major のみ固定（`setup_24.x`）。minor は
   CI と同じ幅で float させる。
+- Go は他ツールと違い `.devcontainer/Dockerfile` の `ARG` ではなく、
+  `.devcontainer/devcontainer.json` の `features`（`ghcr.io/devcontainers/features/go:1`）
+  で固定する。上げるときはそこと、`reusable-backend-go.yml`（CI の `setup-go`）、
+  `services/backend/go/go.mod` の `go`/`toolchain` ディレクティブを同時に更新する
+  （単一ソースは devcontainer.json 側、他は追従）。golangci-lint のバージョンは
+  ルート `Makefile` の `GOLANGCI_LINT_VERSION`（`backend-go-setup`）が単一ソース。
 - Python（deadsnakes 3.14）は #110 の決定に従う（この節の対象外）。
 - AWS CLI v2 / gh / Claude Code は CI のゲート対象ではないため意図的に latest。
 

@@ -149,6 +149,35 @@ git push -u origin sandbox/main
 > **`terraform apply`/`destroy` と `aws:*`（変更系）は ask（都度確認）** に設定している。
 > 権限の自己拡張はエージェントではなく人がレビューして適用する運用。
 
+### ブランチ作成の push だけでは apply が起動しない（#651 の検証で判明）
+
+上記手順2の「push」が**ブランチの新規作成**だった場合、`cd-infra-sandbox.yml` の
+`paths:` フィルタ（`infra/**`）は評価されず、**`apply` ジョブは起動しない**
+（`CI (sandbox)` は `paths` を持たないので起動する — 片方だけ動くので気づきにくい）。
+
+`workflow_dispatch` は `confirm_destroy` を取る **destroy 専用**（`apply is push-only`）
+なので、この経路で初回 apply を起こすことはできない。**ブランチ作成後に `infra/**` を
+触る push をもう1回行う**（コメント1行の追加でよい）。
+
+### PR ブランチから sandbox 枝を切ると、その PR の必須チェックが汚染される
+
+`sandbox/<topic>` を **`main` ではなく作業中の PR ブランチから**切ると、両ブランチの
+先頭コミットが同一 SHA になる。GitHub のステータスチェックは **SHA + コンテキスト名**で
+管理されるため、同じ SHA に対して `CI (sandbox)` が生成する同名コンテキスト
+（`infra / check` など、ルールセット `main-ci-required` の必須チェックと同名）が
+**PR 側の結果を上書きする**。
+
+とくに sandbox 枝へ続けて push すると、先行の `CI (sandbox)` 実行が concurrency で
+`cancelled` になり、その **cancelled が失敗として必須チェックに反映されて PR が
+`BLOCKED` になる**（コード側には何の問題も無い）。
+
+対処は次のいずれか:
+
+- **sandbox 枝は `main` から切る**（[検証の流れ](#検証の流れ)の手順1どおり）。PR ブランチの
+  変更を実機検証したい場合は、`main` から切った sandbox 枝へ cherry-pick / merge する
+- 汚染してしまった場合は、当該 `CI (sandbox)` 実行を **re-run** して同名コンテキストを
+  成功で上書きするか、PR ブランチに新しいコミットを積んで SHA を変える
+
 ## デプロイ後 E2E スモークテスト（第4のゲート、#373・#376・ADR-0008）
 
 `cd-app-sandbox.yml` の `smoke-test` ジョブは、`deploy`/`frontend` の成功後に実ブラウザ

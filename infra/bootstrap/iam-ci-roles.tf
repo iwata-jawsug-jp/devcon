@@ -169,13 +169,3 @@ resource "aws_iam_role" "ci_deploy" {
   assume_role_policy = data.aws_iam_policy_document.deploy_assume_role.json
   description        = "Role assumed on merge to main to apply infra and deploy the app."
 }
-
-resource "aws_iam_policy" "ci_deploy_state" {
-  name   = "${local.name_prefix}-deploy-tfstate-access"
-  policy = data.aws_iam_policy_document.tfstate_access_deploy.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_deploy_state" {
-  role       = aws_iam_role.ci_deploy.name
-  policy_arn = aws_iam_policy.ci_deploy_state.arn
-}

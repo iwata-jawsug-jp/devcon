@@ -7,6 +7,18 @@
 # not because a violation is currently expected.
 package main
 
+# Which second dimension is required depends on the layer (#657, when `conftest test` started
+# covering `infra/bootstrap` too). The app layer is deployed once per environment and tags
+# `Environment`; `infra/bootstrap` is applied once per *account* and has no environment to
+# name, so its provider tags `Layer = "bootstrap"` instead (infra/bootstrap/providers.tf).
+# Requiring `Environment` there would flag every bootstrap resource for a tag that would be
+# meaningless if it existed.
+resource_layer(after) := object.get(after.tags_all, "Layer", "")
+
+required_tags(after) := {"Project", "Layer"} if resource_layer(after) == "bootstrap"
+
+required_tags(after) := {"Project", "Environment"} if resource_layer(after) != "bootstrap"
+
 deny contains msg if {
 	rc := input.resource_changes[_]
 	after := rc.change.after
@@ -17,7 +29,7 @@ deny contains msg if {
 	# value, so untaggable resources are skipped rather than flagged as "missing tags".
 	is_object(after.tags_all)
 
-	required := {"Project", "Environment"}
+	required := required_tags(after)
 	present_keys := {k | after.tags_all[k]}
 	missing := required - present_keys
 	count(missing) > 0

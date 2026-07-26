@@ -17,7 +17,7 @@
     "test:e2e": "playwright test",
     "lhci": "lhci autorun",
     "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
-    "gen-types": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.ts",
+    "gen-types:python": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.python.ts",
     "design:lint": "designmd lint ../../docs/frontend-design.md",
     "design:gen-theme": "node scripts/gen-design-tokens.mjs"
   },
@@ -60,6 +60,7 @@
   "overrides": {
     "tmp": "^0.2.6",
     "uuid": "^11.1.1",
-    "js-yaml": "^4.3.0"
+    "js-yaml": "^4.3.0",
+    "fast-uri": "^3.1.4"
   }
 }

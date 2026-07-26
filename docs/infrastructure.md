@@ -591,18 +591,40 @@ Web UI での設定・動作確認・注意事項の詳細は
      でも実行するが、実際の plan に対する `conftest test` は plan JSON が必要なためこの `plan`
      ジョブでのみ実行する。ポリシー追加は `infra/policy/` に `.rego` + `_test.rego` を足すだけで、
      ワークフロー変更は不要。ブロッキング（Count→Block の段階導入はしない — 理由は ADR-0017
-     参照）。現在のポリシー一覧:
-     - `tags.rego` — 必須タグ（Project/Environment）
-     - `iam_wildcard.rego` — 識別ポリシーの Allow ステートメントでのワイルドカードアクション禁止
+     参照）。
+
+     **`infra/bootstrap/` も同じルールで検査する（#657）。** `plan` ジョブが
+     `make policy-test-bootstrap` を実行する。`infra/bootstrap/` はローカル state で手動適用
+     するため CI に plan 対象の state が無く、**合成変数を使って空の state から plan する**
+     （一時ディレクトリへ `.tf` をコピーして実行するので、手元の実 state を触らない）。
+     rego はレンダリング済みドキュメントの**形**（ワイルドカードアクション、リージョン条件、
+     必須タグ）しか見ないため、実際の project 名・アカウント・サフィックスに依存しない。
+     この経路が無かった間は、`ci_deploy` のポリシーが下記の規約に違反しても CI は緑のまま
+     通っていた（ゲートが機能しているように見えて、このリポジトリが最も気にしている IAM を
+     1つも見ていない状態だった）。現在のポリシー一覧:
+     - `tags.rego` — 必須タグ（app 層は Project/Environment、`Layer = "bootstrap"` の
+       リソースは Project/Layer。bootstrap はアカウントに1回だけ適用する層で、名乗るべき
+       environment が無いため）
+     - `iam_wildcard.rego` — 識別ポリシーの Allow ステートメントでのワイルドカードアクション禁止。
+       名前が `-boundary` で終わるポリシーは対象外（許可の境界は権限の付与ではなく上限の設定で、
+       `Action: "*"` を含むのが正常 — [ADR-0027](adr/0027-ci-deploy-permissions-boundary-and-scoped-wildcards.md)
+       第1層）
      - `region_condition.rego` — 識別ポリシーの region 依存アクション（EC2/ECS/ECR/RDS/
        CloudWatch Logs/ELB/Application Auto Scaling）に `aws:RequestedRegion` 条件を必須化
        （#285 再発防止）。app 層の plan JSON と `infra/bootstrap/` の state JSON の両方の
-       スキーマに対応しているため、`infra/bootstrap/` 変更時は accessanalyzer 検証と同様に
-       ローカルで手動実行する:
+       スキーマに対応している。`infra/bootstrap/` は #657 以降 CI（`plan` ジョブの
+       `make policy-test-bootstrap`）が自動で検査するので手動実行は不要になったが、
+       手元の実 state に対して確認したい場合は次でもよい:
        ```bash
        cd infra/bootstrap && terraform show -json terraform.tfstate > /tmp/bootstrap-state.json
        conftest test --policy ../policy /tmp/bootstrap-state.json
        ```
+     - `iam_managed_policy_attachment.rego` — AWS マネージドポリシー
+       （`arn:aws:iam::aws:policy/*`）のアタッチを（ロール, ポリシー）の組の許可リストで
+       制限（#666）。他の IAM ルールがポリシー**文書**しか見ないため、
+       `PowerUserAccess` を1行アタッチするだけで全ブロッキングゲートを素通りできる穴が
+       あった（Checkov の類似検査は `--soft-fail` 運用でブロックしない）。
+       正当な AWS マネージドアタッチを増やすときは、この許可リストに追記する
      - `network_endpoints.rego` — private route table に NAT 経路が無いこと、必須の VPC
        interface endpoint（ECR/Logs/Secrets Manager/Cognito IDP）が揃っていること（#369 再発防止）
      - `csp.rego` — CloudFront の CSP `connect-src` が Cognito オリジンを許可していること

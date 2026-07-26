@@ -1,0 +1,7 @@
+tmp/
+api
+.env
+.env.*
+!.env.example
+Dockerfile
+.dockerignore

@@ -10,6 +10,8 @@ on:
     outputs:
       backend:
         value: ${{ jobs.check.outputs.backend }}
+      backend_go:
+        value: ${{ jobs.check.outputs.backend_go }}
       frontend:
         value: ${{ jobs.check.outputs.frontend }}
       infra:
@@ -28,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
+      backend_go: ${{ steps.filter.outputs.backend_go }}
       frontend: ${{ steps.filter.outputs.frontend }}
       infra: ${{ steps.filter.outputs.infra }}
       scripts: ${{ steps.filter.outputs.scripts }}
@@ -40,6 +43,9 @@ jobs:
           filters: |
             backend:
               - 'services/backend/python/**'
+              - '.github/workflows/**'
+            backend_go:
+              - 'services/backend/go/**'
               - '.github/workflows/**'
             frontend:
               - 'services/frontend/**'

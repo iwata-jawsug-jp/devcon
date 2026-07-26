@@ -5,5 +5,6 @@ dev-dist/
 coverage/
 playwright-report/
 test-results/
-# Generated from the API's OpenAPI schema by `make gen-types` — never format or edit
-src/api/schema.ts
+# Generated from each backend's OpenAPI schema by `make gen-types` — never format or edit
+src/api/schema.python.ts
+src/api/schema.go.ts

@@ -171,7 +171,8 @@ services/frontend/
     ├── stores/               # Pinia ストア（counter.ts、クライアントのみの状態）
     └── api/                  # API アクセスの単一窓口
         ├── client.ts         #   typed な ApiClient / apiClient
-        ├── schema.ts         #   ★ OpenAPI から生成（手で編集しない）
+        ├── schema.python.ts  #   ★ Python backend の OpenAPI から生成（手で編集しない）
+        ├── schema.go.ts      #   ★ Go backend の OpenAPI から生成（同上、#639まで未使用）
         ├── queries.ts        #   TanStack Query の composable（useHealthQuery 等）
         └── index.ts
 ```
@@ -318,15 +319,29 @@ CI（`ci.yml`）が強制するしきい値と計測方法。数値は現状の�
 ## API 型生成（`make gen-types`）
 
 フロントの型はバックエンドの OpenAPI から生成する。**手書きで二重管理しない。**
+`services/backend/python`（FastAPI）と `services/backend/go`（huma、ADR-0024）の両方が
+`/openapi.json` を持ち、`make gen-types` は両方を単一の生成パイプラインで処理する
+（#638、Epic #636 §7 決定事項）。
 
 ```bash
 make gen-types
 ```
 
-- 内部では backend の `app.openapi()` を JSON にダンプし、`openapi-typescript` で
-  `services/frontend/src/api/schema.ts` を生成する（サーバ起動は不要）。
-- `schema.ts` は生成物。直接編集せず、API 変更時に再生成してコミットする。
-- `client.ts` は生成された `paths` 型を取り込み、型安全な窓口を提供する。
+- 内部では Python backend の `app.openapi()` を JSON にダンプし（`uv run python -c ...`）、
+  Go backend は `go run ./cmd/api openapi`（`huma.API.OpenAPI()` を直接 JSON 化）で同様に
+  ダンプする——どちらもサーバ起動は不要。
+- **サービス別に出力ファイルを分割**する方針で型名衝突を回避（#638 で決定）:
+  `openapi-typescript` を 2 回実行し、`services/frontend/src/api/schema.python.ts` と
+  `schema.go.ts` をそれぞれ生成する。単一ファイルへの namespace 統合は行わない
+  （2 サービスが独立して進化するため、ファイル分割の方が既存コードへの影響が小さい）。
+- どちらも生成物。直接編集せず、API 変更時に再生成してコミットする。
+- `client.ts` は現状 `schema.python.ts` の `paths`/`components` のみ取り込む。`schema.go.ts`
+  は Go backend が実際の HTTP エンドポイントを持つまで（Phase 2、#639）未使用のまま。
+- CI（`reusable-gen-types.yml`、`ci.yml`/`ci-sandbox.yml` の `gen-types` ジョブ）が
+  `make gen-types` を再実行し `git diff --exit-code` でドリフトを検知する。backend /
+  backend-go / frontend のどれが変わっても走る横断ジョブのため、専用の `*_ENABLED`
+  エリアスイッチは持たない（`scripts`/`scaffold` ジョブと同じ扱い、
+  [ci-cd-area-switches.md](ci-cd-area-switches.md) の対象外リスト参照）。
 
 > API の入出力を変えたら: スキーマ/ルーターを更新 → `make gen-types` → フロントを型に追従。
 

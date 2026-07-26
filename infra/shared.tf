@@ -21,11 +21,27 @@ data "aws_iam_policy_document" "ecs_assume" {
   }
 }
 
+# Permissions boundary every role created here must carry (ADR-0027 第1層, #656).
+# ci_deploy is only allowed to create/modify `${var.project}-*` roles when this
+# exact boundary is attached, so omitting it does not silently weaken anything --
+# the apply fails at CreateRole with AccessDenied.
+#
+# Read from SSM rather than derived: the boundary policy's name carries the
+# bootstrap's random suffix (infra/bootstrap/locals.tf), so this layer cannot
+# construct the ARN. infra/bootstrap publishes it at this project-scoped,
+# deterministic path (infra/bootstrap/iam-app-role-boundary.tf), which keeps the
+# handoff working for a fresh clone with no extra repo variable or workflow
+# plumbing -- and keeps `terraform plan` working locally.
+data "aws_ssm_parameter" "app_role_boundary_arn" {
+  name = "/${var.project}/bootstrap/app-role-boundary-arn"
+}
+
 # Task EXECUTION role: pulls the image, writes logs, and reads the DB secret.
 resource "aws_iam_role" "ecs_execution" {
-  name               = "${local.name_prefix}-ecs-exec"
-  assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
-  description        = "ECS task execution role (ECR pull, logs, secret fetch)."
+  name                 = "${local.name_prefix}-ecs-exec"
+  assume_role_policy   = data.aws_iam_policy_document.ecs_assume.json
+  description          = "ECS task execution role (ECR pull, logs, secret fetch)."
+  permissions_boundary = data.aws_ssm_parameter.app_role_boundary_arn.value
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_execution_managed" {
@@ -90,7 +106,8 @@ resource "aws_iam_role_policy" "ecs_execution_ecr_pull_through" {
 
 # Task role: the app runtime identity. No AWS API needs yet; kept for future use.
 resource "aws_iam_role" "ecs_task" {
-  name               = "${local.name_prefix}-ecs-task"
-  assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
-  description        = "ECS task role (application runtime identity)."
+  name                 = "${local.name_prefix}-ecs-task"
+  assume_role_policy   = data.aws_iam_policy_document.ecs_assume.json
+  description          = "ECS task role (application runtime identity)."
+  permissions_boundary = data.aws_ssm_parameter.app_role_boundary_arn.value
 }

@@ -23,8 +23,14 @@ jobs:
   backend:
     uses: ./.github/workflows/reusable-backend.yml
 
+  backend-go:
+    uses: ./.github/workflows/reusable-backend-go.yml
+
   frontend:
     uses: ./.github/workflows/reusable-frontend.yml
+
+  gen-types:
+    uses: ./.github/workflows/reusable-gen-types.yml
 
   infra:
     uses: ./.github/workflows/reusable-infra.yml

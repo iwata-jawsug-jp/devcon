@@ -7,7 +7,7 @@
 # 「実際に登録されている変数（gh variable list）」の3者を突き合わせ、ドリフト
 # （ドキュメント漏れ・廃止済み記載の残り・登録忘れ・orphan登録）を検出する。
 # check-devenv-setup.sh（bootstrap配線4個のみ）とは対象範囲が異なる — 本スクリプトは
-# 全33変数を対象にした横断チェック。CI では使わない — ローカル/devcontainer 専用。
+# 全34変数を対象にした横断チェック。CI では使わない — ローカル/devcontainer 専用。
 #
 # Usage: ./tools/script/check-repo-vars.sh
 #
@@ -55,7 +55,7 @@ DOC_FILE="docs/repository-variables.md"
 
 # ---- カテゴリ定義（docs/repository-variables.md と対応させること）----
 REQUIRED_VARS=(AWS_TF_STATE_BUCKET AWS_PLAN_ROLE_ARN AWS_DEPLOY_ROLE_ARN PROJECT_NAME)
-SWITCH_VARS=(BACKEND_ENABLED FRONTEND_ENABLED INFRA_ENABLED INFRA_APPLY_ENABLED LIVE_SMOKE_ENABLED)
+SWITCH_VARS=(BACKEND_ENABLED BACKEND_GO_ENABLED FRONTEND_ENABLED INFRA_ENABLED INFRA_APPLY_ENABLED LIVE_SMOKE_ENABLED)
 PROD_VARS=(ECR_REPOSITORY ECS_TASK_FAMILY ECS_CLUSTER ECS_SERVICE PRIVATE_SUBNET_IDS \
   APP_SECURITY_GROUP_ID WEB_BUCKET CLOUDFRONT_DISTRIBUTION_ID CLOUDFRONT_DOMAIN_NAME \
   COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_DOMAIN)
@@ -152,7 +152,7 @@ if [[ "$registered_available" == true ]]; then
     fi
   done
 
-  section "登録状況（エリア別/オプトインスイッチ・任意5個）"
+  section "登録状況（エリア別/オプトインスイッチ・任意6個）"
   for v in "${SWITCH_VARS[@]}"; do
     if grep -qx "$v" <<<"$registered_vars"; then
       info "$v 登録済み（docs/ci-cd-area-switches.md 参照）"

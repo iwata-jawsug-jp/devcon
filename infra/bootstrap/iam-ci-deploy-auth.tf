@@ -75,13 +75,3 @@ data "aws_iam_policy_document" "ci_deploy_auth" {
     }
   }
 }
-
-resource "aws_iam_policy" "ci_deploy_auth" {
-  name   = "${local.name_prefix}-deploy-auth"
-  policy = data.aws_iam_policy_document.ci_deploy_auth.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_deploy_auth" {
-  role       = aws_iam_role.ci_deploy.name
-  policy_arn = aws_iam_policy.ci_deploy_auth.arn
-}

@@ -853,18 +853,16 @@ cmd_recover() {
 
   local ro_policy_arn="arn:aws:iam::aws:policy/ReadOnlyAccess"
 
-  # ci_deploy_* リソースのアドレス suffix → main.tf のポリシー名 suffix
-  # （aws_iam_policy.<key> の name = "${project}-<suffix>"）。main.tf の
-  # 該当 resource ブロックにポリシーを追加/変更したら、ここも合わせて更新すること。
-  declare -A policy_suffix=(
-    [ci_deploy_state]="deploy-tfstate-access"
-    [ci_deploy_network]="deploy-network"
-    [ci_deploy_compute]="deploy-compute"
-    [ci_deploy_storage_cdn]="deploy-storage-cdn"
-    [ci_deploy_data]="deploy-data"
-    [ci_deploy_auth]="deploy-auth"
-    [ci_deploy_observability]="deploy-observability"
-    [ci_deploy_iam]="manage-project-iam"
+  # ci_deploy にアタッチするマネージドポリシーの名前 suffix。#652 でエリア別9本から
+  # 4グループへ統合したのに伴い、Terraform 側は for_each の
+  # aws_iam_policy.ci_deploy["<suffix>"] という単一リソースになっている
+  # （infra/bootstrap/iam-ci-deploy-policies.tf。policy document 自体はエリア別のまま）。
+  # グループを増減・改名したら、あちらの locals.ci_deploy_policies と合わせてここも更新すること。
+  local ci_deploy_policy_keys=(
+    "deploy-platform"
+    "deploy-runtime"
+    "deploy-datastore"
+    "deploy-edge"
   )
 
   # main.tf の全 managed resource（data source は除く）の address / import ID 対応表を組み立てる。
@@ -898,12 +896,20 @@ cmd_recover() {
   addresses+=("aws_iam_role_policy.agent_mcp_guardrails"); ids+=("${agent_mcp_role_name}:mcp-guardrails")
 
   local key policy_arn
-  for key in ci_deploy_state ci_deploy_network ci_deploy_compute ci_deploy_storage_cdn \
-    ci_deploy_data ci_deploy_auth ci_deploy_observability ci_deploy_iam; do
-    policy_arn="arn:aws:iam::${account_id}:policy/${project}-${suffix}-${policy_suffix[$key]}"
-    addresses+=("aws_iam_policy.${key}"); ids+=("$policy_arn")
-    addresses+=("aws_iam_role_policy_attachment.${key}"); ids+=("${deploy_role_name}/${policy_arn}")
+  for key in "${ci_deploy_policy_keys[@]}"; do
+    policy_arn="arn:aws:iam::${account_id}:policy/${project}-${suffix}-${key}"
+    addresses+=("aws_iam_policy.ci_deploy[\"${key}\"]"); ids+=("$policy_arn")
+    addresses+=("aws_iam_role_policy_attachment.ci_deploy[\"${key}\"]")
+    ids+=("${deploy_role_name}/${policy_arn}")
   done
+
+  # 許可の境界（#656、ADR-0027 第1層）。ci_deploy にアタッチするものではなく、
+  # ci_deploy が作る app 層ロールに強制する天井なので上のループには入らない。
+  # ARN は app 層が SSM 経由で読むため、パラメータ側も一緒に import する
+  # （#656 でこの2つを import 対応表に足し忘れており、#652 で気づいて追加した）。
+  local boundary_policy_arn="arn:aws:iam::${account_id}:policy/${project}-${suffix}-app-role-boundary"
+  addresses+=("aws_iam_policy.app_role_boundary"); ids+=("$boundary_policy_arn")
+  addresses+=("aws_ssm_parameter.app_role_boundary_arn"); ids+=("/${project}/bootstrap/app-role-boundary-arn")
 
   echo
   echo "==> terraform import を実行します（${#addresses[@]}件）..."

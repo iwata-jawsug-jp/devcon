@@ -20,6 +20,20 @@ the app-infra layer, which depends on the resources created here.
   Denies), assumed locally by a human via the AWS MCP Server (Claude Code) — not OIDC, not
   used by CI, never registered as a GitHub repo variable. See
   `docs/aws-temporary-credentials.md` for how to assume it from the devcontainer.
+- **Four managed policies** attached to `*-ci-deploy` (`*-deploy-platform` /
+  `*-deploy-compute` / `*-deploy-data` / `*-deploy-edge`). IAM allows 10 per role, and one
+  policy per area file had reached 9/10 — so the _documents_ stay one-per-area
+  (`iam-ci-deploy-<area>.tf`, which is the review unit) and only the `aws_iam_policy`
+  resources merge via `source_policy_documents` (#652). Each group renders to under 61% of
+  the 6,144-char per-policy quota, and a `precondition` fails the **plan** rather than the
+  apply if one ever exceeds 90%. Adding a new area file means adding its document to a group
+  in `iam-ci-deploy-policies.tf`, not a tenth attachment.
+- One **permissions boundary** (`*-app-role-boundary`, #656 / ADR-0027 第1層). It is _not_
+  attached to any role here — `ci_deploy` may only create or re-permission a `<project>-*`
+  role when that role carries this exact boundary, which is what closes the
+  "attach AdministratorAccess to myself" path. Its ARN is published to SSM at
+  `/<project>/bootstrap/app-role-boundary-arn`, which is how `infra/shared.tf` reads it.
+  A boundary does **not** count against the 10-managed-policies quota (measured, #652).
 
 Every IAM role/policy name above is actually `<project>-<suffix>-...` (`local.name_prefix`,
 locals.tf, #571) — `<suffix>` is a random 6-char token (`var.resource_name_suffix`, the same

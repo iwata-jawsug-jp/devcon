@@ -1,0 +1,19 @@
+# air (github.com/air-verse/air) hot reload — `make backend-go-dev`, the Go
+# equivalent of `uvicorn --reload` (Python's dev server, see root Makefile's
+# `backend-dev`).
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/api ./cmd/api"
+bin = "./tmp/api"
+include_ext = ["go"]
+exclude_dir = ["tmp", "internal/db"]
+exclude_regex = ["_test\\.go"]
+delay = 200
+
+[log]
+time = false
+
+[misc]
+clean_on_exit = true

@@ -25,7 +25,7 @@ npm run lint        # eslint .
 npm run format      # prettier --write .
 npm test            # vitest run (unit tests)
 npm run test:e2e    # playwright test (requires `npx playwright install`)
-npm run gen-types   # regenerate src/api/schema.ts from the backend OpenAPI doc
+npm run gen-types:python  # regenerate src/api/schema.python.ts against a running :8000 dev server
 ```
 
 ## API access
@@ -33,8 +33,11 @@ npm run gen-types   # regenerate src/api/schema.ts from the backend OpenAPI doc
 All backend calls go through the single typed client in `src/api/`:
 
 - `src/api/client.ts` — typed `fetch` wrapper against `/api` (e.g. `getHealth()`).
-- `src/api/schema.ts` — **generated** by `make gen-types` /
-  `npm run gen-types` (openapi-typescript). Do not edit by hand.
+- `src/api/schema.python.ts` / `src/api/schema.go.ts` — **generated** per-backend
+  (openapi-typescript), one file per service to avoid type-name collisions. Do not edit by
+  hand. `make gen-types` (repo root) regenerates both without needing either backend's dev
+  server running; `npm run gen-types:python` is a frontend-only shortcut against a running
+  Python dev server.
 - `src/api/index.ts` — public re-exports.
 
 Components import `apiClient` from `src/api` rather than calling `fetch` directly.

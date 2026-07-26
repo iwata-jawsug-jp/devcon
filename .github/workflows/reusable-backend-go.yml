@@ -1,0 +1,79 @@
+name: reusable-backend-go
+
+# ADR-0012 / #295 pattern, applied to the Go backend (services/backend/go, Lambda-only —
+# ADR-0024). Single source shared by ci.yml and ci-sandbox.yml so the two workflows can't
+# drift (#153 finding 7) — mirrors reusable-backend.yml's structure for the Python backend.
+
+on:
+  workflow_call:
+    inputs:
+      should_run:
+        description: >-
+          Whether to actually execute this gate (vs. report a skipped check).
+          Keeping the job always invoked (rather than gating with `if:` on the
+          caller side) keeps the status-check context name stable at
+          "backend-go / check" regardless of skip state — see ADR-0012.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: inputs.should_run
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend/go
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: services/backend/go/go.mod
+          cache-dependency-path: services/backend/go/go.sum
+      # Version pin must match Makefile's GOLANGCI_LINT_VERSION (backend-go-lint /
+      # backend-go-setup) — update both together, same convention as TERRAFORM_VERSION.
+      - name: golangci-lint (staticcheck + gosec + govet + errcheck + unused)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+          working-directory: services/backend/go
+      # No version pin (matches govulncheck's own documented usage): the vulnerability
+      # database it queries (vuln.go.dev) is what actually needs to be current, not the
+      # scanner binary.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - name: Build
+        run: go build ./...
+      # #639 (proposal §2.3.1): schema.sql / sqlcgen are generated from the Alembic-owned
+      # schema (services/backend/python) via `make gen-schema` — needs uv (to run Alembic)
+      # and sqlc, plus a real Postgres (`make db-up`, same docker-compose service used
+      # locally, not a separate Actions `services:` postgres — keeps CI and `make
+      # gen-schema`/`make backend-go-test` identical to local dev).
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install Python backend dependencies (for Alembic)
+        working-directory: services/backend/python
+        run: uv sync --all-extras --dev
+      # Version pin must match Makefile's SQLC_VERSION (gen-schema) — update both together.
+      - name: Install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+      - name: gen-schema (pg_dump snapshot + sqlc generate)
+        working-directory: .
+        run: make gen-schema
+      - name: Fail if schema.sql / sqlc generated code drifted from Alembic
+        working-directory: .
+        run: |
+          if ! git diff --exit-code -- services/backend/go/internal/db/schema.sql services/backend/go/internal/db/sqlcgen/; then
+            echo "::error::internal/db/schema.sql or internal/db/sqlcgen/ is out of date. Run 'make gen-schema' locally (after 'make migrate') and commit the result."
+            exit 1
+          fi
+      - name: Test
+        run: go test ./...

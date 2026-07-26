@@ -16,6 +16,9 @@
       "version": "latest",
       "moby": true,
       "dockerDashComposeVersion": "v2"
+    },
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "1.26.5"
     }
   },
   "runArgs": ["--privileged"],
@@ -32,6 +35,7 @@
         "hashicorp.terraform",
         "ms-python.python",
         "ms-python.vscode-pylance",
+        "golang.go",
         "amazonwebservices.aws-toolkit-vscode",
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",

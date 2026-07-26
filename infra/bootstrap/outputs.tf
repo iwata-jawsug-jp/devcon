@@ -23,6 +23,11 @@ output "agent_mcp_role_arn" {
   value       = aws_iam_role.agent_mcp.arn
 }
 
+output "app_role_boundary_arn" {
+  description = "Permissions boundary the app layer must attach to every role it creates (ADR-0027 第1層). Also published to SSM at /<project>/bootstrap/app-role-boundary-arn, which is how infra/shared.tf actually reads it -- this output is for humans and for `terraform output` based checks."
+  value       = aws_iam_policy.app_role_boundary.arn
+}
+
 output "resource_name_suffix" {
   description = "Pass-through of var.resource_name_suffix, so tools/script/bootstrap.sh can recover it via `terraform output` if terraform.auto.tfvars is lost but local state survives."
   value       = var.resource_name_suffix

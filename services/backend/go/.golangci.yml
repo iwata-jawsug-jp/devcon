@@ -1,0 +1,18 @@
+version: '2'
+
+# golangci-lint v2 (proposal §3.1: "meta-linter + staticcheck + gosec" as the
+# Go equivalent of ruff+mypy). Run via `make backend-go-lint` / CI
+# (reusable-backend-go.yml) / pre-commit — same command everywhere.
+linters:
+  default: standard
+  enable:
+    - staticcheck
+    - gosec
+    - govet
+    - errcheck
+    - unused
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

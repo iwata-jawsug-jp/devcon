@@ -46,8 +46,21 @@ data "aws_iam_policy_document" "ci_deploy_network" {
       "ec2:AuthorizeSecurityGroupEgress",
       "ec2:RevokeSecurityGroupIngress",
       "ec2:RevokeSecurityGroupEgress",
-      "ec2:UpdateSecurityGroupRuleDescriptionsIngress",
-      "ec2:UpdateSecurityGroupRuleDescriptionsEgress",
+      # In-place update of a rule declared with the modern
+      # aws_vpc_security_group_{ingress,egress}_rule resources (network.tf,
+      # endpoints.tf use these exclusively) -- changing a description, port
+      # range, CIDR or referenced SG makes the provider call
+      # ModifySecurityGroupRules rather than revoke+authorize. Never hit so far
+      # because the sandbox rebuilds from scratch every time and only exercises
+      # the create path; the first in-place edit on main would have failed with
+      # AccessDenied (#651, found by static audit, not by a real apply).
+      #
+      # The older UpdateSecurityGroupRuleDescriptions{Ingress,Egress} pair that
+      # used to sit here was dropped in the same change: those are what the
+      # legacy aws_security_group_rule / inline ingress-egress blocks call, and
+      # this repo declares neither (#651). They were write permissions, so
+      # removing them is a real reduction, not cosmetic.
+      "ec2:ModifySecurityGroupRules",
       "ec2:DescribeVpcEndpoints",
       "ec2:CreateVpcEndpoint",
       "ec2:DeleteVpcEndpoints",
@@ -63,6 +76,14 @@ data "aws_iam_policy_document" "ci_deploy_network" {
       # endpoint attached, to populate its subnet/network-interface
       # attributes on every plan/apply refresh, not just first create (#258).
       "ec2:DescribeNetworkInterfaces",
+      # A VPC-attached Lambda (worker.tf, #640) owns ENIs in its subnets/security group
+      # that outlive the function itself (Hyperplane ENI lifecycle). Destroying the
+      # subnet/security group makes the provider try to force-delete those leftover
+      # ENIs first -- without this, `terraform destroy` fails with AccessDenied on
+      # ec2:DeleteNetworkInterface (CloudTrail-evidenced in sandbox, #640; ECS's own
+      # awsvpc-mode ENIs never hit this because ECS itself reclaims them on task stop,
+      # before Terraform ever gets to the subnet).
+      "ec2:DeleteNetworkInterface",
       "ec2:CreateTags",
       "ec2:DeleteTags",
       "ec2:DescribeTags",
@@ -80,14 +101,4 @@ data "aws_iam_policy_document" "ci_deploy_network" {
       }
     }
   }
-}
-
-resource "aws_iam_policy" "ci_deploy_network" {
-  name   = "${local.name_prefix}-deploy-network"
-  policy = data.aws_iam_policy_document.ci_deploy_network.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_deploy_network" {
-  role       = aws_iam_role.ci_deploy.name
-  policy_arn = aws_iam_policy.ci_deploy_network.arn
 }

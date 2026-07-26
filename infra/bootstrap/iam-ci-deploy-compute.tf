@@ -21,31 +21,16 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     }
   }
   statement {
-    sid    = "EcrProjectRepo"
-    effect = "Allow"
-    actions = [
-      "ecr:DescribeRepositories",
-      "ecr:CreateRepository",
-      "ecr:DeleteRepository",
-      "ecr:PutLifecyclePolicy",
-      "ecr:GetLifecyclePolicy",
-      "ecr:DeleteLifecyclePolicy",
-      "ecr:SetRepositoryPolicy",
-      "ecr:GetRepositoryPolicy",
-      "ecr:PutImageScanningConfiguration",
-      "ecr:TagResource",
-      "ecr:UntagResource",
-      "ecr:ListTagsForResource",
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:GetDownloadUrlForLayer",
-      "ecr:BatchGetImage",
-      "ecr:PutImage",
-      "ecr:InitiateLayerUpload",
-      "ecr:UploadLayerPart",
-      "ecr:CompleteLayerUpload",
-      "ecr:DescribeImages",
-      "ecr:ListImages",
-    ]
+    # Service-level wildcard, deliberately (ADR-0027 第2層, #658): the resource ARN and
+    # region axes below still do the work, and enumerating ECR actions bought nothing but
+    # a sandbox round-trip every time the provider called one more of them. What the old
+    # 21-action list encoded, kept because it is not obvious from the resource blocks:
+    # the image push in cd-app.yml, and Set/GetRepositoryPolicy for worker.tf's
+    # container-image Lambda (#640) -- CreateFunction with package_type=Image makes Lambda
+    # auto-add its own pull grant to the repo, but only if the caller holds those two.
+    sid       = "EcrProjectRepo"
+    effect    = "Allow"
+    actions   = ["ecr:*"]
     resources = ["arn:aws:ecr:*:*:repository/${var.project}-*"]
 
     dynamic "condition" {
@@ -58,23 +43,14 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     }
   }
   statement {
-    sid    = "EcsProjectResources"
-    effect = "Allow"
-    actions = [
-      "ecs:DescribeClusters",
-      "ecs:CreateCluster",
-      "ecs:DeleteCluster",
-      "ecs:UpdateClusterSettings",
-      "ecs:DescribeServices",
-      "ecs:CreateService",
-      "ecs:UpdateService",
-      "ecs:DeleteService",
-      "ecs:DescribeTasks",
-      "ecs:StopTask",
-      "ecs:TagResource",
-      "ecs:UntagResource",
-      "ecs:ListTagsForResource",
-    ]
+    # `ecs:*` scoped to this project's cluster/service/task ARNs (ADR-0027 第2層, #658).
+    # Note the ARNs below are the whole guardrail here: ECS actions that AWS does not
+    # authorize against these resource types are unaffected by widening the action list --
+    # they still need their own statements (EcsProjectTaskDefinitions,
+    # EcsTaskDefinitionReadDeregister below).
+    sid     = "EcsProjectResources"
+    effect  = "Allow"
+    actions = ["ecs:*"]
     resources = [
       "arn:aws:ecs:*:*:cluster/${var.project}-*",
       "arn:aws:ecs:*:*:service/${var.project}-*/*",
@@ -99,24 +75,20 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
     # run (#338). RegisterTaskDefinition does support resource-level scoping
     # (evaluated against the family's task-definition/<family>:* ARN), so
     # scope by ARN instead.
-    # - TagResource: default_tags applies tags at creation, so
-    #   RegisterTaskDefinition also evaluates ecs:TagResource against the
-    #   task-definition ARN (CloudTrail-evidenced denial in #338; same
-    #   pattern as rds:AddTagsToResource on subgrp in #258). Untag/ListTags
-    #   are deliberately absent: the provider reads task-definition tags via
-    #   DescribeTaskDefinition(include=TAGS), and no run has exercised either.
-    # - RunTask: authorized against the task-definition ARN per the service
-    #   authorization reference (cluster is a condition key, not a resource),
-    #   so it lives here, not in EcsProjectResources -- there it could never
-    #   match. cd-app(-sandbox).yml's migrate job calls run-task under this
-    #   role (PR #339 review).
-    sid    = "EcsProjectTaskDefinitions"
-    effect = "Allow"
-    actions = [
-      "ecs:RegisterTaskDefinition",
-      "ecs:TagResource",
-      "ecs:RunTask",
-    ]
+    #
+    # Why this stays a separate statement now that both it and
+    # EcsProjectResources say `ecs:*` (ADR-0027 第2層, #658): they differ in
+    # the *resource*, and that is the axis still doing the work. AWS
+    # authorizes RegisterTaskDefinition / RunTask / the TagResource call that
+    # default_tags triggers at registration against the task-definition ARN
+    # (for RunTask the cluster is a condition key, not a resource), so those
+    # calls can only ever match here -- listing them in EcsProjectResources
+    # would never match its cluster/service/task ARNs. Merging the two
+    # statements would mean unioning the resource lists, which widens more
+    # than the action axis ever did.
+    sid       = "EcsProjectTaskDefinitions"
+    effect    = "Allow"
+    actions   = ["ecs:*"]
     resources = ["arn:aws:ecs:*:*:task-definition/${var.project}-*"]
 
     dynamic "condition" {
@@ -249,14 +221,4 @@ data "aws_iam_policy_document" "ci_deploy_compute" {
       }
     }
   }
-}
-
-resource "aws_iam_policy" "ci_deploy_compute" {
-  name   = "${local.name_prefix}-deploy-compute"
-  policy = data.aws_iam_policy_document.ci_deploy_compute.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_deploy_compute" {
-  role       = aws_iam_role.ci_deploy.name
-  policy_arn = aws_iam_policy.ci_deploy_compute.arn
 }

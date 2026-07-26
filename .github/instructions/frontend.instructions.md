@@ -12,8 +12,9 @@ Details: `docs/app-development.md`, `services/frontend/CLAUDE.md`.
   `src/api/queries.ts` (TanStack Query, wraps the generated `apiClient`). No
   ad-hoc `fetch` or direct `apiClient` calls in components. Client-only state
   stays in Pinia (`src/stores/`) — don't copy server data into a store.
-- `src/api/schema.ts` is generated from OpenAPI by `make gen-types` — never edit
-  it by hand. Regenerate and commit it after the API contract changes.
+- `src/api/schema.python.ts` / `src/api/schema.go.ts` are generated per-backend
+  from OpenAPI by `make gen-types` — never edit them by hand. Regenerate and
+  commit after either API contract changes.
 - Frontend env vars MUST be `VITE_`-prefixed and non-secret (they ship to the
   browser). Don't put secrets in the frontend.
 - `main.ts` exports `ViteSSG(App, { routes }, setup)`, not `createApp(App).mount(...)`

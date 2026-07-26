@@ -14,50 +14,14 @@ data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
   statement {
     sid    = "S3ProjectBuckets"
     effect = "Allow"
-    actions = [
-      "s3:CreateBucket",
-      "s3:DeleteBucket",
-      "s3:GetBucketPolicy",
-      "s3:PutBucketPolicy",
-      "s3:DeleteBucketPolicy",
-      "s3:GetBucketVersioning",
-      "s3:PutBucketVersioning",
-      "s3:GetBucketPublicAccessBlock",
-      "s3:PutBucketPublicAccessBlock",
-      # The AWS provider's aws_s3_bucket resource reads a long list of
-      # per-bucket sub-configurations on every refresh, even for ones this
-      # project never sets explicitly -- discovered one at a time
-      # (Acl, then CORS, then Website) across three sandbox apply
-      # cycles (#258), so the remaining common ones are granted proactively
-      # here rather than one AccessDenied at a time. All read-only and
-      # already scoped to this project's bucket names below.
-      "s3:GetBucketAcl",
-      "s3:GetBucketCORS",
-      "s3:GetBucketWebsite",
-      "s3:GetBucketLogging",
-      "s3:GetBucketRequestPayment",
-      "s3:GetAccelerateConfiguration",
-      "s3:GetBucketObjectLockConfiguration",
-      "s3:GetReplicationConfiguration",
-      "s3:GetEncryptionConfiguration",
-      # aws_s3_bucket_server_side_encryption_configuration.web (#587).
-      "s3:PutEncryptionConfiguration",
-      "s3:GetBucketOwnershipControls",
-      # aws_s3_bucket_lifecycle_configuration.web (#303).
-      "s3:GetLifecycleConfiguration",
-      "s3:PutLifecycleConfiguration",
-      "s3:GetBucketTagging",
-      "s3:PutBucketTagging",
-      "s3:ListBucket",
-      "s3:GetObject",
-      "s3:PutObject",
-      "s3:DeleteObject",
-      # aws_s3_bucket.web's force_destroy (golden-path-verify teardown):
-      # the provider's force_destroy always calls ListObjectVersions to
-      # empty the bucket before deleting it, even when versioning is off.
-      "s3:ListBucketVersions",
-      "s3:DeleteObjectVersion",
-    ]
+    # Service-level wildcard on this project's bucket ARNs (ADR-0027 第2層, #658). This is
+    # the statement #258 grew one AccessDenied at a time (Acl -> CORS -> Website, three
+    # sandbox cycles, plus a batch of read-only sub-config getters added pre-emptively
+    # afterwards) and #587 extended again for encryption config -- exactly the churn the
+    # wildcard removes. No aws:RequestedRegion condition here, by the same #45 reasoning as
+    # before: `aws s3 sync` may route through the global/us-east-1 endpoint for a bucket in
+    # ap-northeast-1, so a region condition risks spurious AccessDenied.
+    actions = ["s3:*"]
     resources = [
       "arn:aws:s3:::${var.project}-*",
       "arn:aws:s3:::${var.project}-*/*",
@@ -120,14 +84,4 @@ data "aws_iam_policy_document" "ci_deploy_storage_cdn" {
     actions   = ["kms:DescribeKey", "kms:GenerateDataKey"]
     resources = [data.aws_kms_alias.s3.target_key_arn]
   }
-}
-
-resource "aws_iam_policy" "ci_deploy_storage_cdn" {
-  name   = "${local.name_prefix}-deploy-storage-cdn"
-  policy = data.aws_iam_policy_document.ci_deploy_storage_cdn.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_deploy_storage_cdn" {
-  role       = aws_iam_role.ci_deploy.name
-  policy_arn = aws_iam_policy.ci_deploy_storage_cdn.arn
 }

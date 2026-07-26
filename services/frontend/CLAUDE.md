@@ -49,6 +49,9 @@ all users get the same static HTML). SFCs use `<script setup lang="ts">`. Compon
 
 ## Generated API client
 
-`src/api/schema.ts` is generated from the API's OpenAPI schema by `make gen-types` — never
-edit it by hand. After the API contract changes, run `make gen-types` and commit the result;
-don't hand-write request/response types.
+`src/api/schema.python.ts` (Python backend) and `src/api/schema.go.ts` (Go backend) are each
+generated from that service's OpenAPI schema by `make gen-types` — one file per service, to
+avoid type-name collisions between the two independently-evolving APIs. Never edit either by
+hand. After an API contract changes, run `make gen-types` and commit the result; don't
+hand-write request/response types. `client.ts` only imports from `schema.python.ts` today —
+`schema.go.ts` is unused until the Go backend gets a real HTTP surface (#639).

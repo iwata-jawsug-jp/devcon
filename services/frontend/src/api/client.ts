@@ -1,4 +1,4 @@
-import type { components, paths } from './schema';
+import type { components, paths } from './schema.python';
 import { useAuthStore } from '../stores/auth';
 
 /**
@@ -39,8 +39,9 @@ export class ApiError extends Error {
  * The single, typed entry point for talking to the backend API.
  *
  * Components MUST go through this client rather than calling `fetch` directly.
- * `paths` is imported from the generated `schema.ts` so request/response types
- * can be tightened as the OpenAPI schema grows.
+ * `paths` is imported from the generated `schema.python.ts` (Python backend) so
+ * request/response types can be tightened as the OpenAPI schema grows. See
+ * `schema.go.ts` for the Go backend's types (unused here until #639).
  */
 export class ApiClient {
   constructor(private readonly baseUrl: string = API_BASE) {}

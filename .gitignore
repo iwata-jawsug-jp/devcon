@@ -55,6 +55,10 @@ dist/
 build/
 *.egg-info/
 
+# ---- Go ----
+services/backend/go/api
+services/backend/go/tmp/
+
 # ---- Node ----
 node_modules/
 npm-debug.log*

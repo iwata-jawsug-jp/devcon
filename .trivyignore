@@ -30,3 +30,16 @@ AVD-AWS-0011
 # justified for alarm notification text on this dev stack (same rationale as
 # AVD-AWS-0132 for S3).
 AVD-AWS-0136
+
+# `s3:*` in ci_deploy's S3ProjectBuckets statement (ADR-0027 第2層, #658). The check fires
+# on the action alone and cannot see the two axes that actually bound this statement: the
+# resource is `arn:aws:s3:::${project}-*` (+ `/*`), never `*`, and the role is the CI deploy
+# role that owns those buckets by definition. Enumerating S3 actions instead is what made
+# #258 take three sandbox round-trips and #587 another -- the trade this ADR deliberately
+# reverses.
+#
+# What still enforces the distinction the check is reaching for: infra/policy/
+# iam_wildcard.rego denies `s3:*` (or any service wildcard) the moment `Resource` is `*`,
+# and since #657 that rule runs against infra/bootstrap too. So an actually-unrestricted S3
+# policy still fails a gate -- just a rule that understands resource scoping.
+AVD-AWS-0345

@@ -30,6 +30,18 @@ Remote state per env: `terraform init -backend-config=env/<env>.backend.hcl`; va
   changes needed. `conftest test` against a real plan only runs in `cd-infra.yml`'s `plan`
   job (needs the AWS plan role); locally/pre-commit/`ci.yml` only run the AWS-credential-free
   unit tests.
+  One rule inspects attachments rather than documents: `iam_managed_policy_attachment.rego`
+  allowlists AWS-managed policies per (role, policy) pair (#666) — attaching
+  `PowerUserAccess` to `ci_deploy` has no document for the other rules to see, and Checkov's
+  comparable check is `--soft-fail` here. Adding a legitimate AWS-managed attachment means
+  adding it to that allowlist.
+  **The same rules cover `bootstrap/` too** (#657): `make policy-test-bootstrap` plans it from
+  an empty state with synthetic variables in a temp copy and runs `conftest test` on the
+  result — `cd-infra.yml`'s `plan` job runs that exact target. Needs AWS credentials, and
+  never touches the real `bootstrap/` state. Two rules are layer-aware as a result: `tags.rego`
+  requires `Layer` instead of `Environment` for bootstrap resources, and `iam_wildcard.rego`
+  exempts policies named `*-boundary` (a permissions boundary is a ceiling, so `Action: "*"`
+  is normal in one — ADR-0027 第1層).
 
 ## Conventions
 

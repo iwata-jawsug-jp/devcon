@@ -19,6 +19,7 @@ trivy --version
 checkov --version
 aws --version
 node --version
+go version
 python3 --version
 uv --version
 rg --version | head -1

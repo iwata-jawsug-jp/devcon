@@ -7,6 +7,35 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-26
+
+### Security
+
+- **`ci_deploy` ロールに実在していた権限昇格経路を塞いだ（ADR-0027 第1層）**: `iam-ci-deploy-iam.tf` の `ManageProjectRoles` 文は `arn:aws:iam::*:role/${var.project}-*` に対して `iam:CreateRole` / `iam:AttachRolePolicy` / `iam:PutRolePolicy` を条件なしで許可しており、`locals.tf` の `name_prefix = "${var.project}-${var.resource_name_suffix}"` により **`ci_deploy` 自身のロール名がこの ARN パターンにマッチしていた**。つまり `AttachRolePolicy AdministratorAccess` を自分自身に付ける1ステップでアカウント全体の管理者権限に到達でき、同じ理由で `ci_plan` / `agent-mcp` も改変（`agent_mcp_guardrails` の Deny 除去を含む）できた。AWS の委譲パターン（"Delegating responsibility to others using permissions boundaries"）に従い、`iam:PermissionsBoundary` 条件により**指定の境界を付けた場合にのみ**ロール作成・ポリシー操作を許可する形へ分割し、境界の取り外し・境界ポリシーの書き換え・多段 assume を明示 Deny した。境界 ARN は bootstrap が SSM（`/<project>/bootstrap/app-role-boundary-arn`）へ公開し、app 層（`infra/shared.tf`）の ECS タスクロール / タスク実行ロールが読んで `permissions_boundary` に設定する（リポジトリ変数もワークフローの変更も不要で、ローカル `terraform plan` もそのまま動く）。`aws iam simulate-principal-policy` で自己 Attach が `implicitDeny`、ガードレール3種が `explicitDeny` になることを確認し、sandbox 実機で「境界未設定の既存ロールからの移行 → アプリのデプロイ → ライブスモークテスト → destroy」まで完走させた（#656, [ADR-0027](docs/adr/0027-ci-deploy-permissions-boundary-and-scoped-wildcards.md)）。
+- **AWS マネージドポリシーのアタッチが全ブロッキングゲートを素通りしていた穴を塞いだ**: `infra/policy/*.rego` はポリシー**文書**（`aws_iam_policy` / `aws_iam_role_policy` / `aws_iam_user_policy`）しか検査しておらず、`aws_iam_role_policy_attachment` で `PowerUserAccess` / `AdministratorAccess` を足す経路は検知できなかった（Checkov に類似検査はあるが `--soft-fail` 運用のためブロックしない）。1行の追加で本リリースの絞り込みを全て無効化できる状態だった。（ロール名の接尾辞, ポリシー ARN）の組による許可リスト方式の `iam_managed_policy_attachment.rego` を追加し、`aws_iam_role` の `managed_policy_arns` 引数という別経路も同じ許可リストで検査する。`infra/bootstrap` に `PowerUserAccess` のアタッチを一時注入してゲートが実際に FAIL することまで確認した（#666）。
+
+### Added
+
+- **Go backend（`services/backend/go/`）の足場と非同期ジョブの縦切り実装**: ADR-0024 で決めた構成（huma v2 + chi、pgx + sqlc、DB スキーマは Python の Alembic に一元化）に沿って Phase 1 の足場を追加し、`make gen-types` を Python + Go の OpenAPI を統合する単一パイプラインへ拡張、SQS 起点の非同期ジョブ1本を sqlc / `make gen-schema` / slog / OpenTelemetry まで通した縦切りとして実装した（#645, #646, #647）。
+- **Go worker Lambda（SQS）の確定インフラ構成を ADR-0026 として決定**（#640, [ADR-0026](docs/adr/0026-go-worker-lambda-sqs-configuration.md)）。
+- **`ci-deploy-iam-gap` スキル**: `infra/bootstrap/iam-ci-deploy-*.tf` に欠けている `ci_deploy` 権限を、実機の AccessDenied から事後対応する Mode A と、新規 AWS リソース追加前に事前予測する Mode B の2モードで扱う。#631 / #640 で計4件の権限不足を CloudTrail や `terraform destroy` で事後発見してきたパターン（タグ系の refresh 時暗黙呼び出し、依存リソースのクリーンアップ系）を再現可能な手順にした。本リリースではさらに **Mode C（`aws iam simulate-principal-policy` による静的検証）** と、境界起因の deny を疑う診断手順を追加した（#650, #656）。
+- **`ci_deploy` の権限スコープ戦略の提案書と ADR-0027**: #45 で PowerUserAccess から最小権限へ移行して以降、実 AWS でしか顕在化しない権限ギャップの後追い（#258 / #338 / #437 / #587 / #600 / #631 / #640 / #651）が反復コストとして定着していた。この構造的コスト、マネージドポリシー枠の枯渇、および検討中に発見した権限昇格経路を同時に扱うため、4案（PowerUserAccess + α / PowerUserAccess + Deny ガードレール / スコープ済み文のみワイルドカード化 / 許可の境界）を13評価軸で比較し、優先度の異なる3層として実施する方針を決定した（#653, #654, #655）。
+- **`conftest test` を `infra/bootstrap` にも適用**: これまで `conftest test` は `cd-infra.yml` の `plan` ジョブで app 層の plan JSON に対してのみ実行されており、`ci_deploy` のポリシーが `iam_wildcard.rego` / `region_condition.rego` に違反しても CI は緑のまま通っていた（ゲートが機能しているように見えて、このリポジトリが最も気にしている IAM を1つも見ていない状態だった）。`infra/bootstrap` はローカル state で手動適用するため CI に plan 対象の state が無いので、**合成変数を使って空の state から plan する**方式で解決した（適用済み state に対する no-op plan では `resource_changes` が空になり `iam_wildcard.rego` が何も検査しない）。実装は `make policy-test-bootstrap` に置き、CI はそれを呼ぶだけにして「ローカルで緑 = CI で緑」を保った。有効化にあたり `tags.rego` を層対応（`Layer = "bootstrap"` は Project/Layer を必須）にし、`iam_wildcard.rego` に `-boundary` 接尾辞のポリシーの除外を追加した（#657）。
+
+### Changed
+
+- **`ci_deploy` の identity policy は「スコープ済み文のみ」action をワイルドカード化（ADR-0027 第2層）**: リソース ARN が `${var.project}-*` にスコープされている12文だけ、action をサービスレベルのワイルドカード（`ecr:*` / `ecs:*` / `lambda:*` / `sqs:*` / `rds:*` / `logs:*` / `sns:*` / `cloudwatch:*` / `s3:*`）に緩めた。守りの主力であるリソース ARN 軸とリージョン軸は完全に維持されるため、他リージョン・他リソースへの横展開は依然として塞がったまま。`Resource = "*"` の文、プロジェクト所有でない ARN を指す KMS 系、IAM 系、state アクセスは緩めていない。併せて `iam_wildcard.rego` の許容条件を「`Resource` が `*` でないこと」を必須とし、リージョン条件は `region_condition.rego` の対象サービスに限って必須とした（一律に要求すると、意図的に条件を持たない `S3ProjectBuckets`（#45）と `CloudWatchDashboard`（#258）を自分で弾く自己矛盾になる）。bare の `Action: "*"` は `Resource` がスコープ済みでも許容しない。ポリシー総量は 15,509字 → 12,620字（-19%）。Trivy の `AVD-AWS-0345` が `s3:*` をブロックしたため `.trivyignore` に理由付きで追加した（この検査は action だけを見てリソース ARN 軸を評価できず、同じ観点は `iam_wildcard.rego` が引き継いでいる）（#658）。
+- **`ci_deploy` のマネージドポリシーを4グループに統合**: アタッチ済みが 9/10 枠で、あと1エリア増えると `infra/bootstrap` 自体が apply 不能になる状態だった。クォータは Service Quotas で25まで引き上げ可能だが、本リポジトリは copier scaffold（#294）なので生成先ごとの手動申請が必要になると「fresh clone でそのまま apply できる」前提が壊れる。policy document はエリア別のまま（レビュー単位とアクションの根拠コメントはそこにある）、`aws_iam_policy` リソースだけ `source_policy_documents` で `deploy-platform` / `deploy-runtime` / `deploy-datastore` / `deploy-edge` の4本に統合した（9本 → 4本、最大でもクォータの60%）。実効権限が不変であること（statement 40件、Sid の増減・内容差分なし）を plan JSON の機械比較で確認済み。レンダリング結果が90%を超えたら apply 時の AWS エラーではなく plan の `precondition` で落とす仕組みも入れた。**グループ名に旧ポリシー名を再利用してはならない** — 再利用すると Terraform に create と destroy の順序関係が無いため create が `EntityAlreadyExists` で落ちる一方、アタッチメントの destroy だけが先に完了し、`ci_deploy` がポリシー0本の状態で apply が停止する（実際に踏んだため恒久対処した）。併せて「許可の境界はマネージドポリシー10個枠を消費しない」ことを実機で測定して確定した（#652）。
+- **ADR-0027 第3層（`ci_deploy` 自身への許可の境界）は再評価の結果、採用しないと決定**: `ci_deploy` が正当に必要とする `s3:*` / `cloudfront:*` / `iam:*` をグローバルに許可せざるを得ず、天井が実際に足すのは「他リージョンの遮断」程度で最も価値の高い攻撃対象は開いたままになること、守ろうとしていたドリフトの大半は第2層と #657 の静的ゲートが PR 時点で落とすこと、残る穴（マネージドポリシーのアタッチ）は境界より安く塞げること（#666）が理由。再検討トリガーと、採用する場合の設計制約（app ロール用と**別 ARN** にする。同一だと自己 Attach 経路が再開する）も ADR に残した。
+
+### Fixed
+
+- **`ci_deploy` の SG ルール更新権限の欠落と、`iam:CreateServiceLinkedRole` の過大な付与**: `infra/` の SG ルールは全て新形式（`aws_vpc_security_group_{ingress,egress}_rule`）で宣言されており、in-place 更新でプロバイダは `ec2:ModifySecurityGroupRules` を呼ぶが未付与だった。sandbox が毎回まっさらから作り直すため Create 経路しか通っておらず未顕在化だったが、既存ルールの説明文を1文字直すだけで `main` の apply が止まる状態だった（sandbox 実機で description 変更 → 再 apply を通し、CloudTrail でも確認）。旧形式が使う `ec2:UpdateSecurityGroupRuleDescriptions{Ingress,Egress}`（`infra/*.tf` に該当リソースは存在しない）は削除した。`iam:CreateServiceLinkedRole` は `Resource: "*"` 無条件で `ci_deploy` 全体で最も広い付与になっていたため、`aws-service-role` パス + `iam:AWSServiceName` の allowlist（5サービス）へ絞った。allowlist には静的監査の想定になかった `pullthroughcache.ecr.amazonaws.com` を含む — `aws_ecr_pull_through_cache_rule`（#598）がキャッシュルール作成時に ECR に SLR を呼び出し元の権限で作らせるためで、**fresh account の初回 apply でしか顕在化しない**（#651）。
+- **Go worker Lambda（SQS）向けの `ci_deploy` IAM 権限を追加**（#640, #648）。
+- **`tools/script/bootstrap.sh` の `recover`（state 消失時の import 復旧）の欠落を修正**: ポリシー統合に伴う対応表の更新に加え、許可の境界ポリシーと SSM パラメータが対応表から漏れていたため、state を失った環境を復旧するとこの2つだけ state 外に取り残される状態だった（#652, #656）。
+- **frontend の Dependabot アラート対応（[iwata-jawsug-jp/devcon#5](https://github.com/iwata-jawsug-jp/devcon/security/dependabot/5)）**: `fast-uri`（`vite-plugin-pwa` → `workbox-build` → `ajv` が要求する transitive dependency）の 3.0.0〜3.1.3 に、リテラルのバックスラッシュを authority 区切りとして扱わないため Node の WHATWG `URL`/`fetch()` と解釈結果がずれ、ホストベースのポリシー（allowlist・SSRF 対策等）を回避されうる脆弱性（CVE-2026-16221, GHSA-v2hh-gcrm-f6hx, High）があった。`package.json` の `overrides`（`tmp`/`uuid`/`js-yaml` と同じ既存パターン）に `fast-uri@^3.1.4` を追加して強制固定した。lint/typecheck/test/build/`npm audit` で動作確認済み（本番ビルドの PWA/Service Worker 生成が正常に完走することも確認）。
+- **`docs/sandbox.md` に検証手順の落とし穴2件を追記**: `sandbox/*` ブランチの**新規作成 push では `cd-infra-sandbox.yml` の `paths:` フィルタが評価されず apply が起動しない**（`CI (sandbox)` だけは起動するので気づきにくい。`workflow_dispatch` は destroy 専用なので代替できない）。**PR ブランチから sandbox 枝を切ると、その PR の必須チェックが汚染される**（チェックは SHA + コンテキスト名で管理されるため、同一 SHA の `CI (sandbox)` が同名コンテキストを上書きし、concurrency による cancelled が失敗として反映されて PR が `BLOCKED` になる）。どちらも #651 の実機検証で踏んだもの（#651）。
+
 ## [0.6.9] - 2026-07-24
 
 ### Added
@@ -1361,7 +1390,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.9...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.6...v0.6.7

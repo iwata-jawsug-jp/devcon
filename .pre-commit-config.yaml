@@ -54,6 +54,26 @@ repos:
       - id: ruff-format
         files: ^(services/backend/python/|\.github/scripts/)
 
+  # ---- Go (services/backend/go, Lambda-only — ADR-0024) ----
+  # local, not the ruff/prettier repo-hook style: golangci-lint has no official
+  # pre-commit-hooks.yaml, so this runs the same binary `make backend-go-lint`/CI use
+  # (requires golangci-lint on PATH — `make backend-go-setup`, same convention as
+  # conftest-verify below needing conftest on PATH).
+  - repo: local
+    hooks:
+      - id: golangci-lint-fmt
+        name: golangci-lint fmt (services/backend/go)
+        entry: bash -c 'cd services/backend/go && golangci-lint fmt'
+        language: system
+        files: ^services/backend/go/.*\.go$
+        pass_filenames: false
+      - id: golangci-lint-run
+        name: golangci-lint run (services/backend/go)
+        entry: bash -c 'cd services/backend/go && golangci-lint run'
+        language: system
+        files: ^services/backend/go/
+        pass_filenames: false
+
   # ---- Node / TypeScript / web assets (prettier) ----
   # Uses the frontend's own prettier (version pinned by services/frontend/package.json +
   # package-lock.json) so the hook and `npm run format` always agree. Requires
@@ -69,7 +89,7 @@ repos:
         files: \.(ts|tsx|js|jsx|mjs|cjs|vue|json|yaml|yml|md|html|css)$
         # .claude/skills/ and .kiro/settings/templates/ are cc-sdd upstream artifacts
         # (docs/sdd.md) — leave them unformatted to keep diffs vs upstream small (#127).
-        exclude: ^(services/frontend/dist/|services/frontend/src/api/schema\.ts|services/frontend/playwright-report/|.*\.terraform/|\.claude/skills/|\.kiro/settings/templates/)
+        exclude: ^(services/frontend/dist/|services/frontend/src/api/schema\.(python|go)\.ts|services/frontend/playwright-report/|.*\.terraform/|\.claude/skills/|\.kiro/settings/templates/)
       # Catches a scope added to the Cognito resource server (or the frontend's login
       # scope list) without updating the other side — only reproduces at a real Cognito
       # login otherwise (#438). Only runs when either file actually changes.

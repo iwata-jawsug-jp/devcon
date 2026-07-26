@@ -25,7 +25,7 @@ guidance).
 The `@theme` block in `services/frontend/src/main.css` is **generated** from the YAML front
 matter above via `make gen-design-tokens` (`@google/design.md`'s `export --format css-tailwind`,
 #264) — the same "single source, generated, never hand-edit" pattern as `make gen-types` /
-`schema.ts`. Token names here must match `main.css`'s custom-property names 1:1 (a `typography`
+`schema.python.ts`/`schema.go.ts`. Token names here must match `main.css`'s custom-property names 1:1 (a `typography`
 key becomes `--font-<key>`, a `colors` key becomes `--color-<key>`) so the generator's output
 lines up with what components actually reference. After editing this file's front matter, run
 `make gen-design-tokens` and commit both files together.

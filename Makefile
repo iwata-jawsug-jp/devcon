@@ -1,14 +1,16 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-INFRA_DIR     := infra
-BACKEND_DIR   := services/backend/python
-FRONTEND_DIR  := services/frontend
+INFRA_DIR      := infra
+BACKEND_DIR    := services/backend/python
+BACKEND_GO_DIR := services/backend/go
+FRONTEND_DIR   := services/frontend
 
-.PHONY: help setup hooks check-setup check-repo-vars claude-setup dev gen-types gen-design-tokens fmt lint test security perf-test ci-frontend \
+.PHONY: help setup hooks check-setup check-repo-vars claude-setup dev gen-types gen-schema gen-design-tokens fmt lint test security perf-test ci-frontend \
         db-up db-down migrate makemigration \
-        tf-init tf-fmt tf-validate tf-plan tf-lint policy-test \
+        tf-init tf-fmt tf-validate tf-plan tf-lint policy-test policy-test-bootstrap \
         backend-setup backend-dev backend-test backend-lint \
+        backend-go-setup backend-go-dev backend-go-test backend-go-lint \
         frontend-setup frontend-dev frontend-build frontend-lint frontend-test frontend-test-e2e \
         metrics-dora-lint metrics-dora-test check-oauth-scopes scaffold-verify
 
@@ -17,7 +19,7 @@ help: ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 ## ---- Bootstrap ----
-setup: backend-setup frontend-setup hooks ## Install all toolchains + git hooks
+setup: backend-setup backend-go-setup frontend-setup hooks ## Install all toolchains + git hooks
 
 hooks: ## Install pre-commit git hooks
 	pip install --quiet pre-commit || python3 -m pip install --quiet pre-commit
@@ -40,18 +42,31 @@ dev: db-up ## Run backend (:8000) and frontend (:5173) together (starts the db f
 		( cd $(FRONTEND_DIR) && npm run dev ) & \
 		wait
 
-gen-types: ## Generate frontend TS types from the API OpenAPI schema
-	cd $(BACKEND_DIR) && uv run python -c "import json,sys; from api.main import app; json.dump(app.openapi(), sys.stdout)" > $(CURDIR)/$(FRONTEND_DIR)/openapi.json
-	cd $(FRONTEND_DIR) && npx --yes openapi-typescript openapi.json -o src/api/schema.ts
-	rm -f $(FRONTEND_DIR)/openapi.json
+gen-types: ## Generate frontend TS types from both backends' OpenAPI schemas (Python + Go, #638)
+	cd $(BACKEND_DIR) && uv run python -c "import json,sys; from api.main import app; json.dump(app.openapi(), sys.stdout)" > $(CURDIR)/$(FRONTEND_DIR)/openapi.python.json
+	cd $(BACKEND_GO_DIR) && go run ./cmd/api openapi > $(CURDIR)/$(FRONTEND_DIR)/openapi.go.json
+	cd $(FRONTEND_DIR) && npx --yes openapi-typescript openapi.python.json -o src/api/schema.python.ts
+	cd $(FRONTEND_DIR) && npx --yes openapi-typescript openapi.go.json -o src/api/schema.go.ts
+	rm -f $(FRONTEND_DIR)/openapi.python.json $(FRONTEND_DIR)/openapi.go.json
+
+# #639 (proposal §2.3.1): Alembic (services/backend/python) is the sole schema authority — Go
+# never migrates. This snapshots the migrated schema for sqlc to read. pg_dump 16.10+ wraps
+# output in psql-only `\restrict`/`\unrestrict` guard commands (not valid SQL); strip them so
+# the file stays plain DDL that both sqlc's parser and a raw `psql -f` can consume.
+gen-schema: db-up migrate ## Snapshot the Alembic-migrated schema for Go's sqlc (Go never migrates; #639)
+	docker compose exec -T db pg_dump -U app -d app --schema-only --no-owner --no-privileges \
+		| sed '/^\\restrict /d; /^\\unrestrict /d' > $(CURDIR)/$(BACKEND_GO_DIR)/internal/db/schema.sql
+	printf '%s\n' "$$(cat $(CURDIR)/$(BACKEND_GO_DIR)/internal/db/schema.sql)" > $(CURDIR)/$(BACKEND_GO_DIR)/internal/db/schema.sql.tmp
+	mv $(CURDIR)/$(BACKEND_GO_DIR)/internal/db/schema.sql.tmp $(CURDIR)/$(BACKEND_GO_DIR)/internal/db/schema.sql
+	cd $(BACKEND_GO_DIR) && sqlc generate
 
 gen-design-tokens: ## Regenerate src/main.css's @theme block from docs/frontend-design.md (DESIGN.md)
 	cd $(FRONTEND_DIR) && npm run design:gen-theme
 	cd $(FRONTEND_DIR) && npx prettier --write src/main.css
 
 ## ---- Database ----
-db-up: ## Start the local Postgres container (detached)
-	docker compose up -d db
+db-up: ## Start the local Postgres container (detached, blocks until its healthcheck passes)
+	docker compose up -d --wait db
 
 db-down: ## Stop and remove local containers
 	docker compose down
@@ -65,18 +80,22 @@ makemigration: ## Autogenerate a migration: make makemigration m="message"
 ## ---- Aggregate ----
 fmt: tf-fmt ## Format everything
 	cd $(BACKEND_DIR) && uv run ruff format .
+	cd $(BACKEND_GO_DIR) && golangci-lint fmt
 	cd $(FRONTEND_DIR) && npm run format
 
-lint: tf-lint policy-test backend-lint frontend-lint metrics-dora-lint check-oauth-scopes ## Lint everything
+lint: tf-lint policy-test backend-lint backend-go-lint frontend-lint metrics-dora-lint check-oauth-scopes ## Lint everything
 
-test: backend-test frontend-test metrics-dora-test ## Run all unit tests (backend pytest + frontend vitest + metrics unittest)
+test: backend-test backend-go-test frontend-test metrics-dora-test ## Run all unit tests (backend pytest + backend-go go test + frontend vitest + metrics unittest)
 
 # checkov is informational (--soft-fail) in all three gates (pre-commit / make / CI) —
 # remaining findings (WAF, Multi-AZ RDS, KMS CMKs, custom-domain HTTPS, access logging, ...)
 # are deliberate cost/scope trade-offs for this dev-tier stack. See issue #111.
-security: ## Run Trivy + Checkov over infra (same severity/soft-fail as pre-commit and CI)
+# govulncheck (services/backend/go) mirrors these two: same severity stance (no soft-fail —
+# a known-vulnerable dependency blocks, same as Trivy's HIGH,CRITICAL over infra).
+security: ## Run Trivy + Checkov over infra, govulncheck over services/backend/go (same as pre-commit and CI)
 	trivy config --severity HIGH,CRITICAL --ignorefile .trivyignore $(INFRA_DIR)
 	checkov -d $(INFRA_DIR) --quiet --compact --soft-fail
+	cd $(BACKEND_GO_DIR) && govulncheck ./...
 
 ## ---- Perf (Issue #43; not part of the PR-blocking CI gate — see .github/workflows/perf.yml) ----
 perf-test: ## Run the k6 load/perf smoke test against a local uvicorn instance (needs k6 on PATH, Postgres via `make db-up`)
@@ -125,10 +144,40 @@ tf-lint: ## tflint --recursive over infra (same command as CI)
 	cd $(INFRA_DIR) && tflint --init --config=$(CURDIR)/.tflint.hcl \
 		&& tflint --recursive --config=$(CURDIR)/.tflint.hcl
 
-# Rego unit tests only (#296, ADR-0017) -- no AWS credentials available locally, so this
-# can't run `conftest test` against a real plan; that only happens in cd-infra.yml's plan job.
+# Rego unit tests only (#296, ADR-0017) -- no AWS credentials needed, so this is what
+# pre-commit/ci.yml run. `conftest test` against a real app-layer plan happens in
+# cd-infra.yml's plan job (it needs the AWS plan role); for the bootstrap layer, see
+# policy-test-bootstrap below.
 policy-test: ## conftest verify (Rego policy unit tests, same command as CI)
 	conftest verify --policy $(INFRA_DIR)/policy
+
+# infra/bootstrap is applied by hand with local state (docs/infrastructure.md), so neither
+# this repo's CI nor a fresh clone has state to plan it against -- which is why `conftest
+# test` did not cover it until #657, and the ci_deploy policies could violate
+# iam_wildcard.rego / region_condition.rego with CI still green.
+#
+# Plan it from an *empty* state with synthetic variables instead: every rule here inspects
+# only the shape of the rendered documents (wildcard actions, region conditions, required
+# tags), which does not depend on the real project name, account or suffix. Runs in a temp
+# copy so it can never disturb the operator's real infra/bootstrap state or leave a tfplan
+# behind. Needs AWS credentials (data.aws_caller_identity / data.aws_kms_alias); cd-infra.yml's
+# plan job calls this same target with the read-only plan role.
+policy-test-bootstrap: ## conftest test against a synthetic infra/bootstrap plan (needs AWS creds; same command as CI)
+	@set -euo pipefail; \
+	work="$$(mktemp -d)"; \
+	trap 'rm -rf "$$work"' EXIT; \
+	cp $(INFRA_DIR)/bootstrap/*.tf "$$work/"; \
+	cd "$$work"; \
+	TF_VAR_project=policycheck \
+	TF_VAR_aws_region=$${AWS_REGION:-ap-northeast-1} \
+	TF_VAR_github_org=policycheck-org \
+	TF_VAR_github_repo=policycheck-repo \
+	TF_VAR_state_bucket_name=policycheck-tfstate-placeholder \
+	TF_VAR_resource_name_suffix=policy \
+	sh -c 'terraform init -backend=false -input=false >/dev/null && \
+	       terraform plan -no-color -input=false -out=tfplan >/dev/null && \
+	       terraform show -json tfplan > bootstrap-plan.json'; \
+	conftest test --policy $(CURDIR)/$(INFRA_DIR)/policy bootstrap-plan.json
 
 ## ---- Backend (services/backend/python, FastAPI) ----
 backend-setup: ## uv sync (install deps)
@@ -142,6 +191,27 @@ backend-test: ## pytest
 
 backend-lint: ## ruff check + mypy
 	cd $(BACKEND_DIR) && uv run ruff check . && uv run mypy
+
+## ---- Backend (services/backend/go, Lambda-only — ADR-0024) ----
+# Pin versions here match .devcontainer/Dockerfile / reusable-backend-go.yml (single
+# source, same convention as TERRAFORM_VERSION etc.); update all together.
+GOLANGCI_LINT_VERSION := v2.12.2
+SQLC_VERSION := v1.31.1
+
+backend-go-setup: ## go mod download + install golangci-lint/govulncheck/sqlc (idempotent)
+	cd $(BACKEND_GO_DIR) && go mod download
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	go install golang.org/x/vuln/cmd/govulncheck@latest
+	go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
+
+backend-go-dev: ## air hot reload on :8000 (needs `go install github.com/air-verse/air@latest`)
+	cd $(BACKEND_GO_DIR) && air
+
+backend-go-test: ## go test ./...
+	cd $(BACKEND_GO_DIR) && go test ./...
+
+backend-go-lint: ## golangci-lint run (staticcheck + gosec + govet + errcheck + unused, .golangci.yml)
+	cd $(BACKEND_GO_DIR) && golangci-lint run
 
 ## ---- Frontend (services/frontend, Vite + Vue 3) ----
 frontend-setup: ## npm install

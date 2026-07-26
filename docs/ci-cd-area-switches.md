@@ -5,7 +5,7 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 [infrastructure.md](infrastructure.md) の「エリア別スイッチ」を参照。
 
 > このリポジトリが使う全リポジトリ変数（bootstrap 配線・本番/sandbox アプリ用も含む）の
-> 一覧は [repository-variables.md](repository-variables.md) を参照。本書はスイッチ系5個の
+> 一覧は [repository-variables.md](repository-variables.md) を参照。本書はスイッチ系6個の
 > 詳しい設定手順に特化している。
 
 ## 仕組み（要点）
@@ -19,13 +19,16 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 
 ## 変数一覧
 
-| 変数               | 停止する範囲                                                            |
-| ------------------ | ----------------------------------------------------------------------- |
-| `BACKEND_ENABLED`  | `ci.yml` の backend / `cd-app.yml` の build → migrate → deploy-api      |
-| `FRONTEND_ENABLED` | `ci.yml` の frontend / `cd-app.yml` の frontend                         |
-| `INFRA_ENABLED`    | `ci.yml` の infra / `cd-infra.yml` の plan・apply（手動 dispatch 含む） |
+| 変数                 | 停止する範囲                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------ |
+| `BACKEND_ENABLED`    | `ci.yml` の backend / `cd-app.yml` の build → migrate → deploy-api                                     |
+| `BACKEND_GO_ENABLED` | `ci.yml`/`ci-sandbox.yml` の backend-go（services/backend/go、ADR-0024）。CD は未実装（Phase 3、#640） |
+| `FRONTEND_ENABLED`   | `ci.yml` の frontend / `cd-app.yml` の frontend                                                        |
+| `INFRA_ENABLED`      | `ci.yml` の infra / `cd-infra.yml` の plan・apply（手動 dispatch 含む）                                |
 
-対象外: `ci.yml` の `scripts` ジョブ・`scaffold` ジョブ（#294。どのエリアにも属さない）、
+対象外: `ci.yml` の `scripts` ジョブ・`scaffold` ジョブ（#294。どのエリアにも属さない）・
+`gen-types` ジョブ（#638。backend/backend-go/frontend 横断のため、いずれかが変更された
+ときに実行——専用スイッチではなく3エリアの変更検知の OR で `should_run` を決めている）、
 sandbox 系ワークフロー（`ci-sandbox.yml` / `cd-app-sandbox.yml` / `cd-infra-sandbox.yml`）。
 
 ## 前提
@@ -39,6 +42,7 @@ sandbox 系ワークフロー（`ci-sandbox.yml` / `cd-app-sandbox.yml` / `cd-in
 ```bash
 # 停止（値は文字列 "false" — これ以外の値はすべて「有効」扱い）
 gh variable set BACKEND_ENABLED --body "false"
+gh variable set BACKEND_GO_ENABLED --body "false"
 gh variable set FRONTEND_ENABLED --body "false"
 gh variable set INFRA_ENABLED --body "false"
 

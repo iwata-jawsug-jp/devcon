@@ -98,13 +98,8 @@ data "aws_iam_policy_document" "ci_deploy_data" {
   statement {
     sid    = "RdsProjectResources"
     effect = "Allow"
-    actions = [
-      "rds:CreateDBInstance",
-      "rds:ModifyDBInstance",
-      "rds:DeleteDBInstance",
-      "rds:AddTagsToResource",
-      "rds:RemoveTagsFromResource",
-    ]
+    # Service-level wildcard on this project's db: ARNs (ADR-0027 第2層, #658).
+    actions   = ["rds:*"]
     resources = ["arn:aws:rds:*:*:db:${var.project}-*"]
 
     dynamic "condition" {
@@ -119,20 +114,13 @@ data "aws_iam_policy_document" "ci_deploy_data" {
   statement {
     sid    = "RdsSubnetGroup"
     effect = "Allow"
-    actions = [
-      "rds:CreateDBSubnetGroup",
-      "rds:ModifyDBSubnetGroup",
-      "rds:DeleteDBSubnetGroup",
-      # default_tags applies tags at creation time, which needs tagging
-      # permission on the subgrp: resource type too -- RdsProjectResources
-      # above only covers the db: resource type (#258).
-      "rds:AddTagsToResource",
-      "rds:RemoveTagsFromResource",
-      # rds:CreateDBInstance also gets evaluated against the subnet group it
-      # places the instance into, not just the db: resource it creates
-      # (RdsProjectResources above already covers the db: side) (#258).
-      "rds:CreateDBInstance",
-    ]
+    # Service-level wildcard on this project's subgrp: ARNs (ADR-0027 第2層, #658).
+    # Kept separate from RdsProjectResources because the *resource type* differs and that
+    # is the axis still enforcing anything: rds:CreateDBInstance is evaluated against both
+    # the db: it creates and the subgrp: it places the instance into, and default_tags
+    # makes tagging hit both types too (#258). One statement per resource type keeps that
+    # explicit.
+    actions   = ["rds:*"]
     resources = ["arn:aws:rds:*:*:subgrp:${var.project}-*"]
 
     dynamic "condition" {
@@ -165,14 +153,8 @@ data "aws_iam_policy_document" "ci_deploy_data" {
   statement {
     sid    = "LogsProjectGroup"
     effect = "Allow"
-    actions = [
-      "logs:CreateLogGroup",
-      "logs:DeleteLogGroup",
-      "logs:PutRetentionPolicy",
-      "logs:TagResource",
-      "logs:UntagResource",
-      "logs:ListTagsForResource",
-    ]
+    # Service-level wildcard on this project's log-group ARNs (ADR-0027 第2層, #658).
+    actions   = ["logs:*"]
     resources = ["arn:aws:logs:*:*:log-group:/${var.project}/*"]
 
     dynamic "condition" {
@@ -184,14 +166,4 @@ data "aws_iam_policy_document" "ci_deploy_data" {
       }
     }
   }
-}
-
-resource "aws_iam_policy" "ci_deploy_data" {
-  name   = "${local.name_prefix}-deploy-data"
-  policy = data.aws_iam_policy_document.ci_deploy_data.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_deploy_data" {
-  role       = aws_iam_role.ci_deploy.name
-  policy_arn = aws_iam_policy.ci_deploy_data.arn
 }

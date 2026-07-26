@@ -37,3 +37,37 @@ test_resource_without_tags_all_is_ignored if {
 
 	count(violations) == 0
 }
+
+test_bootstrap_layer_requires_layer_not_environment if {
+	# infra/bootstrap is applied once per account and has no environment to name, so its
+	# provider tags Layer instead of Environment (#657).
+	violations := deny with input as {"resource_changes": [{
+		"address": "aws_iam_policy.ci_deploy_compute",
+		"type": "aws_iam_policy",
+		"change": {"after": {"tags_all": {"Project": "demo", "Layer": "bootstrap", "ManagedBy": "terraform"}}},
+	}]}
+
+	count(violations) == 0
+}
+
+test_bootstrap_layer_still_requires_project if {
+	violations := deny with input as {"resource_changes": [{
+		"address": "aws_iam_policy.untagged",
+		"type": "aws_iam_policy",
+		"change": {"after": {"tags_all": {"Layer": "bootstrap"}}},
+	}]}
+
+	count(violations) == 1
+}
+
+test_app_layer_still_requires_environment if {
+	# A non-bootstrap resource must not escape the Environment requirement by carrying some
+	# other Layer value.
+	violations := deny with input as {"resource_changes": [{
+		"address": "aws_cloudwatch_log_group.app",
+		"type": "aws_cloudwatch_log_group",
+		"change": {"after": {"tags_all": {"Project": "demo", "Layer": "app"}}},
+	}]}
+
+	count(violations) == 1
+}

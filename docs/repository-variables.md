@@ -26,7 +26,7 @@ GitHub Actions の各ワークフロー（`ci.yml` / `cd-infra*.yml` / `cd-app*.
 
 詳細: [infrastructure.md「ブートストラップ順序」](infrastructure.md#新規-aws-アカウントリージョンでの前提条件)
 
-## 2. エリア別/オプトインスイッチ（5個・手動登録）
+## 2. エリア別/オプトインスイッチ（6個・手動登録）
 
 CI/CD の一部ジョブを一時停止/有効化するキルスイッチ。**極性が2種類ある**ので注意（下表の
 「極性」列）。
@@ -34,6 +34,7 @@ CI/CD の一部ジョブを一時停止/有効化するキルスイッチ。**�
 | 変数名                | 参照する workflow・job                                            | 用途                                                                                                                      | 極性                         | 未設定時の挙動                                              |
 | --------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------- |
 | `BACKEND_ENABLED`     | `ci.yml`（backend）/ `cd-app.yml`（build → migrate → deploy-api） | backend エリアの一時停止                                                                                                  | オプトアウト（`!= 'false'`） | 有効（デフォルト実行）                                      |
+| `BACKEND_GO_ENABLED`  | `ci.yml`/`ci-sandbox.yml`（backend-go）                           | backend-go（services/backend/go、ADR-0024）エリアの一時停止。CD は未実装（Phase 3、#640）                                 | オプトアウト                 | 有効                                                        |
 | `FRONTEND_ENABLED`    | `ci.yml`（frontend）/ `cd-app.yml`（frontend）                    | frontend エリアの一時停止                                                                                                 | オプトアウト                 | 有効                                                        |
 | `INFRA_ENABLED`       | `ci.yml`（infra）/ `cd-infra.yml`（plan、手動 dispatch 含む）     | infra エリアの一時停止                                                                                                    | オプトアウト                 | 有効                                                        |
 | `INFRA_APPLY_ENABLED` | `cd-infra.yml`（`apply-dev`/`apply-prod`）                        | apply 実行の二重鍵（`workflow_dispatch` 限定に加えて、対象は `environment` 入力で `dev`/`prod` を選択・デフォルト `dev`） | オプトイン（`== 'true'`）    | 無効（`apply-dev`/`apply-prod` スキップ）                   |

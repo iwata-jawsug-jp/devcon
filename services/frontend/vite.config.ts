@@ -84,7 +84,12 @@ export default defineConfig(({ mode }) => {
         provider: 'v8',
         reporter: ['text', 'html'],
         include: ['src/**/*.{ts,vue}'],
-        exclude: ['src/api/schema.ts', 'src/main.ts', 'src/**/*.spec.ts'],
+        exclude: [
+          'src/api/schema.python.ts',
+          'src/api/schema.go.ts',
+          'src/main.ts',
+          'src/**/*.spec.ts',
+        ],
         // Current actual coverage is ~85-96% across all four; these thresholds
         // sit a little below that as a real regression gate (#306), not the
         // near-no-op 35/35/45/55 floor that let coverage silently erode.

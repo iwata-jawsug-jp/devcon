@@ -109,6 +109,19 @@ jobs:
         run: |
           conftest verify --policy policy
           conftest test --policy policy plan.json
+      # Same rules, bootstrap layer (#657). Until this existed, `conftest test` only ever saw
+      # the app layer's plan, so ci_deploy's own policies could violate iam_wildcard.rego /
+      # region_condition.rego and CI would still go green -- a gate that looked like it was
+      # working while covering none of the IAM this repo actually reasons about.
+      #
+      # infra/bootstrap is applied by hand with local state and is not managed by this
+      # workflow (docs/infrastructure.md), so there is no state here to plan against. The
+      # make target plans it from an empty state with synthetic variables in a temp copy;
+      # see the Makefile for why that is sound (the rules only inspect document *shape*).
+      # Runs under the read-only plan role and creates nothing.
+      - name: Policy as Code (conftest, infra/bootstrap)
+        working-directory: .
+        run: make policy-test-bootstrap
       - name: Post plan as PR comment
         uses: actions/github-script@v9
         with:

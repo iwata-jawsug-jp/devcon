@@ -7,20 +7,10 @@ data "aws_iam_policy_document" "ci_deploy_observability" {
   statement {
     sid    = "SnsProjectTopics"
     effect = "Allow"
-    actions = [
-      "sns:CreateTopic",
-      "sns:DeleteTopic",
-      "sns:GetTopicAttributes",
-      "sns:SetTopicAttributes",
-      "sns:Subscribe",
-      "sns:Unsubscribe",
-      "sns:GetSubscriptionAttributes",
-      "sns:SetSubscriptionAttributes",
-      "sns:ListSubscriptionsByTopic",
-      "sns:TagResource",
-      "sns:UntagResource",
-      "sns:ListTagsForResource",
-    ]
+    # Service-level wildcard on this project's topic ARNs (ADR-0027 第2層, #658).
+    # Subscription ARNs are `<topic-arn>:<uuid>`, so the same prefix covers the
+    # subscription-attribute calls #600 had to add one at a time.
+    actions   = ["sns:*"]
     resources = ["arn:aws:sns:*:*:${var.project}-*"]
 
     dynamic "condition" {
@@ -35,14 +25,8 @@ data "aws_iam_policy_document" "ci_deploy_observability" {
   statement {
     sid    = "CloudWatchAlarms"
     effect = "Allow"
-    actions = [
-      "cloudwatch:PutMetricAlarm",
-      "cloudwatch:DeleteAlarms",
-      "cloudwatch:DescribeAlarms",
-      "cloudwatch:TagResource",
-      "cloudwatch:UntagResource",
-      "cloudwatch:ListTagsForResource",
-    ]
+    # Service-level wildcard on this project's alarm ARNs (ADR-0027 第2層, #658).
+    actions   = ["cloudwatch:*"]
     resources = ["arn:aws:cloudwatch:*:*:alarm:${var.project}-*"]
 
     dynamic "condition" {
@@ -57,22 +41,12 @@ data "aws_iam_policy_document" "ci_deploy_observability" {
   statement {
     sid    = "CloudWatchDashboard"
     effect = "Allow"
-    actions = [
-      "cloudwatch:PutDashboard",
-      "cloudwatch:GetDashboard",
-      "cloudwatch:DeleteDashboards",
-      "cloudwatch:ListDashboards",
-    ]
+    # Service-level wildcard on this project's dashboard ARNs (ADR-0027 第2層, #658).
+    # Still separate from CloudWatchAlarms: dashboard ARNs carry no region segment, which
+    # is why this statement deliberately has no aws:RequestedRegion condition (#258). That
+    # asymmetry is also why iam_wildcard.rego cannot require a region condition for every
+    # wildcard action -- see the rule's comment.
+    actions   = ["cloudwatch:*"]
     resources = ["arn:aws:cloudwatch::*:dashboard/${var.project}-*"]
   }
-}
-
-resource "aws_iam_policy" "ci_deploy_observability" {
-  name   = "${local.name_prefix}-deploy-observability"
-  policy = data.aws_iam_policy_document.ci_deploy_observability.json
-}
-
-resource "aws_iam_role_policy_attachment" "ci_deploy_observability" {
-  role       = aws_iam_role.ci_deploy.name
-  policy_arn = aws_iam_policy.ci_deploy_observability.arn
 }

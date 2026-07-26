@@ -21,7 +21,7 @@ AWS リージョンを指定した「命名済み」の新規プロジェクト�
 
 ```
 .
-├── .devcontainer/      # Dev Container 定義（Terraform, AWS CLI, Python 3.14, Node 24, セキュリティツール）
+├── .devcontainer/      # Dev Container 定義（Terraform, AWS CLI, Python 3.14, Node 24, Go 1.26, セキュリティツール）
 ├── .github/workflows/  # CI/CD（ci.yml / cd-infra.yml / cd-app.yml）
 ├── infra/              # Terraform / AWS の IaC
 │   ├── bootstrap/      # 初回のみ・ローカル state（state バケット, OIDC, CI IAM ロール）
@@ -29,7 +29,8 @@ AWS リージョンを指定した「命名済み」の新規プロジェクト�
 │   └── *.tf            # アプリ基盤（web=S3+CloudFront, api=ECR+ECS, shared=VPC ほか）
 ├── services/
 │   ├── backend/
-│   │   └── python/     # バックエンド REST API（Python / FastAPI / uv 管理）
+│   │   ├── python/     # バックエンド REST API（Python / FastAPI / uv 管理、同期系）
+│   │   └── go/         # バックエンド（Go、AWS Lambda 専用・非同期/イベント駆動系、ADR-0024）
 │   └── frontend/       # フロントエンド SPA（TypeScript / Vite + Vue 3）
 ├── .pre-commit-config.yaml  # fmt / lint / セキュリティスキャンの自動実行
 ├── .tflint.hcl

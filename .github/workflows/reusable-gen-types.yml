@@ -1,0 +1,59 @@
+name: reusable-gen-types
+
+# #638 (Epic #636 gen-types統合設計): drift check for `make gen-types`'s generated output —
+# services/frontend/src/api/schema.python.ts (FastAPI) and schema.go.ts (huma). Cross-cutting
+# across backend / backend-go / frontend, so — like the scripts/scaffold jobs (#294) — it has
+# no dedicated area ENABLED switch (docs/ci-cd-area-switches.md's 対象外 list); the caller
+# gates `should_run` on an OR of those three areas' change-detection output instead.
+
+on:
+  workflow_call:
+    inputs:
+      should_run:
+        description: >-
+          Whether to actually execute this gate (vs. report a skipped check).
+          Keeping the job always invoked (rather than gating with `if:` on the
+          caller side) keeps the status-check context name stable at
+          "gen-types / check" regardless of skip state — see ADR-0012.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: inputs.should_run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install Python backend dependencies
+        working-directory: services/backend/python
+        run: uv sync --all-extras --dev
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: services/backend/go/go.mod
+          cache-dependency-path: services/backend/go/go.sum
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: services/frontend
+        run: npm ci
+      - name: Regenerate types (make gen-types)
+        run: make gen-types
+      - name: Fail if generated types drifted from the committed schema
+        run: |
+          if ! git diff --exit-code -- services/frontend/src/api/schema.python.ts services/frontend/src/api/schema.go.ts; then
+            echo "::error::src/api/schema.python.ts / schema.go.ts is out of date. Run 'make gen-types' locally and commit the result."
+            exit 1
+          fi
