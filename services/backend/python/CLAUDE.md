@@ -31,7 +31,15 @@ plain stdlib `logging`, don't `print()`. Distributed tracing (OpenTelemetry, off
   go through a repository.
 - **Every schema change is an Alembic migration** (`make makemigration`); never edit the DB
   by hand. ORM models are `Mapped[...]`-typed; keep Pydantic (API I/O) and ORM models
-  separate (response models use `from_attributes=True`).
+  separate (response models use `from_attributes=True`). `Base.metadata` has a
+  `naming_convention` — new constraints don't need an explicit `name=`.
+- **Unit of work: repositories only `flush()`, never `commit()`/`rollback()`.**
+  `get_session` (`db/session.py`) commits once at the request boundary on success and rolls
+  back on any exception, so a handler calling multiple repository methods still gets one
+  atomic transaction.
+- **Every endpoint needs an explicit auth dependency** — `dependencies=[Depends(require_scope("api/<resource>.<read|write>"))]`
+  (`auth/dependencies.py`). There's no default-secure fallback; an endpoint without it is
+  publicly readable/writable.
 - Tests default to in-memory SQLite (aiosqlite) and run against Postgres in CI.
 - Config from env vars (`API_`-prefixed). Backend secrets stay server-side (SSM / Secrets
   Manager); never commit them.

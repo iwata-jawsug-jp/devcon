@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-07-27
+
+### Changed
+
+- **`services/backend/python` の SQLAlchemy async + Alembic 構成をレビューし、見つかった5件を改善**: `Base.metadata` に `naming_convention` を設定（Alembic 推奨の決定的な制約/インデックス命名。既存 DB の `items_pkey` を `pk_items` へリネームするガード付きマイグレーションを追加— `env.py` の `target_metadata` が `op.create_table` 自体の DDL 生成にも作用するため、素の `ALTER TABLE RENAME` では新規環境で失敗することを実機で発見・対処）。`alembic/env.py` に `compare_type=True`/`compare_server_default=True` を追加し、既定 `False`/`False` では検出できなかった列の型変更（#305 の手書きマイグレーションの原因）を今後は autogenerate で検出できるようにした。`get_session`（`db/session.py`）を unit of work の境界にし、`repositories/` は `flush()` のみ行うよう変更（1エンドポイントが複数のリポジトリ呼び出しをまたいでもアトミックにコミットされる）。`repositories/items.py` の不要な `session.refresh()` を削除し、`ItemModel` に `created_at`/`updated_at` 監査カラムを追加した。付随して `services/backend/go` 側の `internal/db/schema.sql`/`sqlcgen` も `make gen-schema` で追従させた（#677）。
+- **docs/ 配下・AI 向けファイル群（`CLAUDE.md`/Copilot instructions）・`README.md` の整合性を監査し、見つかった不整合をまとめて修正**: リンク切れは実質ゼロだったが、内容面の記述ドリフトを多数発見。`docs/infrastructure.md` は `ci_deploy` の IAM ポリシー構成（エリア別6本アタッチ→#652で4グループへ再編済み）・bootstrap 層 IAM リソース件数・`main-ci-required` ルールセットの必須チェック数・`infra/policy/` のポリシー一覧などが古いままだった。ADR-0008/0009/0015 が実在しない `infra/bootstrap/main.tf`（後に `iam-ci-deploy-*.tf` 等へ分割）を参照していたのも修正。`docs/app-development.md` は存在しない `ItemStore`/`get_store` の例・古いカバレッジ閾値・`auth/` パッケージの記載漏れなどを修正し、認証（Cognito JWT 検証・スコープ認可）の解説セクションを新設した。**Go バックエンド（`services/backend/go`、ADR-0024で Accepted 済み）が AI 向けファイル群からほぼ不可視だった問題**を解消: ルート `CLAUDE.md`/`.github/copilot-instructions.md` の Map/Architecture セクションを実在エントリに更新し、`.github/instructions/backend-go.instructions.md` を新設、`README.md` の `make setup`/`fmt`/`lint`/`test`/`security` の説明・コマンド例サブセクションに Go の記載漏れを追加した。直近の SQLAlchemy 改善（unit of work・認証必須）を `services/backend/python/CLAUDE.md`/`backend.instructions.md` へ、`services/frontend/CLAUDE.md` の design-tokens 生成ルールを `frontend.instructions.md` へも反映し、`docs/ai-instructions.md` 自身が定める「docs/CLAUDE.md/Copilot の3点セット」ルールの取りこぼしを解消した（#678, #679, #680）。
+
+### Fixed
+
+- **`ci-sandbox.yml` の `backend-go` も `BACKEND_GO_ENABLED` でゲートするよう変更**: `ci.yml` の `backend-go` は #673 で `BACKEND_GO_ENABLED` によるオプトイン（既定無効）に変更済みだったが、`ci-sandbox.yml` は他エリアと同じ「全エリア無条件実行」の設計のままで、sandbox ブランチでは正式リリース前の `backend-go` が無条件に走る抜け穴になっていた（#675）。
+- **copier テンプレートの文字列置換が UTF-8 ロケールで日本語直後の置換に失敗する不具合を修正**: `copier.yml` の `_tasks` が使う `s#\bdevcon\b#{{ project_name }}#g` は、GNU sed の `\b`（単語境界）が実行時ロケールの ctype テーブルに従って判定されるため、UTF-8 ロケール（`en_US.UTF-8` 等 Linux/macOS の一般的な既定値）では CJK を alnum 相当とみなし、`devcon` の直後に空白なしで日本語が続く箇所で置換が黙って効かないことを実機で発見した。`verify-scaffold.sh` の残存文字列チェックも同じ罠を踏むため検知もできなかった。両方を `LC_ALL=C` に揃えてバイト単位判定に固定して解消した（#676）。
+
 ## [0.7.1] - 2026-07-26
 
 ### Changed
@@ -1401,7 +1413,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.8...v0.6.9

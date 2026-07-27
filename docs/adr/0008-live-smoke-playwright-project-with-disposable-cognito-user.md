@@ -42,8 +42,8 @@ VPC 経路は、ローカル開発（Vite proxy）にも CI（認証をモック
   — Playwright の trace は既にネットワークログを含む（Trace Viewer の Network タブ）ため、
   追加の HAR 保存は冗長と判断した。
 - 固定の事前登録済みユーザーを廃止し、`ci_deploy` ロールに `cognito-idp:AdminCreateUser` /
-  `AdminSetUserPassword` / `AdminDeleteUser`（`infra/bootstrap/main.tf` の `ci_deploy_auth`、
-  リソースは `arn:aws:cognito-idp:*:*:userpool/*` へスコープ — 具体的なプール ID は
+  `AdminSetUserPassword` / `AdminDeleteUser`（`infra/bootstrap/iam-ci-deploy-auth.tf` の
+  `ci_deploy_auth`、リソースは `arn:aws:cognito-idp:*:*:userpool/*` へスコープ — 具体的なプール ID は
   bootstrap 層より後に作られるアプリ層のリソースのため、この層からは参照できない。既存の
   ECS/ECR/RDS 系ステートメントと同じ「リソース種別までは絞るがアカウント/リージョンは
   ワイルドカード + `aws:RequestedRegion` 条件で絞る」パターンに合わせた）を新規付与し、

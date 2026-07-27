@@ -46,10 +46,12 @@ AWS 認証情報を持たない」ことが最大の懸念だった。実際に�
     `aws_iam_role_policy.ecs_execution_secret` の 1 件のみ、`shared.tf`）。
   - **bootstrap 層**: `terraform show -json terraform.tfstate` の出力を
     `check_iam_policies.py` に渡すローカル専用コマンド（要 AWS 認証）。対象は
-    `ci_deploy_*` / `tfstate_access_*` の 9 件（実際に #338 が発生した層）。CI ジョブを持たない
-    ため、bootstrap を変更したら手動で実行することを運用として求める。
+    `ci_plan_*` / `ci_deploy` / `agent_mcp_guardrails` / `app_role_boundary` の 8 件
+    （実際に #338 が発生した層）。CI ジョブを持たないため、bootstrap を変更したら手動で
+    実行することを運用として求める。
 - **PR-plan ロールに `access-analyzer:ValidatePolicy` を明示的に付与する**
-  （`infra/bootstrap/main.tf`）。この呼び出しは特定のリソース ARN を持たず
+  （`infra/bootstrap/iam-ci-roles.tf` の `ci_plan_access_analyzer`）。この呼び出しは
+  特定のリソース ARN を持たず
   （ポリシー文書自体をリクエスト引数として渡す）読み取り専用・副作用なしのため
   `Resource "*"`。`ReadOnlyAccess`（AWS 管理ポリシー）が暗黙にカバーしている可能性はあるが、
   それに賭けず明示的に付与する（#45 の最小権限方針: 広い AWS 管理ポリシーの未文書化された

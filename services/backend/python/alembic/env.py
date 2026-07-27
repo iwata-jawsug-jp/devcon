@@ -29,6 +29,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
+        compare_server_default=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -36,7 +38,15 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Configure context with a live connection and run migrations."""
-    context.configure(connection=connection, target_metadata=target_metadata)
+    # compare_type/compare_server_default: the default False/False misses column type
+    # changes (e.g. #305 -- a VARCHAR length change needed a hand-written migration
+    # because autogenerate found no diff) and server-side default drift.
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        compare_server_default=True,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

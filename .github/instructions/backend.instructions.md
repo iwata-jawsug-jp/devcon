@@ -15,6 +15,12 @@ Details: `docs/app-development.md`, `services/backend/python/CLAUDE.md`.
 - Every schema change is an Alembic migration (`make makemigration`); never edit
   the DB by hand. Keep ORM and Pydantic models separate (responses use
   `from_attributes=True`).
+- Repositories only `flush()`, never `commit()`/`rollback()` — `get_session`
+  commits once at the request boundary (unit of work) and rolls back on any
+  exception.
+- Every endpoint needs an explicit auth dependency
+  (`dependencies=[Depends(require_scope("api/<resource>.<read|write>"))]`
+  from `auth/dependencies.py`) — there's no default-secure fallback.
 - Tests default to an in-memory SQLite database (schema built directly from ORM metadata, no
   Alembic) and run against Postgres in CI.
 - Keep type hints (mypy strict).

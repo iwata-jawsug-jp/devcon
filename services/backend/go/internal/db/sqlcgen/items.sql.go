@@ -7,6 +7,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const appendItemNote = `-- name: AppendItemNote :one
@@ -21,9 +23,15 @@ type AppendItemNoteParams struct {
 	ID   int32  `json:"id"`
 }
 
-func (q *Queries) AppendItemNote(ctx context.Context, arg AppendItemNoteParams) (Item, error) {
+type AppendItemNoteRow struct {
+	ID          int32       `json:"id"`
+	Name        string      `json:"name"`
+	Description pgtype.Text `json:"description"`
+}
+
+func (q *Queries) AppendItemNote(ctx context.Context, arg AppendItemNoteParams) (AppendItemNoteRow, error) {
 	row := q.db.QueryRow(ctx, appendItemNote, arg.Note, arg.ID)
-	var i Item
+	var i AppendItemNoteRow
 	err := row.Scan(&i.ID, &i.Name, &i.Description)
 	return i, err
 }
@@ -33,11 +41,17 @@ const getItem = `-- name: GetItem :one
 SELECT id, name, description FROM items WHERE id = $1
 `
 
+type GetItemRow struct {
+	ID          int32       `json:"id"`
+	Name        string      `json:"name"`
+	Description pgtype.Text `json:"description"`
+}
+
 // Queries against the `items` table (owned by services/backend/python's Alembic — see
 // internal/db/schema.sql). Backs the worker's item-note-append job (cmd/worker, #639).
-func (q *Queries) GetItem(ctx context.Context, id int32) (Item, error) {
+func (q *Queries) GetItem(ctx context.Context, id int32) (GetItemRow, error) {
 	row := q.db.QueryRow(ctx, getItem, id)
-	var i Item
+	var i GetItemRow
 	err := row.Scan(&i.ID, &i.Name, &i.Description)
 	return i, err
 }

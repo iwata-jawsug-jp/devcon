@@ -8,6 +8,11 @@ name: CI (sandbox)
 # workflows can no longer drift the way they had (#153 finding 7). Deliberately does NOT call
 # reusable-changes.yml — this file's whole point is to run every area unconditionally, so it
 # calls each reusable-<area>.yml directly instead of gating on path-filter output.
+#
+# backend-go is the one exception: it still respects BACKEND_GO_ENABLED (opt-in, default
+# disabled — services/backend/go isn't released yet, docs/ci-cd-area-switches.md). Unlike the
+# other jobs here, this isn't a path-filter skip; it's the same "not ready to run at all"
+# switch ci.yml uses, so sandbox branches must opt in the same way to exercise it.
 on:
   push:
     branches: [sandbox/**]
@@ -25,6 +30,8 @@ jobs:
 
   backend-go:
     uses: ./.github/workflows/reusable-backend-go.yml
+    with:
+      should_run: ${{ vars.BACKEND_GO_ENABLED == 'true' }}
 
   frontend:
     uses: ./.github/workflows/reusable-frontend.yml

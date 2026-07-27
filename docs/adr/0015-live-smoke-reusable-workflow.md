@@ -44,7 +44,7 @@ alerting か・issue を起票するか・opt-in ゲート）はすべて呼び�
    単純な blocking のまま。
 2. **`environment` を呼び出し側から渡す input にする（reusable workflow 内のジョブに直接
    `environment: production` を書かない）。** OIDC の `role-to-assume` を実行するのは
-   reusable workflow の内部ジョブであり、`infra/bootstrap/main.tf` の `deploy_subjects` は
+   reusable workflow の内部ジョブであり、`infra/bootstrap/locals.tf` の `deploy_subjects` は
    `ref:refs/heads/main` **または** `environment:production` の `sub` claim を要求する
    （[docs/infrastructure.md](../infrastructure.md)）。`environment` 保護はこの OIDC trust
    policy の一部であって装飾ではないため、実際に `configure-aws-credentials` を呼ぶジョブに

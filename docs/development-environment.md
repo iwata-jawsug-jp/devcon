@@ -49,7 +49,8 @@ Python / Node / セキュリティツールがすべて揃った状態になり�
 > ユーザー設定（後述）はボリュームに残るため、再ログインは基本不要。
 
 > **初回ビルドの高速化（ADR-0018）:** `devcontainer.json` の `build.cacheFrom` が GHCR に
-> 事前公開されたレイヤー（`ghcr.io/iwata-jawsug-jp/devcon/devcontainer:latest`）を参照しており、
+> 事前公開されたレイヤー（`ghcr.io/iwata-jawsug-jp/devcon/devcontainer:buildcache`、`:latest`
+> ではなく `:buildcache` タグ固定 — ADR-0018 訂正6）を参照しており、
 > `.devcontainer/Dockerfile` が前回公開時点と同じであれば初回ビルドがほぼ pull のみの速度になる。
 > ビルドログに `ERROR: failed to configure registry cache importer` という赤い行が出ることが
 > あるが、これはキャッシュ元が見つからない/未公開なだけの無害なメッセージで、ビルド自体は

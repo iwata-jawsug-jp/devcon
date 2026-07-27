@@ -43,8 +43,8 @@ AWS リージョンを指定した「命名済み」の新規プロジェクト�
   `/api/*` で API を呼ぶ。
 - 開発時は Vite(:5173) が `/api/*` を uvicorn(:8000) にプロキシ（ローカルでは CORS 不要）。
   本番は CloudFront が `/api/*` を api オリジンへルーティング。
-- API 契約は FastAPI の OpenAPI（`/openapi.json`）。TS の型は `make gen-types` で生成し、
-  リクエスト/レスポンス型を二重管理しない。
+- API 契約は各バックエンドの OpenAPI（`/openapi.json`。FastAPI と Go/huma の両方）。TS の型は
+  `make gen-types` が両方から生成し、リクエスト/レスポンス型を二重管理しない。
 
 ## クイックスタート（ローカル）
 
@@ -54,7 +54,7 @@ Dev Container（VS Code: "Reopen in Container"）で開くと、以下が利用�
 `terraform` / `tflint` / `trivy` / `checkov` / `aws` / `node` / `python3` / `uv` / `gh` / `docker`。
 
 ```bash
-make setup     # Python(uv) + Node(npm) 依存と pre-commit フックを導入
+make setup     # Python(uv) + Go + Node(npm) 依存と pre-commit フックを導入
 make dev       # backend(:8000) と frontend(:5173) を同時起動
 # アプリ: http://localhost:5173 ・ API ドキュメント: http://localhost:8000/docs
 ```
@@ -220,11 +220,11 @@ CI/CD（GitHub OIDC → IAM ロール）で自分の AWS へデプロイでき�
 ```bash
 make help        # 全コマンド一覧
 make dev         # backend(:8000) + frontend(:5173) を同時起動
-make gen-types   # API の OpenAPI から frontend の TS 型を生成
-make fmt         # 全体フォーマット（terraform fmt / ruff / prettier）
-make lint        # 全体 Lint（tflint / ruff+mypy / eslint+vue-tsc）
-make test        # 全テスト（pytest / vitest）
-make security    # Trivy + Checkov で infra をスキャン
+make gen-types   # 両バックエンドの OpenAPI から frontend の TS 型を生成
+make fmt         # 全体フォーマット（terraform fmt / ruff / golangci-lint fmt / prettier）
+make lint        # 全体 Lint（tflint / ruff+mypy / golangci-lint / eslint+vue-tsc / Rego 等）
+make test        # 全テスト（pytest / go test / vitest 等）
+make security    # Trivy + Checkov（infra） + govulncheck（backend/go）でスキャン
 ```
 
 #### インフラ（Terraform）
@@ -250,6 +250,16 @@ uv run uvicorn api.main:app --reload   # http://localhost:8000/docs
 uv run pytest
 ```
 
+#### バックエンド Go（services/backend/go · Lambda 専用・非同期/イベント駆動、ADR-0024）
+
+同期 REST は担当しない（それは上記 Python 側）。SQS/EventBridge/S3 トリガーのジョブが対象。
+
+```bash
+make backend-go-dev    # air によるホットリロード（:8000、huma+chi の healthz/openapi.json）
+make backend-go-test   # go test ./...
+make backend-go-lint   # golangci-lint run
+```
+
 #### フロントエンド SPA（services/frontend · Vite + Vue 3）
 
 ```bash
@@ -266,7 +276,8 @@ npm run test:e2e   # Playwright（E2E）
 （"ローカルで green" == "CI で green"）。AWS 認証は **長期キーを使わず GitHub OIDC** で
 IAM ロールを引き受ける。詳細は [`CLAUDE.md`](CLAUDE.md) の CI/CD を参照。
 
-- `ci.yml` … PR / main push で変更パスのみ per-service ジョブ（backend / frontend / infra）。
+- `ci.yml` … PR / main push で変更パスのみ per-service ジョブ（backend / backend-go / frontend /
+  infra ほか）。`backend-go` はオプトイン既定無効（[`docs/ci-cd-area-switches.md`](docs/ci-cd-area-switches.md)）。
 - `cd-infra.yml` … PR で `terraform plan`、手動実行（`workflow_dispatch`）で `apply`。
 - `cd-app.yml` … backend イメージを ECR へ push し ECS を更新、frontend を S3 同期 + CloudFront 無効化。
 

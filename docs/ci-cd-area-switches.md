@@ -30,7 +30,9 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 ときに実行——専用スイッチではなく3エリアの変更検知の OR で `should_run` を決めている）、
 sandbox 系ワークフロー（`ci-sandbox.yml` / `cd-app-sandbox.yml` / `cd-infra-sandbox.yml`）。
 `ci.yml` の backend-go は `BACKEND_GO_ENABLED` で止めるが、これは極性が逆（オプトイン）
-——下記「オプトイン方式のスイッチ」を参照。
+——下記「オプトイン方式のスイッチ」を参照。`ci-sandbox.yml` の backend-go だけは例外で、
+このオプトインスイッチの対象**内**（他エリアと違い「変更検知でスキップ」ではなく
+「未リリース機能をそもそも走らせない」ためのスイッチなので、sandbox でも同じ扱い）。
 
 ## 前提
 
@@ -131,13 +133,22 @@ gh variable set INFRA_APPLY_ENABLED --body "true"
 gh variable delete INFRA_APPLY_ENABLED
 ```
 
-### `BACKEND_GO_ENABLED`（`ci.yml` の `backend-go`）
+### `BACKEND_GO_ENABLED`（`ci.yml` / `ci-sandbox.yml` の `backend-go`）
 
 services/backend/go（Lambda-only、ADR-0024）はまだ Phase 3（#640）で CD 未実装の実験的
 エリアなので、他のエリア別スイッチ（デフォルト有効）とは逆に、使う作業ブランチ／PR で
 明示的に `true` を設定したときだけ CI が走るオプトインにしている。未設定・削除時は
-無効（skip）。`ci-sandbox.yml` の `backend-go` はこのスイッチの対象外（同ファイルは
-全エリア無条件実行、#153 finding 7 の設計）。
+無効（skip）。`ci-sandbox.yml` の `backend-go` も同じスイッチで止まる（同ファイルの他
+ジョブは #153 finding 7 の設計どおり全エリア無条件実行だが、backend-go だけは正式リリース
+前の機能を sandbox でも無条件で走らせないための例外）。backend-go を sandbox ブランチで
+検証したい場合は、対象ブランチ／PR に対して明示的に `true` を設定すること。
+
+**ローカル PC の `make setup`/`lint`/`test`/`security`・pre-commit フックはこのスイッチの
+対象外**（意図的）。これらは backend-go を実装・検証するための開発ツールチェーンそのもの
+であり、Epic #636 の実装作業（Phase 2/3）は現在進行中のため、ここを止めると実装作業自体が
+ブロックされてしまう。このスイッチが止めているのは「CI/CD 上で正式機能として検証・合格
+扱いにすること」であって、ローカルでの開発行為ではない。`make dev` はそもそも Go backend
+を起動しない（Lambda 専用設計のため常駐サーバーとして混入する経路が無い）ので対策不要。
 
 ```bash
 # 有効化（backend-go に変更を入れて検証したい間だけ）

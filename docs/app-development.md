@@ -3,6 +3,10 @@
 `services/backend/python`（バックエンド）と `services/frontend`（フロントエンド）の
 開発手順・構造・規約。全体のアーキテクチャは [`../CLAUDE.md`](../CLAUDE.md) を参照。
 
+> `services/backend/go`（Lambda 専用の非同期バックエンド、[ADR-0024](adr/0024-adopt-go-as-second-backend-language.md)）
+> はスコープ外。開発手順・規約は
+> [`services/backend/go/CLAUDE.md`](../services/backend/go/CLAUDE.md) を参照。
+
 ## アーキテクチャ概要
 
 ```
@@ -48,13 +52,24 @@ services/backend/python/
 └── src/api/
     ├── main.py               # FastAPI app（api.main:app）。ルーターを include
     ├── config.py             # pydantic-settings の Settings / get_settings()
-    ├── routers/              # APIRouter（/api 配下）
+    ├── middleware.py         # CorrelationIdMiddleware（リクエスト相関ID、#42）
+    ├── logging_config.py     # configure_logging()（JSON構造化ログ）
+    ├── exception_handlers.py # 例外 → HTTP レスポンスのハンドラ登録
+    ├── tracing.py            # configure_tracing()（OpenTelemetry、ADR-0007。既定オフ）
+    ├── auth/                 # Cognito JWT 検証・スコープ認可（後述「認証」）
+    │   ├── dependencies.py   #   get_current_user / require_scope
+    │   ├── jwks.py           #   JWKS 取得・キャッシュ
+    │   └── schemas.py        #   AuthenticatedUser
+    ├── routers/               # APIRouter（/api 配下）
     │   ├── health.py         #   GET /api/health
     │   └── items.py          #   GET/POST /api/items, GET /api/items/{id}
-    └── schemas/              # Pydantic モデル（リクエスト/レスポンス）
-        ├── health.py         #   HealthStatus
-        └── item.py           #   ItemBase / ItemCreate / Item
-tests/                        # TestClient ベース（test_health.py, test_items.py）
+    ├── schemas/               # Pydantic モデル（リクエスト/レスポンス、API I/O 専用）
+    │   ├── health.py         #   HealthStatus
+    │   └── item.py           #   ItemBase / ItemCreate / Item
+    ├── db/                    # SQLAlchemy async（後述「データベース」で詳説）
+    └── repositories/          # データアクセス層（ORM モデルと routers/ の間）
+        └── items.py           #   ItemRepository
+tests/                        # httpx.AsyncClient + ASGITransport ベース（test_health.py, test_items.py, ...）
 ```
 
 ### 開発フロー
@@ -72,7 +87,9 @@ uv run ruff check . && uv run mypy       # lint + 型チェック（strict）
 - **非同期ハンドラ**（`async def`）で書く。
 - レスポンス/リクエストは **Pydantic モデルで検証**する（生 dict を返さない）。
   ルーターには `response_model=` を指定する。
-- 依存は `Depends` で注入する（例: `items.py` の `ItemStore` を `Depends(get_store)`）。
+- 依存は `Depends` で注入する（例: `items.py` の `ItemRepository` を `Depends(get_repo)`）。
+  認証必須のエンドポイントは `Depends(require_scope("api/items.read"))` のように
+  `auth/dependencies.py` の `require_scope` を `dependencies=[...]` に渡す（後述）。
 - 設定は `pydantic-settings` の `Settings` 経由。環境変数は **`API_` プレフィックス**
   （`API_ENVIRONMENT`, `API_APP_NAME`）。秘密情報はコミットせず `.env`（git-ignored）に置く。
 - ルートは `/api` プレフィックス配下に置く（フロントの `/api/*` 呼び出しと一致させる）。
@@ -83,8 +100,24 @@ uv run ruff check . && uv run mypy       # lint + 型チェック（strict）
 1. `src/api/schemas/` に Pydantic モデルを追加。
 2. `src/api/routers/` に `APIRouter` を作り、`async` ハンドラを `response_model` 付きで定義。
 3. `src/api/main.py` で `app.include_router(...)`。
-4. `tests/` に `TestClient` のテストを追加。
+4. `tests/` に `httpx.AsyncClient` ベースのテストを追加。
 5. フロントで使うなら `make gen-types` で型を再生成（後述）。
+
+### 認証（Cognito JWT / スコープ認可）
+
+`src/api/auth/` が Cognito の Hosted UI が発行するアクセストークン（JWT）を検証する
+リソースサーバー。トークンの**発行**（ログイン UI・OAuth2 コード交換）はフロント側
+（`services/frontend/src/auth/`）と Cognito が担い、`backend` は Bearer トークンの検証のみ行う。
+
+- `auth/jwks.py`: Cognito の JWKS エンドポイントから署名鍵を取得・キャッシュ。
+- `auth/dependencies.py`:
+  - `get_current_user`: 検証済みトークンから `AuthenticatedUser` を解決、失敗時は
+    常に 401（署名不正・期限切れ・`token_use` が `access` でない・`client_id` 不一致など）。
+  - `require_scope(scope)`: `get_current_user` に積む依存ファクトリ。スコープを
+    持たない場合は 403。ルーターでは `dependencies=[Depends(require_scope("api/items.read"))]`
+    のように使う（`routers/items.py` 参照）。
+- スコープ文字列は Cognito のカスタムリソースサーバーが定義する `"<identifier>/<scope_name>"`
+  形式（例: `api/items.read`）。インフラ側の定義は `infra/auth.tf`。
 
 ### データベース（SQLAlchemy async + Alembic）
 
@@ -117,7 +150,13 @@ cd services/backend/python && uv run pytest # テスト（後述のとおり既�
   `repositories/` 経由でアクセスする。
 - ORM モデルは `Mapped[...]` で型付け（mypy strict 準拠）。Pydantic スキーマ（API I/O）と
   ORM モデルは分離し、レスポンス用 Pydantic は `from_attributes=True`。
-- **スキーマ変更は必ず Alembic マイグレーション**。DB を手で変更しない。
+- **スキーマ変更は必ず Alembic マイグレーション**。DB を手で変更しない。`Base.metadata` に
+  `naming_convention` を設定済み（制約・インデックス名を決定的にし、Alembic autogenerate の
+  diff を安定させる）ので、新しいテーブル・制約を追加するときに個別の `name=` 指定は不要。
+- **コミットは `get_session`（リクエスト境界）でまとめて行う（unit of work）**。
+  `repositories/` 側は `session.flush()` のみ行い `commit()`/`rollback()` はしない —
+  1エンドポイントが複数のリポジトリ呼び出しをまたぐ場合でも1トランザクションで
+  アトミックにコミット/ロールバックされる。
 - DB 接続は `API_DATABASE_URL`（環境変数）。秘密はコミットせず、本番は Secrets Manager。
 
 テスト DB:
@@ -156,19 +195,24 @@ cd services/backend/python && uv run pytest # テスト（後述のとおり既�
 
 ```
 services/frontend/
-├── package.json              # scripts: dev/build(=vite-ssg build)/typecheck/lint/test/test:e2e/gen-types
+├── package.json              # scripts: dev/build(=vite-ssg build)/typecheck/lint/test/test:e2e/gen-types:python
 ├── vite.config.ts            # @vitejs/plugin-vue・/api プロキシ・ssgOptions・Vitest 設定
 ├── tsconfig.json(.node.json) # strict, moduleResolution Bundler
 ├── index.html                # エントリ（#app）
-├── playwright.config.ts      # E2E（testDir ./e2e）
+├── playwright.config.ts      # E2E（testDir ./e2e、live-smoke プロジェクトは e2e/live-smoke/）
 ├── .env.example              # VITE_ プレフィックスの非機密変数のみ（VITE_SITE_URL 等）
 └── src/
     ├── main.ts               # ViteSSG(App, { routes }, setup) — createApp を直接呼ばない
     ├── App.vue                #   サイト共通の titleTemplate（useHead）
     ├── router/index.ts       # ルート定義（RouteRecordRaw[]。vite-ssg がこれで router を構築）
-    ├── views/                # ルートに対応するページ（HomeView.vue、各ページで useHead）
-    ├── components/           # 再利用コンポーネント（HealthBadge.vue）
-    ├── stores/               # Pinia ストア（counter.ts、クライアントのみの状態）
+    ├── auth/                 # Cognito Hosted UI（OIDC）クライアント設定
+    │   └── oidcConfig.ts     #   oidc-client-ts の UserManager 設定
+    ├── views/                # ルートに対応するページ
+    │   ├── HomeView.vue      #   （各ページで useHead）
+    │   ├── LoginView.vue     #   Hosted UI へのリダイレクト
+    │   └── AuthCallbackView.vue # OAuth2 コード交換のコールバック
+    ├── components/           # 再利用コンポーネント（HealthBadge.vue, AuthStatusBadge.vue）
+    ├── stores/               # Pinia ストア（auth.ts＝認証状態、counter.ts＝クライアントのみの状態）
     └── api/                  # API アクセスの単一窓口
         ├── client.ts         #   typed な ApiClient / apiClient
         ├── schema.python.ts  #   ★ Python backend の OpenAPI から生成（手で編集しない）
@@ -284,14 +328,14 @@ shadcn-vue 系）は**現時点では導入しない**。
 CI（`ci.yml`）が強制するしきい値と計測方法。数値は現状のベースラインに合わせた「まず割らせない
 床」で、実装が増えるにつれ引き上げる前提（閾値自体を下げる変更は理由を issue に残す）。
 
-| ゲート                    | しきい値                                                               | 計測方法                                                                                                                                                                                                                                         |
-| ------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| backend カバレッジ        | `--cov-fail-under=90`（現状 ~97%）                                     | `pyproject.toml` の `addopts`（`pytest-cov`）。`uv run pytest` / `make backend-test` で自動適用                                                                                                                                                  |
-| frontend カバレッジ       | lines/statements 35%・functions 45%・branches 55%（現状 ~39%/50%/62%） | `vite.config.ts` の `test.coverage.thresholds`（`@vitest/coverage-v8`）。`npm test` で自動適用                                                                                                                                                   |
-| a11y                      | WCAG 2.0/2.1/2.2 の A+AA タグで違反ゼロ                                | `e2e/home.spec.ts` の `@axe-core/playwright` スキャン（Playwright e2e の一部として CI で実行）                                                                                                                                                   |
-| Core Web Vitals（lab）    | LCP ≤2.5s・CLS ≤0.1・Total Blocking Time ≤300ms（INP のラボ代替指標）  | `lighthouserc.json`（Lighthouse CI、`dist/` を `staticDistDir` で直接計測）                                                                                                                                                                      |
-| Lighthouse カテゴリスコア | performance / accessibility とも ≥0.9                                  | 同上                                                                                                                                                                                                                                             |
-| JS バンドル予算（gzip）   | script 400KB・stylesheet 100KB・total 600KB                            | `budget.json` を `scripts/check-bundle-budget.mjs` が読み、`dist/assets/` の実際の gzip サイズと突き合わせる（`npm run check:bundle-budget`）。Lighthouse 本体の `performance-budget`/`timing-budget` オーディットは上流で削除済みのため使わない |
+| ゲート                    | しきい値                                                                                                            | 計測方法                                                                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| backend カバレッジ        | `--cov-fail-under=90`（現状 ~99%）                                                                                  | `pyproject.toml` の `addopts`（`pytest-cov`）。`uv run pytest` / `make backend-test` で自動適用                                                                                                                                                  |
+| frontend カバレッジ       | lines/statements 90%・functions 90%・branches 80%（#306で近無効フロアの35/35/45/55から引き上げ、現状 ~96%/92%/86%） | `vite.config.ts` の `test.coverage.thresholds`（`@vitest/coverage-v8`）。`npm test` で自動適用                                                                                                                                                   |
+| a11y                      | WCAG 2.0/2.1/2.2 の A+AA タグで違反ゼロ                                                                             | `e2e/home.spec.ts` の `@axe-core/playwright` スキャン（Playwright e2e の一部として CI で実行）                                                                                                                                                   |
+| Core Web Vitals（lab）    | LCP ≤2.5s・CLS ≤0.1・Total Blocking Time ≤300ms（INP のラボ代替指標）                                               | `lighthouserc.json`（Lighthouse CI、`dist/` を `staticDistDir` で直接計測）                                                                                                                                                                      |
+| Lighthouse カテゴリスコア | performance / accessibility とも ≥0.9                                                                               | 同上                                                                                                                                                                                                                                             |
+| JS バンドル予算（gzip）   | script 400KB・stylesheet 100KB・total 600KB                                                                         | `budget.json` を `scripts/check-bundle-budget.mjs` が読み、`dist/assets/` の実際の gzip サイズと突き合わせる（`npm run check:bundle-budget`）。Lighthouse 本体の `performance-budget`/`timing-budget` オーディットは上流で削除済みのため使わない |
 
 > 実際の INP（Interaction to Next Paint）はフィールドデータが必要で lab 計測では代替不可。
 > フロントエンドの RUM/エラートラッキングは可観測性エピック（issue #42）の範囲。

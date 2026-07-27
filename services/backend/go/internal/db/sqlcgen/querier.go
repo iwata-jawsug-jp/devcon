@@ -9,10 +9,10 @@ import (
 )
 
 type Querier interface {
-	AppendItemNote(ctx context.Context, arg AppendItemNoteParams) (Item, error)
+	AppendItemNote(ctx context.Context, arg AppendItemNoteParams) (AppendItemNoteRow, error)
 	// Queries against the `items` table (owned by services/backend/python's Alembic — see
 	// internal/db/schema.sql). Backs the worker's item-note-append job (cmd/worker, #639).
-	GetItem(ctx context.Context, id int32) (Item, error)
+	GetItem(ctx context.Context, id int32) (GetItemRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -98,7 +98,18 @@ aws_region:
 # 経由でこの copier.yml が使われるとき、publish-to-public.sh 自身の変換で `devcon` は
 # 短い `devcon` に化ける。`devcon` は `.devcontainer/devcontainer.json` 等の
 # `devcontainer` という頻出語の先頭一致になってしまうため、単語境界なしだと
-# `ghcr.io/devcontainers/...` のような文字列を破壊する（#515 で実機確認）。他の3パターンは
+# `ghcr.io/devcontainers/...` のような文字列を破壊する（#515 で実機確認）。
+#
+# `\b` は GNU sed の実行時ロケールに依存する: UTF-8 ロケール（en_US.UTF-8 等、Linux/macOS
+# の一般的な既定値）では CJK（漢字・かな）を alnum 相当とみなすため、"devcon" の直後に
+# 空白なしで日本語が続く箇所（Markdown/コメントの地の文で起こりうる。例:
+# "devcon自身"）で単語境界の判定に失敗し、置換が黙って効かない（実機検証で再現・
+# インターネット検索で既知の class of bug と確認: GNU grep/sed の `\b`/`-w` は locale の
+# ctype テーブルに従って word-constituent を判定するため、UTF-8 ロケールではマルチバイト
+# 文字が巻き込まれる）。C/POSIX ロケールでは非ASCIIバイトはすべて非word文字として扱われ
+# 期待どおり動くため、`LC_ALL=C` で明示的にバイト単位の判定に固定する（単純なリテラル
+# 文字列の置換なので、多バイト文字を「1文字」として解釈できなくても対象データは破壊されない）。
+# 検証手順・再現コマンドは docs/scaffold-cli.md 参照。他の3パターンは
 # 衝突がなく、\b を付けると逆に `ap-northeast-1_xxxxxxxxx`（CognitoユーザープールID）のような
 # 後続がアンダースコアの正当な一致を壊すため、意図的に付けない。
 #
@@ -113,7 +124,7 @@ _tasks:
   - >-
     find . -path ./.git -prune -o -name .copier-answers.yml -prune -o -type f -print0 | xargs -0
     grep -Il . 2>/dev/null | while IFS= read -r f; do
-    sed -i
+    LC_ALL=C sed -i
     -e 's#iwata-jawsug-jp/devcon#{{ github_org }}/{{ github_repo }}#g'
     -e 's#itouhi#{{ github_org }}#g'
     -e 's#\bdevcon\b#{{ project_name }}#g'

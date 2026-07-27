@@ -6,6 +6,10 @@ applyTo: 'services/frontend/**'
 
 Details: `docs/app-development.md`, `services/frontend/CLAUDE.md`.
 
+- `src/main.css`'s `@theme` block (brand colors/fonts) is **generated** from
+  `docs/frontend-design.md`'s front matter — never hand-edit between its
+  `design-tokens:start`/`:end` markers. After changing the front matter, run
+  `make gen-design-tokens` and commit both files together.
 - SFCs use `<script setup lang="ts">` (Composition API, strict, ESM).
 - Type-check with `vue-tsc --noEmit`, never `tsc` (it can't resolve Vue types).
 - Fetch server state only through `useXxxQuery()` composables in

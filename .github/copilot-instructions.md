@@ -5,13 +5,16 @@ For details, see `docs/` and each `.github/instructions/*.instructions.md`.
 
 ## Architecture
 
-- `services/backend/python/` — backend REST API (Python / FastAPI / uvicorn), nested by
-  language so future non-Python backend services can sit alongside it
+- `services/backend/python/` — backend REST API (Python / FastAPI / uvicorn), synchronous
+  request/response, nested by language so other backend languages sit alongside it
+- `services/backend/go/` — backend async/event-driven work (Go, Lambda-only). SQS/EventBridge/S3
+  triggered jobs, not synchronous CRUD. Never gets its own migrations — Alembic (Python) stays
+  the single schema authority.
 - `services/frontend/` — frontend SPA (TypeScript / Vite + Vue 3)
 - `infra/` — Terraform IaC (AWS, ap-northeast-1)
 - `frontend` is a static SPA, `backend` a stateless JSON API. The browser calls the backend
   only via `/api/*` and never touches AWS directly.
-- The API contract is FastAPI's OpenAPI schema (`/openapi.json`) — the single
+- The API contract is each backend's OpenAPI schema (`/openapi.json`) — the single
   source of truth. Generate frontend types with `make gen-types`; never
   hand-write them twice.
 

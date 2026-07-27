@@ -152,11 +152,38 @@ glob パターンに置き換えて解消した。あわせて `docs/org-ruleset
 `iwata-jawsug-jp` 自身への適用記録）・`docs/frontend-frameworks-demo.md`（sandbox実験計画メモ）
 を `_exclude` に追加した。
 
+**発見・修正済みの重大バグ（`\b` の UTF-8 ロケール依存、2026-07-27）:** `_tasks` の sed が
+`devcon` パターンだけ `\bdevcon\b`（単語境界必須）にしている理由は上記のとおりだが、
+GNU sed（GNU grep も同様）の `\b` は実行時のロケールの ctype テーブルに従って
+word-constituent を判定するため、UTF-8 ロケール（`en_US.UTF-8` など Linux/macOS の一般的な
+既定値）では CJK（漢字・かな）を alnum 相当とみなす。このため `devcon` の直後に
+空白なしで日本語が続く箇所（例: `devcon自身`、Markdown/コメントの地の文で普通に
+起こりうる）で単語境界の判定に失敗し、**置換が黙って効かない**。実機で再現・確認した:
+
+```bash
+$ printf 'devcon自身のテスト\n' | sed -E 's#\bdevcon\b#PROJECT#g'
+devcon自身のテスト          # 置換されない（バグ再現、既定ロケールで実行）
+$ printf 'devcon自身のテスト\n' | LC_ALL=C sed -E 's#\bdevcon\b#PROJECT#g'
+PROJECT自身のテスト                # LC_ALL=C なら正しく置換される
+```
+
+C/POSIX ロケールでは非ASCIIバイトはすべて非word文字として扱われるため意図どおり動く。
+リテラル文字列の単純置換であり多バイト文字を「1文字」として解釈する必要が無いため、
+`LC_ALL=C` に固定してもデータは壊れない（確認済み）。`copier.yml` の `_tasks` の sed 呼び出しと
+`verify-scaffold.sh` の残存文字列チェック（`grep -P '\bdevcon\b'`）の両方を `LC_ALL=C` に
+揃えた — 判定がズレたままだと、置換漏れと検知漏れが同じ理由で同時に起こり、CI が偽陽性の
+green を返す（sed が黙って置換に失敗した箇所を、同じロケールで動く検証 grep も同じ理由で
+見逃す）ため、片方だけ直しても意味が無い。発見時点でリポジトリ本体に実際に生成対象へ含まれる
+該当パターンは無かった（唯一の実例 `.github/workflows/devcontainer-build.yml` は `_exclude`
+対象）ため生成物への実害はまだ出ていなかったが、日本語の地の文で今後いつでも再発しうる
+潜在バグだった。
+
 ## 生成物の検証CI
 
 `tools/script/verify-scaffold.sh`（`make scaffold-verify`）が `copier copy` で実際に生成し、
-生成物を検証する。`ci.yml` の `scaffold` ジョブ（`copier.yml` / このスクリプト / `ci.yml` 自身の
-変更で起動、エリアスイッチ対象外）から呼ばれる。
+生成物を検証する。`ci.yml` の `scaffold` ジョブ（`copier.yml` / このスクリプト / `.github/workflows/`
+配下の**任意のワークフローファイル**の変更で起動、`reusable-changes.yml` の path filter 参照。
+エリアスイッチ対象外）から呼ばれる。
 
 **検証範囲（スコープを意図的に絞っている）:**
 

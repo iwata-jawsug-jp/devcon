@@ -53,16 +53,25 @@ GitHub Actions ── OIDC でロール引受（長期キーなし）
   - `*-ci-deploy` … main / `production` 用のデプロイ。**最小権限化済み**（#45）: 以前は
     `PowerUserAccess` だったが、`infra/*.tf` が実際に宣言するリソース種別（EC2 ネットワーク・
     ECS・ECR・ELB・RDS・S3・CloudFront・CloudWatch Logs・Application Auto Scaling・
-    Cognito・SNS）ごとにスコープしたカスタマー管理ポリシー（`ci_deploy_network`/
+    Cognito・SNS・Lambda/SQS）ごとにスコープしたポリシー**文書**（`ci_deploy_network`/
     `ci_deploy_compute`/`ci_deploy_storage_cdn`/`ci_deploy_data`/`ci_deploy_auth`/
-    `ci_deploy_observability`、各 `infra/bootstrap/iam-ci-deploy-*.tf`）に置き換えた。**インラインポリシー
-    （`aws_iam_role_policy`）ではなくカスタマー管理ポリシー（`aws_iam_policy` +
-    `aws_iam_role_policy_attachment`）を使う**: ロールのインラインポリシーは全体で
-    10,240 バイトの合計上限を共有するため、auth.tf/observability.tf 分（#258）を
+    `ci_deploy_observability`/`ci_deploy_messaging`/`ci_deploy_iam`、各
+    `infra/bootstrap/iam-ci-deploy-*.tf` の `data "aws_iam_policy_document"`）に置き換えた。
+    **インラインポリシー（`aws_iam_role_policy`）ではなくカスタマー管理ポリシー
+    （`aws_iam_policy` + `aws_iam_role_policy_attachment`）を使う**: ロールのインラインポリシーは
+    全体で 10,240 バイトの合計上限を共有するため、auth.tf/observability.tf 分（#258）を
     追加した時点でこの上限を超えて `terraform apply` が `LimitExceeded` で失敗した。
-    カスタマー管理ポリシーは1本ごとに 6,144 文字の枠を持つ（ロールには最大10本まで
-    アタッチ可）ため、この構造的な制約を避けられる。IAM 自体の権限（ECS タスクロールの
+    カスタマー管理ポリシーは1本ごとに 6,144 文字の枠を持つ。ただし**ポリシー文書は
+    エリアごとに分かれたままだが、実際にロールへアタッチする `aws_iam_policy` はエリア別の
+    1対1ではなく `infra/bootstrap/iam-ci-deploy-policies.tf` で4つのグループにまとめている**
+    （`deploy-platform`/`deploy-runtime`/`deploy-datastore`/`deploy-edge`、`source_policy_documents`
+    でエリア別文書を連結。ロールにアタッチできるカスタマー管理ポリシーは最大10本までで、
+    エリア別に1本ずつアタッチする方式ではエリアが増えるたびにこの上限に近づく — #652 で
+    9/10 まで達したため4本のグループへ再編した。有効な権限は変わらず、Sid はエリア別のまま
+    一意なので CloudTrail 等での特定は引き続きできる）。IAM 自体の権限（ECS タスクロールの
     作成・PassRole）は元から `${var.project}-*` ロール名にスコープ済み（`ci_deploy_iam`）。
+    さらに `iam-app-role-boundary.tf` の permissions boundary（ADR-0027 第1層）が、
+    `ci_deploy` が作成する IAM ロールに対して越えられない上限を設定する。
     追加の絞り込み（#45）として、リージョン依存サービス
     （EC2/ECS/ECR/RDS/CloudWatch Logs/ELB/Application Auto Scaling）の各ステートメントに
     `aws:RequestedRegion` 条件（`var.aws_region` 限定）を付与し、`elasticloadbalancing:*`/
@@ -289,17 +298,18 @@ hcl を渡して初期化する。
 > という**アプリ側のディレクトリ名とは独立**（[ADR-0004](adr/0004-rename-services-by-role-and-nest-backend-by-language.md)）。
 > リソース名を追従させるとリソースの再作成（replace）を招くため、意図的に変更していない。
 
-| ファイル                                                                      | 内容                                                                                                                                                                             |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `main.tf`                                                                     | レイヤ共通の locals（`name_prefix`）・データソース（caller identity / region）                                                                                                   |
-| `network.tf`                                                                  | VPC（2 AZ・public/private subnet・IGW）、app SG / db SG。TODO: NAT ゲートウェイ（private subnet の egress 用）                                                                   |
-| `endpoints.tf`                                                                | ECR / CloudWatch Logs / Secrets Manager 向け VPC インターフェースエンドポイント + S3 ゲートウェイエンドポイント（NAT なしで Fargate タスクがプライベートリンク経由でアクセス）   |
-| `db.tf`                                                                       | **RDS for PostgreSQL**（private subnet・暗号化・非公開・Secrets Manager マネージド認証）                                                                                         |
-| `web.tf`                                                                      | SPA 配信（S3 + CloudFront（OAC）+ セキュリティヘッダーポリシー）。TODO: カスタムドメイン用の ACM 証明書 / Route53（`var.domain_name` 設定時のみ）                                |
-| `api.tf`                                                                      | ECR リポジトリ + ECS Fargate（クラスタ・タスク定義・サービス）+ ALB + Application Auto Scaling（CPU/メモリのターゲット追跡、#44）。代替案としてコメントに Lambda + API GW も記載 |
-| `shared.tf`                                                                   | CloudWatch ロググループ、ECS タスク実行ロール / タスクロール（IAM）                                                                                                              |
-| `observability.tf`                                                            | CloudWatch アラーム（ALB 5xx/レイテンシ、ECS CPU/メモリ、RDS CPU/接続数/空き容量）+ 通知用 SNS トピック（#42）                                                                   |
-| `providers.tf` / `versions.tf` / `variables.tf` / `outputs.tf` / `backend.tf` | 共通定義                                                                                                                                                                         |
+| ファイル                                                                      | 内容                                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.tf`                                                                     | レイヤ共通の locals（`name_prefix`）・データソース（caller identity / region）                                                                                                                                                                      |
+| `network.tf`                                                                  | VPC（2 AZ・public/private subnet・IGW）、app SG / db SG。TODO: NAT ゲートウェイ（private subnet の egress 用）                                                                                                                                      |
+| `endpoints.tf`                                                                | ECR / CloudWatch Logs / Secrets Manager 向け VPC インターフェースエンドポイント + S3 ゲートウェイエンドポイント（NAT なしで Fargate タスクがプライベートリンク経由でアクセス）                                                                      |
+| `db.tf`                                                                       | **RDS for PostgreSQL**（private subnet・暗号化・非公開・Secrets Manager マネージド認証）                                                                                                                                                            |
+| `auth.tf`                                                                     | **Cognito**（User Pool + Hosted UI + カスタムリソースサーバー、Issue #41）。API 側の JWT 検証は `services/backend/python/src/api/auth/`、フロント側の Hosted UI ログインは `services/frontend/src/auth/` が担う（インフラ側はプロビジョニングのみ） |
+| `web.tf`                                                                      | SPA 配信（S3 + CloudFront（OAC）+ セキュリティヘッダーポリシー）。TODO: カスタムドメイン用の ACM 証明書 / Route53（`var.domain_name` 設定時のみ）                                                                                                   |
+| `api.tf`                                                                      | ECR リポジトリ + ECS Fargate（クラスタ・タスク定義・サービス）+ ALB + Application Auto Scaling（CPU/メモリのターゲット追跡、#44）。代替案としてコメントに Lambda + API GW も記載                                                                    |
+| `shared.tf`                                                                   | CloudWatch ロググループ、ECS タスク実行ロール / タスクロール（IAM）                                                                                                                                                                                 |
+| `observability.tf`                                                            | CloudWatch アラーム（ALB 5xx/レイテンシ、ECS CPU/メモリ、RDS CPU/接続数/空き容量）+ 通知用 SNS トピック（#42）                                                                                                                                      |
+| `providers.tf` / `versions.tf` / `variables.tf` / `outputs.tf` / `backend.tf` | 共通定義                                                                                                                                                                                                                                            |
 
 `endpoints.tf` のインターフェースエンドポイント（ECR api/dkr・Logs・Secrets Manager、tracing
 有効時は xray も）は `var.vpce_single_az`（**dev/sandbox既定は`true`、prodは`false`**）で
@@ -450,9 +460,13 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 
 `main`（`~DEFAULT_BRANCH`）に `main-ci-required` ルールセットを設定している
 （`required_status_checks`: `changes / check`・`backend / check`・`frontend / check`・
-`infra / check`・`scripts / check`、`ci.yml` の5ジョブすべて）。エリア別スイッチで skip
-されたジョブは「合格」扱いなので、該当エリアの変更が無い PR は引き続き skip でマージできる。
-変更があるのに赤い PR はマージボタンが物理的に押せなくなる。
+`infra / check`・`scripts / check`）。`ci.yml` は現在 `backend-go`・`gen-types`・`scaffold` を
+含む8ジョブを持つが、必須チェックに登録しているのはこの5つのみ — `backend-go` はオプトイン
+スイッチで既定 skip（[ci-cd-area-switches.md](ci-cd-area-switches.md)）、`gen-types`/`scaffold`
+はどのエリアの変更でも実行されうる横断ジョブ（エリア別スイッチの対象外）なので、必須チェックに
+入れると無関係な PR まで意味なく待たされる。エリア別スイッチで skip されたジョブ（上記5つのうち）
+は「合格」扱いなので、該当エリアの変更が無い PR は引き続き skip でマージできる。変更があるのに
+赤い PR はマージボタンが物理的に押せなくなる。
 
 > **チェック名に `/ check` が付く理由（#295, ADR-0012）:** `ci.yml` の各ジョブは
 > `workflow_call` で `reusable-<area>.yml` を呼び出す構成になっている
@@ -510,8 +524,8 @@ gh api -X PUT "repos/<org>/<repo>/rulesets/$rs_id" --input /tmp/ruleset.json
 設定できない環境では、**Settings → Rules → Rulesets → New ruleset** で名前を
 `main-ci-required`（`make check-setup` が参照する名前と一致させる）とし、対象を **デフォルト
 ブランチ**（`~DEFAULT_BRANCH`）にしたうえで `Require status checks to pass` に `changes / check` /
-`backend / check` / `frontend / check` / `infra / check` / `scripts / check`（`ci.yml` の
-5ジョブ）を追加する。
+`backend / check` / `frontend / check` / `infra / check` / `scripts / check`（必須チェックと
+する上記5つ）を追加する。
 
 ![main-ci-required ルールセット: 名前・Enforcement status・対象ブランチ（Default）](images/main-ci-required_rulesets_image_01.png)
 
@@ -576,8 +590,9 @@ Web UI での設定・動作確認・注意事項の詳細は
      で検証。`terraform validate`/tflint/checkov では検出できない「実在しない条件キーによる
      ステートメントの無言の無効化」（#338）をここで検出する。対象は app 層の1件のみ
      （`aws_iam_role_policy.ecs_execution_secret`、`shared.tf`）— `infra/bootstrap/` は CI 外
-     運用のため、そちらの9件（`ci_deploy_*`/`tfstate_access_*`）は以下（要ローカル AWS 認証）で
-     別途検証する。
+     運用のため、そちらの8件（`ci_plan_access_analyzer`/`ci_plan_state`/`agent_mcp_guardrails`/
+     `app_role_boundary`、および `ci_deploy` の4グループ `deploy-platform`/`deploy-runtime`/
+     `deploy-datastore`/`deploy-edge`）は以下（要ローカル AWS 認証）で別途検証する。
 
      ```bash
      cd infra/bootstrap && terraform show -json terraform.tfstate > /tmp/bootstrap-iam-plan.json
@@ -633,6 +648,11 @@ Web UI での設定・動作確認・注意事項の詳細は
        対象）と、`cd-app.yml`/`cd-app-sandbox.yml` の frontend ジョブ `Build` ステップの
        `VITE_COGNITO_*`（#367 再発防止、ワークフロー YAML 自体が入力）の両方を検証。後者は
        plan JSON を必要としないため `ci.yml`（`reusable-infra.yml`）で実行する。
+     - `s3_security.rego` — S3 バケットの暗号化設定（`aws_s3_bucket_server_side_encryption_configuration`）
+       とパブリックアクセスブロック（`aws_s3_bucket_public_access_block`）が必須リソースとして
+       揃っていることを検証。バケットと同じローカル名で紐付けるため、リソースアドレスの命名規約
+       （例: `aws_s3_bucket.web` + 同名の `..._server_side_encryption_configuration.web`）に
+       従う必要がある
 
 - **apply（手動）**: `workflow_dispatch` で手動実行する `terraform apply`（deploy ロール・
   `TF_ENV=prod`）。private repo ＋現プランでは GitHub Environment の required reviewers が
@@ -734,9 +754,9 @@ rule`）を返し設定できないので、上記のとおり apply を手動 `
   ブロックしないための安全策。適用・検証が済んだら有効化する）。
 
 参照する変数（リポジトリ Variables、プレフィックスなし）の全量は
-[repository-variables.md「3. 本番アプリ用」](repository-variables.md#3-本番アプリ用12個プレフィックスなし手動登録)
-を参照（`AWS_DEPLOY_ROLE_ARN`〈sandbox/production 共用〉に加え、ECR/ECS/ネットワーク/S3/
-CloudFront/Cognito 関連の計11個）。
+[repository-variables.md「3. 本番アプリ用」](repository-variables.md#3-本番アプリ用12個プレフィックスなしwrite-cd-app-varsshで自動登録)
+を参照（`AWS_DEPLOY_ROLE_ARN`〈sandbox/production 共用、bootstrap 配線側の別カテゴリ〉に加え、
+ECR/ECS/ネットワーク/S3/CloudFront/Cognito 関連の計12個）。
 
 **これらのプレフィックスなしの変数はまだ何も登録されていない**（本番用の別インフラが
 存在しないため）。`preflight` はこれを正しく「未設定」と検知し、以降のジョブをすべて

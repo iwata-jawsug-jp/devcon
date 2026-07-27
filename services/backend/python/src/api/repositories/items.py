@@ -27,9 +27,15 @@ class ItemRepository:
         return await self._session.get(ItemModel, item_id)
 
     async def create(self, data: ItemCreate) -> ItemModel:
-        """Persist a new item and return it."""
+        """Persist a new item and return it.
+
+        Flushes (not commits) so callers stay composable within one request's
+        transaction; ``get_session`` commits once at the request boundary
+        (unit of work) -- see ``db/session.py``. A Postgres INSERT populates
+        generated columns (``id``, ``created_at``, ``updated_at``) via
+        ``RETURNING`` on flush, so no extra ``refresh()`` round trip is needed.
+        """
         item = ItemModel(name=data.name, description=data.description)
         self._session.add(item)
-        await self._session.commit()
-        await self._session.refresh(item)
+        await self._session.flush()
         return item

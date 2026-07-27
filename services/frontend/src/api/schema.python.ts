@@ -102,6 +102,16 @@ export interface components {
             description?: string | null;
             /** Id */
             id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * ItemCreate

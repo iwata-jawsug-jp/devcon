@@ -37,7 +37,13 @@ echo "[scaffold-verify] 置換漏れチェック（devcon / itouhi / ap-northeas
 # Cognito ユーザープールID形式（末尾がアンダースコア）の正当な残存を見逃すため付けない。
 # .copier-answers.yml は除外する: _src_path は copier update が参照する本物のテンプレート
 # 配布元（devcon/itouhi を含む）を意図的に保持している（下記の専用チェック参照）。
-if grep -rlP '\bdevcon\b' "$GEN" --exclude-dir=.git --exclude=.copier-answers.yml \
+#
+# LC_ALL=C で copier.yml の _tasks の sed 呼び出しとロケールを揃える: \b は UTF-8
+# ロケールだと CJK を alnum 扱いして "devcon" の直後に空白なしで日本語が続く箇所の
+# 判定に失敗する（実機検証で確認済み）。ここを C 以外のロケールのままにすると、置換が
+# 同じ理由で効かなかった場合にこのチェック自身も同じ箇所を見逃し、CI が偽陽性の green を
+# 返してしまう（sed 側と grep 側で判定がズレていては検証にならない）。
+if LC_ALL=C grep -rlP '\bdevcon\b' "$GEN" --exclude-dir=.git --exclude=.copier-answers.yml \
   || grep -rl -e 'itouhi' -e 'ap-northeast-1' "$GEN" --exclude-dir=.git --exclude=.copier-answers.yml; then
   echo "[scaffold-verify] NG: 未置換の文字列が上記ファイルに残っています" >&2
   exit 1

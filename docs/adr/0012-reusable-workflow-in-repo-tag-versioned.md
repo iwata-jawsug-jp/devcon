@@ -57,9 +57,12 @@ check 名は必然的に `<呼び出し側ジョブ名> / <内側ジョブ名>` 
 
 ## Decision
 
-1. **reusable workflow は本リポジトリ内 `.github/workflows/reusable-ci.yml` に置く。** 専用
+1. **reusable workflow は本リポジトリ内 `.github/workflows/` に置く。** 専用
    リポジトリへの切り出しは行わない。ADR-0011 と同じ理由（ドッグフーディング、単一の
-   保守対象）。
+   保守対象）。**（実装中に発見・修正）単一の `reusable-ci.yml` にはせず、項目4のとおり
+   エリアごとに `reusable-<area>.yml` へ分割した** — 単一ファイルだと呼び出し側から
+   エリア単位で `should_run`/入力を渡し分けられず、エリア別スイッチ（`BACKEND_ENABLED`等）や
+   `ci-sandbox.yml` の「全エリア無条件実行」という異なる挙動を1ファイルの中で表現できない。
 2. **バージョン参照は既存の `v*` リリースタグを使う。** 新しいバージョン体系を作らず、
    `docs/release.md` の既存リリースフローに乗せる。
    **（実装中に判明・訂正）参照先は `iwata-jawsug-jp/devcon` ではなく公開ミラー

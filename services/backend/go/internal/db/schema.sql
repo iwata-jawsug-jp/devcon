@@ -37,7 +37,9 @@ CREATE TABLE public.alembic_version (
 CREATE TABLE public.items (
     id integer NOT NULL,
     name character varying(200) NOT NULL,
-    description character varying(2000)
+    description character varying(2000),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -77,11 +79,11 @@ ALTER TABLE ONLY public.alembic_version
 
 
 --
--- Name: items items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: items pk_items; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.items
-    ADD CONSTRAINT items_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT pk_items PRIMARY KEY (id);
 
 
 --

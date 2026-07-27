@@ -92,8 +92,8 @@ gh workflow run cd-sandbox-cycle.yml --ref sandbox/<検証用の名前>
      assume 対象ロール ARN。sandbox/production どちらのブランチから assume するかは
      IAM の trust policy 側で制御しているため、この変数自体はプレフィックスなしでよい）
    - `cd-app-sandbox.yml` はリソース識別子の変数を **`SANDBOX_` プレフィックス付きで**
-     参照する（全11個の一覧は
-     [repository-variables.md「4. sandbox 用」](repository-variables.md#4-sandbox-用12個sandbox-プレフィックス手動登録)
+     参照する（全12個の一覧は
+     [repository-variables.md「4. sandbox 用」](repository-variables.md#4-sandbox-用12個sandbox_-プレフィックスwrite-cd-app-varsshで自動登録)
      参照）。**プレフィックスなしの名前
      （`ECS_CLUSTER` 等）では登録しないこと** — `cd-app.yml` 側はプレフィックスなしの
      同名変数を読むため、もし登録してしまうと `cd-app.yml` がそれを本番用インフラの

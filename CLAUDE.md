@@ -45,17 +45,21 @@ Guidance for Claude Code in this repo. Area-specific rules live in nested `CLAUD
 
 A monorepo in a Dev Container: a web app plus its infrastructure.
 
-- `services/backend/python/` — backend REST API (Python, FastAPI, uvicorn). See
-  `services/backend/python/CLAUDE.md`. Nested by language so future non-Python backend services
-  can sit alongside it (e.g. `services/backend/go/`).
+- `services/backend/python/` — backend REST API (Python, FastAPI, uvicorn), synchronous
+  request/response. See `services/backend/python/CLAUDE.md`. Nested by language so other
+  backend languages sit alongside it.
+- `services/backend/go/` — backend async/event-driven work (Go, Lambda-only, ADR-0024):
+  SQS/EventBridge/S3-triggered jobs, not synchronous CRUD. See `services/backend/go/CLAUDE.md`.
 - `services/frontend/` — frontend SPA (TypeScript, Vite + Vue 3). See `services/frontend/CLAUDE.md`.
 - `infra/` — Terraform IaC (AWS, `ap-northeast-1`). See `infra/CLAUDE.md`.
 
 `frontend` is a static SPA, `backend` a stateless JSON API — separate processes. The browser
 calls `/api/*` (Vite proxies to uvicorn in dev; CloudFront routes to the api origin in prod)
 and never touches AWS directly. `backend` persists to PostgreSQL (RDS in prod, docker-compose
-locally) via SQLAlchemy async. The API contract is FastAPI's OpenAPI schema (`/openapi.json`);
-the frontend's types are generated from it (`make gen-types`) — never hand-written twice.
+locally) via SQLAlchemy async; `services/backend/go` never migrates the schema itself — Alembic
+stays the single authority. The API contract is FastAPI's (and `services/backend/go`'s) OpenAPI
+schema (`/openapi.json`); the frontend's types are generated from both (`make gen-types`) —
+never hand-written twice.
 
 ## Run locally
 
@@ -87,8 +91,9 @@ the frontend's types are generated from it (`make gen-types`) — never hand-wri
   template variable design, generation-verification CI design notes. User-facing generation
   steps live in `README.md`; see `adr/0010` (tool choice) and `adr/0011` (template lives in
   this repo, not a separate template repo).
-- `docs/org-rulesets.md` — (design only, #295) org-level GitHub Ruleset standard for
-  `iwata-jawsug-jp`; not yet applied live, needs an explicit go-ahead before running.
+- `docs/org-rulesets.md` — org-level GitHub Ruleset standard for `iwata-jawsug-jp` (#295);
+  applied live since 2026-07-14 (ruleset id `18954567`, `devcon` excluded — see the doc for
+  the confirm command and the exclusion's history).
 - `docs/ai-instructions.md` — keeping these rules in sync with the Copilot
   `.github/instructions/*` mirror (change `docs/` + `CLAUDE.md` + Copilot files together).
 - `docs/adr/` — Architecture Decision Records: record the "why" behind infra/architecture
