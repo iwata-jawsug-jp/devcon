@@ -384,8 +384,9 @@ make gen-types
 - CI（`reusable-gen-types.yml`、`ci.yml`/`ci-sandbox.yml` の `gen-types` ジョブ）が
   `make gen-types` を再実行し `git diff --exit-code` でドリフトを検知する。backend /
   backend-go / frontend のどれが変わっても走る横断ジョブのため、専用の `*_ENABLED`
-  エリアスイッチは持たない（`scripts`/`scaffold` ジョブと同じ扱い、
-  [ci-cd-area-switches.md](ci-cd-area-switches.md) の対象外リスト参照）。
+  エリアスイッチは持たない（`scripts` ジョブと同じ扱い、
+  [ci-cd-area-switches.md](ci-cd-area-switches.md) の対象外リスト参照。`scaffold` ジョブは
+  同じく横断ジョブだが、こちらは専用の `SCAFFOLD_ENABLED` を持つ点が異なる）。
 
 > API の入出力を変えたら: スキーマ/ルーターを更新 → `make gen-types` → フロントを型に追従。
 

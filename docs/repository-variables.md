@@ -26,7 +26,7 @@ GitHub Actions の各ワークフロー（`ci.yml` / `cd-infra*.yml` / `cd-app*.
 
 詳細: [infrastructure.md「ブートストラップ順序」](infrastructure.md#新規-aws-アカウントリージョンでの前提条件)
 
-## 2. エリア別/オプトインスイッチ（6個・手動登録）
+## 2. エリア別/オプトインスイッチ（7個・手動登録）
 
 CI/CD の一部ジョブを一時停止/有効化するキルスイッチ。**極性が2種類ある**ので注意（下表の
 「極性」列）。
@@ -37,6 +37,7 @@ CI/CD の一部ジョブを一時停止/有効化するキルスイッチ。**�
 | `BACKEND_GO_ENABLED`  | `ci.yml` / `ci-sandbox.yml`（ともに backend-go）                  | backend-go（services/backend/go、ADR-0024）エリアの実行可否。CD は未実装（Phase 3、#640）                                 | オプトイン（`== 'true'`）    | 無効（`backend-go` スキップ）                               |
 | `FRONTEND_ENABLED`    | `ci.yml`（frontend）/ `cd-app.yml`（frontend）                    | frontend エリアの一時停止                                                                                                 | オプトアウト                 | 有効                                                        |
 | `INFRA_ENABLED`       | `ci.yml`（infra）/ `cd-infra.yml`（plan、手動 dispatch 含む）     | infra エリアの一時停止                                                                                                    | オプトアウト                 | 有効                                                        |
+| `SCAFFOLD_ENABLED`    | `ci.yml` / `ci-sandbox.yml`（ともに scaffold）                    | scaffold ジョブ（#294）の一時停止。特定エリアに属さない横断ジョブだが極性は他と同じ                                       | オプトアウト                 | 有効                                                        |
 | `INFRA_APPLY_ENABLED` | `cd-infra.yml`（`apply-dev`/`apply-prod`）                        | apply 実行の二重鍵（`workflow_dispatch` 限定に加えて、対象は `environment` 入力で `dev`/`prod` を選択・デフォルト `dev`） | オプトイン（`== 'true'`）    | 無効（`apply-dev`/`apply-prod` スキップ）                   |
 | `LIVE_SMOKE_ENABLED`  | `cd-app.yml`（`smoke-test`、第4のゲート）                         | 実ブラウザ E2E スモークテストの実行可否                                                                                   | オプトイン（`== 'true'`）    | 無効（`smoke-test` スキップ、デプロイ自体はブロックしない） |
 

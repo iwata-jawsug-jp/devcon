@@ -462,11 +462,12 @@ cp infra/env/dev.tfvars.example      infra/env/dev.tfvars
 （`required_status_checks`: `changes / check`・`backend / check`・`frontend / check`・
 `infra / check`・`scripts / check`）。`ci.yml` は現在 `backend-go`・`gen-types`・`scaffold` を
 含む8ジョブを持つが、必須チェックに登録しているのはこの5つのみ — `backend-go` はオプトイン
-スイッチで既定 skip（[ci-cd-area-switches.md](ci-cd-area-switches.md)）、`gen-types`/`scaffold`
-はどのエリアの変更でも実行されうる横断ジョブ（エリア別スイッチの対象外）なので、必須チェックに
-入れると無関係な PR まで意味なく待たされる。エリア別スイッチで skip されたジョブ（上記5つのうち）
-は「合格」扱いなので、該当エリアの変更が無い PR は引き続き skip でマージできる。変更があるのに
-赤い PR はマージボタンが物理的に押せなくなる。
+スイッチ（`BACKEND_GO_ENABLED`）で既定 skip、`scaffold` は専用の `SCAFFOLD_ENABLED`
+（オプトアウト、既定は実行）を持つが、`gen-types` と同じくどのエリアの変更でも実行され
+うる横断ジョブであることに変わりはないため（[ci-cd-area-switches.md](ci-cd-area-switches.md)）、
+必須チェックに入れると無関係な PR まで意味なく待たされる。エリア別スイッチで skip された
+ジョブ（上記5つのうち）は「合格」扱いなので、該当エリアの変更が無い PR は引き続き skip で
+マージできる。変更があるのに赤い PR はマージボタンが物理的に押せなくなる。
 
 > **チェック名に `/ check` が付く理由（#295, ADR-0012）:** `ci.yml` の各ジョブは
 > `workflow_call` で `reusable-<area>.yml` を呼び出す構成になっている

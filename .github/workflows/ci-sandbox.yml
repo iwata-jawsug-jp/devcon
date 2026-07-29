@@ -9,10 +9,10 @@ name: CI (sandbox)
 # reusable-changes.yml — this file's whole point is to run every area unconditionally, so it
 # calls each reusable-<area>.yml directly instead of gating on path-filter output.
 #
-# backend-go is the one exception: it still respects BACKEND_GO_ENABLED (opt-in, default
-# disabled — services/backend/go isn't released yet, docs/ci-cd-area-switches.md). Unlike the
-# other jobs here, this isn't a path-filter skip; it's the same "not ready to run at all"
-# switch ci.yml uses, so sandbox branches must opt in the same way to exercise it.
+# backend-go and scaffold are the exceptions: they still respect BACKEND_GO_ENABLED /
+# SCAFFOLD_ENABLED (docs/ci-cd-area-switches.md). Unlike the other jobs here, these aren't
+# path-filter skips; they're the same dedicated switches ci.yml uses (backend-go opt-in/default
+# disabled, scaffold opt-out/default enabled), so sandbox branches respect the same on/off state.
 on:
   push:
     branches: [sandbox/**]
@@ -47,3 +47,5 @@ jobs:
 
   scaffold:
     uses: ./.github/workflows/reusable-scaffold.yml
+    with:
+      should_run: ${{ vars.SCAFFOLD_ENABLED != 'false' }}

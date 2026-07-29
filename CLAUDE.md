@@ -94,6 +94,8 @@ never hand-written twice.
 - `docs/org-rulesets.md` — org-level GitHub Ruleset standard for `iwata-jawsug-jp` (#295);
   applied live since 2026-07-14 (ruleset id `18954567`, `devcon` excluded — see the doc for
   the confirm command and the exclusion's history).
+- `docs/scripts.md` — index of `tools/script/*.sh`: what each does, how to run it, and where
+  its detailed doc lives.
 - `docs/ai-instructions.md` — keeping these rules in sync with the Copilot
   `.github/instructions/*` mirror (change `docs/` + `CLAUDE.md` + Copilot files together).
 - `docs/adr/` — Architecture Decision Records: record the "why" behind infra/architecture

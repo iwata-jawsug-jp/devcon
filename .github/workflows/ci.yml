@@ -81,10 +81,12 @@ jobs:
       should_run: ${{ needs.changes.outputs.scripts == 'true' }}
 
   # #294: copier.yml から実際に生成し、生成物が壊れていないことを検証する（置換漏れ・
-  # terraform validate・backend lint・frontend lint/test）。エリアスイッチの対象外
-  # （docs/ci-cd-area-switches.md の「対象外」節。scripts ジョブと同じ扱い）。
+  # terraform validate・backend lint・frontend lint/test）。backend/frontend/infra のような
+  # エリア別スイッチは持たないが（どのエリア変更でも対象になりうる横断ジョブ）、専用の
+  # SCAFFOLD_ENABLED を持つ（他のエリア別スイッチと同じ極性: `!= 'false'`、未設定なら有効。
+  # docs/ci-cd-area-switches.md 参照）。
   scaffold:
     needs: changes
     uses: ./.github/workflows/reusable-scaffold.yml
     with:
-      should_run: ${{ needs.changes.outputs.scaffold == 'true' }}
+      should_run: ${{ needs.changes.outputs.scaffold == 'true' && vars.SCAFFOLD_ENABLED != 'false' }}

@@ -24,11 +24,19 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 | `BACKEND_ENABLED`  | `ci.yml` の backend / `cd-app.yml` の build → migrate → deploy-api      |
 | `FRONTEND_ENABLED` | `ci.yml` の frontend / `cd-app.yml` の frontend                         |
 | `INFRA_ENABLED`    | `ci.yml` の infra / `cd-infra.yml` の plan・apply（手動 dispatch 含む） |
+| `SCAFFOLD_ENABLED` | `ci.yml` / `ci-sandbox.yml` の `scaffold` ジョブ（#294）                |
 
-対象外: `ci.yml` の `scripts` ジョブ・`scaffold` ジョブ（#294。どのエリアにも属さない）・
-`gen-types` ジョブ（#638。backend/backend-go/frontend 横断のため、いずれかが変更された
-ときに実行——専用スイッチではなく3エリアの変更検知の OR で `should_run` を決めている）、
-sandbox 系ワークフロー（`ci-sandbox.yml` / `cd-app-sandbox.yml` / `cd-infra-sandbox.yml`）。
+`SCAFFOLD_ENABLED` は他の3つと違い `scaffold` ジョブは特定のエリアに属さない横断ジョブ
+（`scripts`/`gen-types` と同じ）だが、判定の極性・既定値は上記3つと同じオプトアウト
+（`!= 'false'`、未設定なら有効）。`backend-go` の `BACKEND_GO_ENABLED` と同様に
+`ci-sandbox.yml` の `scaffold` でも同じ変数を尊重する（他のエリア別スイッチが
+`ci-sandbox.yml` では効かないのと対照的 — sandbox 側は「変更検知に基づくスキップ」ではなく
+「このジョブ自体を止める/止めない」という単純な on/off なので、ci.yml と同じ扱いで揃える）。
+
+対象外: `ci.yml` の `scripts` ジョブ（専用スイッチなし）・`gen-types` ジョブ（#638。
+backend/backend-go/frontend 横断のため、いずれかが変更されたときに実行——専用スイッチ
+ではなく3エリアの変更検知の OR で `should_run` を決めている）、sandbox 系ワークフロー
+（`cd-app-sandbox.yml` / `cd-infra-sandbox.yml`。`ci-sandbox.yml` は上記の通り一部例外）。
 `ci.yml` の backend-go は `BACKEND_GO_ENABLED` で止めるが、これは極性が逆（オプトイン）
 ——下記「オプトイン方式のスイッチ」を参照。`ci-sandbox.yml` の backend-go だけは例外で、
 このオプトインスイッチの対象**内**（他エリアと違い「変更検知でスキップ」ではなく
@@ -47,6 +55,7 @@ sandbox 系ワークフロー（`ci-sandbox.yml` / `cd-app-sandbox.yml` / `cd-in
 gh variable set BACKEND_ENABLED --body "false"
 gh variable set FRONTEND_ENABLED --body "false"
 gh variable set INFRA_ENABLED --body "false"
+gh variable set SCAFFOLD_ENABLED --body "false"
 
 # 現状確認
 gh variable list

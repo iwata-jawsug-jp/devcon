@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-07-29
+
+### Added
+
+- **GitHub Ruleset（`main-ci-required`/`sandbox-isolation`）の作成・更新と、デフォルトブランチ名変更を行うシェルスクリプトを追加**: これまで `docs/infrastructure.md`/`docs/sandbox.md` にコピペ用の `gh api` 手順として書かれているだけだったブランチ保護ルールセットの作成・更新を `tools/script/update-branch-rulesets.sh` としてスクリプト化した（`-t main|sandbox|all` で対象選択、`--dry-run` で送信内容の事前確認が可能）。あわせて、デフォルトブランチ名を任意の旧名→新名に変更する汎用ツール `tools/script/rename-default-branch.sh` を追加した。既定では `.github/workflows/*.yml` 内のトリガー参照（`branches: [<old>]` 等）の書き換えのみを行い（ワーキングツリー編集・コミットはしない）、`--rename` を付けたときのみ GitHub 上のブランチを実際にリネームする（`default_branch` の付け替えを含む破壊的操作）（#685）。
+- **`tools/script/` 配下スクリプト全体の使い方索引 `docs/scripts.md` を新設**: 各スクリプトの用途・実行方法・関連ドキュメントへのリンクをカテゴリ別にまとめた。
+
+
+### Changed
+
+- **`ci.yml`/`ci-sandbox.yml` の `scaffold` ジョブに専用のオプトアウトスイッチ `SCAFFOLD_ENABLED` を追加**: 他のエリア別スイッチと同じ極性（未設定なら有効、`"false"` で停止）。`scaffold` は特定エリアに属さない横断ジョブだが、`backend`/`frontend`/`infra` と同様に一時停止できるようにした（#684）。
+
 ## [0.7.2] - 2026-07-27
 
 ### Changed
@@ -1413,7 +1425,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.6.9...v0.7.0
