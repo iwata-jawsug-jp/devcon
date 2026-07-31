@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-31
+
+### Fixed
+
+- **`verify-tree-health.sh` が公開ミラー自身では実行できない不具合を修正**: v0.8.0 リリースで実際に発覚。`tools/script/publish-to-public.sh` は `publish:false` のため公開ミラー（`iwata-jawsug-jp/devcon`）自身には存在しないが、`verify-tree-health.sh`（#714 で blocking 化済み）はそれを無条件に呼び出しており、公開ミラー自身の `tree-health` ジョブが `exit 127` で毎回失敗していた。`publish-to-public.sh` の有無で分岐させ、無い場合（＝このツリー自身が既に公開用ツリー）はそのツリー単体とその生成物（copier生成先）だけを検査するように修正した。
+
 ## [0.8.0] - 2026-07-31
 
 ### Added
@@ -1422,7 +1428,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.2...v0.7.3

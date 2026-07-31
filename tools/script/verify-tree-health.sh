@@ -6,6 +6,13 @@
 # 食い違っている」という課題（提案書 §2.1・ADR-0028 Context）に対応するため、生成は必ず両方の
 # 起点から行う。生成先どうしの差分（課題D: 起点により成果物が変わる問題）も検出する。
 #
+# このスクリプト自身は publish:true（開発用・公開用どちらのツリーにも存在する）。開発用ツリーで
+# 実行された場合（tools/script/publish-to-public.sh が存在する）は上記の4本+差分チェックを行うが、
+# 公開用ツリー自身で実行された場合（publish-to-public.sh は publish:false のため存在しない）は、
+# 「このツリー自身」が既に公開用ツリーなので、publish-to-public.sh による構築を試みず、このツリー
+# 単体とその生成物だけを検査する（実機で発覚: v0.8.0 リリース時、公開ミラー自身の CI で
+# publish-to-public.sh が無く exit 127 になっていた）。
+#
 # Usage: verify-tree-health.sh [--strict]
 #   --strict を渡すと、いずれかのチェックで問題が見つかった時点で exit 1 になる。
 #   Epic #698（④⑤⑥の完了によりリンク切れ・差分が実測0になったこと）を受けて、
@@ -15,6 +22,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECK="$REPO_ROOT/tools/script/check-tree-health.sh"
+PUBLISH_SCRIPT="$REPO_ROOT/tools/script/publish-to-public.sh"
 
 STRICT_FLAG=()
 if [[ "${1:-}" == "--strict" ]]; then
@@ -43,6 +51,31 @@ TEST_PROJECT_NAME="${TEST_PROJECT_NAME:-tree-health-verify}"
 TEST_GITHUB_ORG="${TEST_GITHUB_ORG:-example-org}"
 TEST_AWS_REGION="${TEST_AWS_REGION:-us-east-1}"
 
+if [[ ! -f "$PUBLISH_SCRIPT" ]]; then
+  echo "[verify-tree-health] publish-to-public.sh が無いツリー（公開用ツリー自身）として実行 ..."
+  overall_status=0
+  "$CHECK" "$REPO_ROOT" --label "public (self)" "${STRICT_FLAG[@]}" || overall_status=$?
+
+  GEN_FROM_PUBLIC="$WORK/gen-from-public"
+  echo "[verify-tree-health] このツリーを起点に copier 生成 ..."
+  copier copy \
+    --vcs-ref=HEAD \
+    --data "project_name=$TEST_PROJECT_NAME" \
+    --data "github_org=$TEST_GITHUB_ORG" \
+    --data "github_repo=$TEST_PROJECT_NAME" \
+    --data "aws_region=$TEST_AWS_REGION" \
+    --defaults --trust \
+    "$REPO_ROOT" "$GEN_FROM_PUBLIC" >/dev/null
+
+  echo "[verify-tree-health] 生成先（このツリー起点。第三者が実際に通る経路）のリンクチェック ..."
+  "$CHECK" "$GEN_FROM_PUBLIC" --label "generated (public-origin)" "${STRICT_FLAG[@]}" || overall_status=$?
+
+  if [[ $overall_status -ne 0 ]]; then
+    echo "[verify-tree-health] 現状値を上記のとおり検出しました（--strict 指定時のみ非0で終了）"
+  fi
+  exit "$overall_status"
+fi
+
 PUBLIC_TREE="$WORK/public"
 GEN_FROM_DEV="$WORK/gen-from-dev"
 GEN_FROM_PUBLIC="$WORK/gen-from-public"
@@ -52,7 +85,7 @@ overall_status=0
 "$CHECK" "$REPO_ROOT" --label "dev" "${STRICT_FLAG[@]}" || overall_status=$?
 
 echo "[verify-tree-health] publish-to-public.sh --dry-run で公開用ツリーを構築 ..."
-DRY_RUN=1 DRY_RUN_OUT="$PUBLIC_TREE" "$REPO_ROOT/tools/script/publish-to-public.sh" HEAD >/dev/null
+DRY_RUN=1 DRY_RUN_OUT="$PUBLIC_TREE" "$PUBLISH_SCRIPT" HEAD >/dev/null
 
 echo "[verify-tree-health] 公開用ツリーのリンクチェック ..."
 "$CHECK" "$PUBLIC_TREE" --label "public" "${STRICT_FLAG[@]}" || overall_status=$?
