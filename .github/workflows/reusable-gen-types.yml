@@ -36,7 +36,7 @@ jobs:
         working-directory: services/backend/python
         run: uv sync --all-extras --dev
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: services/backend/go/go.mod
           cache-dependency-path: services/backend/go/go.sum

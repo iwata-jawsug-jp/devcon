@@ -30,14 +30,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: services/backend/go/go.mod
           cache-dependency-path: services/backend/go/go.sum
       # Version pin must match Makefile's GOLANGCI_LINT_VERSION (backend-go-lint /
       # backend-go-setup) — update both together, same convention as TERRAFORM_VERSION.
       - name: golangci-lint (staticcheck + gosec + govet + errcheck + unused)
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
           working-directory: services/backend/go
