@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-24
 - **Deciders:** Itou Hideki
+- **Audience:** publish, generate
 - **Related:** #631（問題2）、[docs/sandbox.md](../sandbox.md) 週次エフェメラルサイクル、
   [ADR-0023](0023-cd-app-deploy-reusable-workflow-and-tfvars-materialize.md)
 

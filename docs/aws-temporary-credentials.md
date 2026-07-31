@@ -1,7 +1,7 @@
 # AWS 一時クレデンシャル発行手順（IAM Identity Center を使わない場合）
 
 このリポジトリの既定の推奨手順は `tools/script/aws-sso-setup.sh` による **AWS IAM Identity
-Center（旧 AWS SSO）** 経由のログイン（[README.md「AWS SSO 初期設定」](../README.md#aws-sso-初期設定)）。
+Center（旧 AWS SSO）** 経由のログイン（[README.md「AWS 認証設定」](../README.md#aws-認証設定)）。
 ただし IAM Identity Center は AWS Organizations の管理アカウント側で有効化されている必要があり、
 個人アカウントや Organizations 未導入のアカウントでは使えないことがある。
 
@@ -40,7 +40,7 @@ AWS CLI が組み込みで提供する、コンソールサインインを再利
 [参考: aws login で AWS CLI の認証がこう変わる](https://blog.serverworks.co.jp/aws-cli-login-command)）。
 長期アクセスキーを一切作らずに済むため、Identity Center が使えない場合の**新しい既定の
 推奨手順**。IAM Identity Center を使っている場合はこのコマンドではなく `aws sso login`
-（[README.md「AWS SSO 初期設定」](../README.md#aws-sso-初期設定)）を使うこと。
+（[README.md「AWS 認証設定」](../README.md#aws-認証設定)）を使うこと。
 
 ### 前提条件
 
@@ -415,8 +415,8 @@ CloudWatch Logs Insights クエリまたは EventBridge ルールで実装でき
 
 ## 関連ドキュメント
 
-- [README.md「AWS SSO 初期設定」](../README.md#aws-sso-初期設定) — 既定の推奨手順（IAM Identity
-  Center）
+- [README.md「AWS 認証設定」](../README.md#aws-認証設定) — SSO（IAM Identity Center）と
+  `aws login` の使い分け
 - [AWS公式: Login for AWS local development using console credentials](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html)
   — `aws login`/`aws logout` のリファレンス
 - [参考: aws login で AWS CLI の認証がこう変わる（サーバーワークスエンジニアブログ）](https://blog.serverworks.co.jp/aws-cli-login-command)

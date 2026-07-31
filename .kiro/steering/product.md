@@ -1,7 +1,7 @@
 # Product Overview
 
 `devcon`（`devcon`）は、Dev Container 上で動く **Web アプリ＋その AWS インフラ（IaC）を
-ひとまとめにしたモノレポのテンプレート**。JAWS-UG 岩松コミュニティ向けに、「AI（Claude Code /
+ひとまとめにしたモノレポのテンプレート**。JAWS-UG 磐田コミュニティ向けに、「AI（Claude Code /
 Copilot）と一緒に、ガードレール付きで AWS アプリ開発を一周体験できる」ことを狙う教材兼ひな型。
 
 ## Core Capabilities

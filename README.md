@@ -5,17 +5,39 @@
 [![Security Policy](https://img.shields.io/badge/Security-Policy-blue.svg)](SECURITY.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Web アプリケーションとそのインフラ（IaC）のためのモノレポ。Dev Container 上で、
-**FastAPI** バックエンド・**Vite + Vue 3** フロントエンド・**Terraform / AWS** を開発する。
-設計・規約の詳細は [`CLAUDE.md`](CLAUDE.md) を参照。
+**Web アプリ＋AWS インフラ（IaC）のひな型を、AI（Claude Code / Copilot）とガードレール付きで
+一周体験できるモノレポテンプレート。** Dev Container 上で **FastAPI** バックエンド・
+**Vite + Vue 3** フロントエンド・**Terraform / AWS** を統合し、要件定義から実装・CI/CD・
+実際の AWS デプロイまでを安全に学べる。設計・規約の詳細は [`CLAUDE.md`](CLAUDE.md) を参照。
 
-このプロジェクトを自分で使うには、公開リポジトリ（`iwata-jawsug-jp/devcon`）を **fork** するか、
-[`copier`](#自分の名前でプロジェクトを生成するスキャフォールド) でプロジェクト名・GitHub org/repo・
-AWS リージョンを指定した「命名済み」の新規プロジェクトとして生成する。アプリをローカルで動かす
-だけなら AWS は不要（下記「クイックスタート（ローカル）」）。CI/CD で自分の AWS にデプロイするには
-「本格セットアップ（自分の AWS で実開発）」を行う。
+> 🔰 **はじめての方へ**: AWS アカウントは不要です。Dev Container を開いて
+> `make setup && make dev` を実行するだけで、数分でアプリが動きます。
+> → [クイックスタート（ローカル）](#クイックスタートローカル)
+
+このリポジトリを自分のプロジェクトとして使いたい場合は
+[自分の名前でプロジェクトを生成する（スキャフォールド）](#自分の名前でプロジェクトを生成するスキャフォールド)、
+CI/CD で自分の AWS にデプロイするところまで進めたい場合は
+[本格セットアップ（自分の AWS で実開発）](#本格セットアップ自分の-aws-で実開発) を参照。
+
+## 目次
+
+- [概要](#概要)
+- [クイックスタート（ローカル）](#クイックスタートローカル)
+- [自分の名前でプロジェクトを生成する（スキャフォールド）](#自分の名前でプロジェクトを生成するスキャフォールド)
+- [本格セットアップ（自分の AWS で実開発）](#本格セットアップ自分の-aws-で実開発)
+- [リファレンス](#リファレンス)
+- [コントリビュート](CONTRIBUTING.md)
+- [ライセンス](#ライセンス)
 
 ## 概要
+
+フロントエンド（Vue 3 SPA）・バックエンド API（FastAPI）・非同期ワーカー（Go / Lambda）・
+AWS インフラ（Terraform）を1つのモノレポにまとめ、Dev Container を開いた瞬間から全部つながった
+状態で開発を始められるひな型。`items` の参照系 CRUD と `health` エンドポイントを最小の骨組みとして
+持ち、長期 AWS キーを使わない GitHub OIDC 経由の CI/CD、`CLAUDE.md` 群による AI 向けの実装ガードレール
+（やってよいこと・確認が要ること・やってはいけないことの明文化）も最初から組み込まれている。
+以下の「構成」「アーキテクチャ」で全体像を、次の「[クイックスタート](#クイックスタートローカル)」で
+実際に手を動かす手順を示す。
 
 ### 構成
 
@@ -59,6 +81,14 @@ make dev       # backend(:8000) と frontend(:5173) を同時起動
 # アプリ: http://localhost:5173 ・ API ドキュメント: http://localhost:8000/docs
 ```
 
+> `make setup` の実行中に npm の警告（`Failed to hardlink files` / `allow-scripts` 等）が
+> 出ることがあるが、いずれも devcontainer のファイルシステム構成に起因する既知の警告で
+> `make dev` の実行を妨げない。`make dev` 起動時のログに出る `Cognito is not configured ...
+authentication will not work` も、ローカルでは認証機能自体を使わない設計のため想定通り
+> （`items` API は認証必須のため、この状態では Swagger UI から直接は叩けない。詳細・
+> ローカルでの動作確認方法は
+> [`docs/app-development.md`「認証」](docs/app-development.md#認証cognito-jwt--スコープ認可)を参照）。
+
 コミットする場合は、続けて「本格セットアップ」の [Git 初期設定](#git-初期設定) を済ませる。
 
 ## 自分の名前でプロジェクトを生成する（スキャフォールド）
@@ -99,7 +129,9 @@ copier copy gh:iwata-jawsug-jp/devcon <生成先ディレクトリ>
    生成方法によって変わらない。
 
 生成物が CI で green になることは `make scaffold-verify`（`ci.yml` の `scaffold` ジョブ）で
-継続的に検証している。
+継続的に検証している。生成物の内部整合（Markdown相対リンク切れ）は `make tree-health`
+（`ci.yml` の `tree-health` ジョブ、#699）が、開発用ツリー・公開用ツリーそれぞれを起点にした
+生成結果まで含めて検査する（blocking）。
 
 ### 生成後にテンプレートの更新を取り込む（`copier update`）
 
@@ -161,7 +193,13 @@ git push -u origin main           # 初回 push（upstream を設定）
 > 切り替えて `git commit --amend --reset-author --no-edit` で author を書き換える。
 > `gh` で PR 操作をする場合は `gh auth login` を実行。
 
-### AWS SSO 初期設定
+### AWS 認証設定
+
+`infra/bootstrap` の apply やローカルでの `aws` CLI 操作には、一時的な AWS 認証情報が要る。
+どちらか一方でよい。**IAM Identity Center を導入済みなら SSO**、**そうでなければ（個人アカウント等
+では一般的にはこちら）`aws login`** を使う。
+
+#### SSO（IAM Identity Center を導入済みの場合）
 
 `tools/script/aws-sso-setup.sh` で AWS SSO プロファイルの作成・ログイン・認証確認を
 一括で行う。`sso_account_id` と SSO start URL は環境固有のため**必須**（既定値を持たない）。
@@ -188,10 +226,20 @@ rebuild してもプロファイルと SSO トークンは残る（期限切れ�
 ./tools/script/aws-sso-setup.sh -a <id> -u <start_url> -p dev -n PowerUserAccess
 ```
 
-> IAM Identity Center が使えない（個人アカウント等で未導入の）場合は、代替の一時クレデンシャル
-> 発行手順を [`docs/aws-temporary-credentials.md`](docs/aws-temporary-credentials.md) にまとめて
-> ある（推奨: `aws login`。ほか IAM ユーザー + `get-session-token` / `assume-role`、
-> IAM Roles Anywhere、CloudShell 経由）。
+#### `aws login`（IAM Identity Center が無い場合。一般的にはこちら）
+
+AWS CLI **2.32 以降**なら、root / IAM ユーザー / フェデレーテッドID の既存コンソールログインを
+そのまま使って一時クレデンシャルを発行できる（長期アクセスキー・IAM Identity Center とも不要）。
+
+```bash
+aws login
+# devcontainer / Codespaces にはデフォルトブラウザが無いため、通常は --remote を付ける
+aws login --remote
+```
+
+前提条件・トラブルシュート・他の代替手段（IAM ユーザー + `get-session-token` / `assume-role`、
+IAM Roles Anywhere、CloudShell 経由）との比較は
+[`docs/aws-temporary-credentials.md`](docs/aws-temporary-credentials.md) を参照。
 
 ### 自分の AWS にデプロイする
 

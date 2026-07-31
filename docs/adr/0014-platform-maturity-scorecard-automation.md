@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-15
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** [#297](https://github.com/iwata-jawsug-jp/devcon/issues/297),
   [ADR-0006](0006-dora-deployment-frequency-and-lead-time-definitions.md)（同型の週次集計基盤）,
   [`docs/metrics/scorecard-criteria.md`](../metrics/scorecard-criteria.md)（採点基準そのものの定義）

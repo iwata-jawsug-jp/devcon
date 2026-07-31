@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-15
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** [#376](https://github.com/iwata-jawsug-jp/devcon/issues/376)（残タスク「reusable
   workflow化」）、[ADR-0008](0008-live-smoke-playwright-project-with-disposable-cognito-user.md)
   （live-smoke 自体の設計）、[ADR-0012](0012-reusable-workflow-in-repo-tag-versioned.md)（CI 側の

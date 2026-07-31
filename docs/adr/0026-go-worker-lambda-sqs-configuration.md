@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-25
 - **Deciders:** Itou Hideki
+- **Audience:** publish, generate
 - **Related:** [ADR-0024](0024-adopt-go-as-second-backend-language.md)、#639、#640、PR #648、
   [docs/sandbox.md](../sandbox.md)
 

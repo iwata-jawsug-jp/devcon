@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-16
 - **Deciders:** itouhi
+- **Audience:** publish
 - **Related:** #239、[Epic #300](https://github.com/iwata-jawsug-jp/devcon/issues/300)、#294、#298、#476、
   [ADR-0010](0010-adopt-copier-for-scaffold-cli.md)・[ADR-0011](0011-scaffold-template-in-place.md)・
   [ADR-0012](0012-reusable-workflow-in-repo-tag-versioned.md)（いずれも同種の「配布可能な資産を

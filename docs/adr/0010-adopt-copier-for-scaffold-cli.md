@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-14
 - **Deciders:** itouhi
+- **Audience:** publish
 - **Related:** #294, [Epic #300](https://github.com/iwata-jawsug-jp/devcon/issues/300)（IDP化ロードマップ
   フェーズ1）、#153（プラットフォームエンジニアリング評価）、#239（共有 Terraform モジュール。
   インフラ層の配布はそちらの担当でありスコープ外）、#298（フェーズ3: テンプレート更新の下流追従）

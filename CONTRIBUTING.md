@@ -118,7 +118,7 @@ CLAUDE.md と各ツール設定に準拠します。
 
 ## 依存関係の更新
 
-- 依存更新は [Dependabot](.github/dependabot.yml) が weekly で PR を作成します（GitHub Actions /
+- 依存更新は Dependabot が weekly で PR を作成します（GitHub Actions /
   npm / uv / Terraform / devcontainer features / devcontainer ベースイメージ）。minor・patch は
   ecosystem ごとに 1 PR にグループ化されます。**通常の PR と同じく CI が green になってから**
   取り込んでください。

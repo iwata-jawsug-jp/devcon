@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-02
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #98, [提案書（PR #97）](https://github.com/iwata-jawsug-jp/devcon/pull/97),
   [実装（PR #99）](https://github.com/iwata-jawsug-jp/devcon/pull/99),
   [ADR-0003](0003-keep-monorepo-through-domain-and-authn-expansion.md)

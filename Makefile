@@ -12,7 +12,13 @@ FRONTEND_DIR   := services/frontend
         backend-setup backend-dev backend-test backend-lint \
         backend-go-setup backend-go-dev backend-go-test backend-go-lint \
         frontend-setup frontend-dev frontend-build frontend-lint frontend-test frontend-test-e2e \
-        metrics-dora-lint metrics-dora-test check-oauth-scopes scaffold-verify
+        metrics-dora-lint metrics-dora-test check-oauth-scopes tree-health \
+        gen-audience-excludes audience-drift-check
+# audience:no-generate — 課題A（#702）: scaffold-verify は生成先には検証対象の copier.yml
+# 自体が無く必ず失敗する（tools/script/verify-scaffold.sh は generate:false、
+# tools/template/audience.yml）ため、この .PHONY 宣言ごと生成先から除く。
+.PHONY: scaffold-verify
+# /audience:no-generate
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -22,7 +28,10 @@ help: ## Show this help
 setup: backend-setup backend-go-setup frontend-setup hooks ## Install all toolchains + git hooks
 
 hooks: ## Install pre-commit git hooks
-	pip install --quiet pre-commit || python3 -m pip install --quiet pre-commit
+	# `pip` alone isn't on PATH in the devcontainer (.devcontainer/Dockerfile only sets up
+	# `python3 -m pip` via ensurepip); a bare `pip install` fallback here always failed with a
+	# confusing "command not found" before falling through (#719).
+	python3 -m pip install --quiet pre-commit
 	pre-commit install
 
 check-setup: ## Check dev environment initial setup (tools, logins, make setup)
@@ -248,5 +257,17 @@ metrics-dora-test: ## Run the DORA metrics script's unit tests
 check-oauth-scopes: ## Cross-check infra/auth.tf resource-server scopes against oidcConfig.ts's login scope list (#438)
 	python3 .github/scripts/check_oauth_scopes.py
 
+# audience:no-generate
 scaffold-verify: ## Generate a project from copier.yml and verify it isn't broken (#294; needs copier on PATH)
 	bash tools/script/verify-scaffold.sh
+# /audience:no-generate
+
+tree-health: ## Check link integrity across dev/public/generated(x2) trees (#699/#698 blocking, needs copier on PATH)
+	bash tools/script/verify-tree-health.sh --strict
+
+gen-audience-excludes: ## Regenerate copier.yml/_exclude and publish-to-public.sh/EXCLUDES from tools/template/audience.yml (#700)
+	python3 tools/script/gen-audience-excludes.py --write
+
+audience-drift-check: ## Verify copier.yml/publish-to-public.sh match tools/template/audience.yml, and docs/adr/*.md Audience lines match it too (CI; #700, #704)
+	python3 tools/script/gen-audience-excludes.py --check
+	python3 tools/script/check_adr_audience.py

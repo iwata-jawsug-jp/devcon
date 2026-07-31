@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-19
 - **Deciders:** itouhi
+- **Audience:** publish
 - **Related:** #296, #298, #295, [ADR-0012](0012-reusable-workflow-in-repo-tag-versioned.md),
   [ADR-0017](0017-policy-as-code-conftest.md), [ADR-0010](0010-adopt-copier-for-scaffold-cli.md)
 

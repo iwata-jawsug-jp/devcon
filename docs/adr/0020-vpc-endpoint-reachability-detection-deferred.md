@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-19
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #296, #369, [ADR-0017](0017-policy-as-code-conftest.md),
   [ADR-0007](0007-opentelemetry-adot-sidecar-for-distributed-tracing.md)
 

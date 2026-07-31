@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-04
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #237, [ADR-0001](0001-record-architecture-decisions.md)
 
 ## Context

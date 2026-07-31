@@ -7,27 +7,9 @@
 
 ## [Unreleased]
 
-## [0.7.4] - 2026-07-31
+## [0.8.0] - 2026-07-31
 
 ### Added
-
-- **開発用 → 公開用 → 生成先の資産分離規約を ADR-0028 として決定**: 「開発用リポジトリ → 公開用リポジトリ（ゴールデンパスのテンプレート）→ copier 生成先」という2段の導線を実際に流して測定したところ、生成先の Markdown 相対リンク切れが 41〜57 件（起点ツリー依存）、生成先の `scaffold` CI ジョブが入力の `copier.yml` を除外済みなのに検証配管だけ出力されるため必ず失敗（実測 `exit 1`）、さらに**同じ `copier.yml` から生成しても起点が開発用ツリーか公開用ツリーかで成果物の中身が変わる**（`.github/dependabot.yml` と issue テンプレート4件）という3つの問題が判明した。原因は、同じ「資産を絞り込む」処理を担う2つの導線（`publish-to-public.sh` の `EXCLUDES` と `copier.yml` の `_exclude`）が別々に育ち、分類軸が明文化されていないこと。資産ごとに `publish` / `generate` の2軸を宣言して両導線の除外をそこから導出すること、公開導線に実装済みのブロック単位の除外・除外先参照の掃除を copier 導線へ水平展開すること、両ツリーに同じ健全性ゲートを掛けて検証経路を実使用経路（公開用ツリー起点）に合わせること、ADR の分類はメタデータ行で行いディレクトリ分割や本文書き換えはしないことを決定した。「公開しないが生成する」象限が実在するため、3値の単調な階層ではなく2軸を採る（#697, #698, [ADR-0028](docs/adr/0028-template-and-generated-asset-separation.md)）。
-- **バックエンド言語追加の仕組み化を提案**: `services/backend/` への3言語目以降の追加に再利用できる判断基準が無く、ADR-0024（Go採用）が一度きりの決定として書かれている状態だった。役割分担・実行基盤・スキーマ権威・API契約の不変条件を一般化する判断基準ADRの新設と、`services/backend/<lang>/` の雛形・reusable workflow・IAMスコープを一括生成するスキャフォールドCLI拡張を提案した（#696）。
-
-### Changed
-
-- **dependabot PR 6 件を検証のうえ採用**: いずれも patch/minor の依存更新で、PR ごとの CI（対象エリアの `check` + `changes` + `guard`）が green であることを確認してマージした。
-  - backend: fastapi 0.139.2 → 0.141.1（#689）。uvicorn[standard] の要件緩和（#691）は #689 とのロックファイル競合で dependabot が rebase 後に自動クローズしたため今回は見送り（`uvicorn[standard]>=0.51.0` のまま。再度 open されたら改めて検討）
-  - frontend: npm-minor-patch グループ（@google/design.md 0.4.0、@playwright/test 1.62.0、eslint 10.8.0、globals 17.8.0、vite 8.2.0。#692）、jsdom 29.1.1 → 30.0.1（Node 最小バージョン要求の破壊的変更は本リポジトリが Node 24 のため無関係。#693）
-  - infra: terraform-provider-aws 6.56.0 → 6.57.1（`infra`/`infra/bootstrap` 両面のロックファイル。#690）
-  - GitHub Actions: actions/setup-go 6 → 7、golangci-lint-action 8 → 9（node20 → node24 ランタイム化。#694, #695）
-
-## [0.7.3] - 2026-07-29
-
-### Added
-
-- **GitHub Ruleset（`main-ci-required`/`sandbox-isolation`）の作成・更新と、デフォルトブランチ名変更を行うシェルスクリプトを追加**: これまで `docs/infrastructure.md`/`docs/sandbox.md` にコピペ用の `gh api` 手順として書かれているだけだったブランチ保護ルールセットの作成・更新を `tools/script/update-branch-rulesets.sh` としてスクリプト化した（`-t main|sandbox|all` で対象選択、`--dry-run` で送信内容の事前確認が可能）。あわせて、デフォルトブランチ名を任意の旧名→新名に変更する汎用ツール `tools/script/rename-default-branch.sh` を追加した。既定では `.github/workflows/*.yml` 内のトリガー参照（`branches: [<old>]` 等）の書き換えのみを行い（ワーキングツリー編集・コミットはしない）、`--rename` を付けたときのみ GitHub 上のブランチを実際にリネームする（`default_branch` の付け替えを含む破壊的操作）（#685）。
-- **`tools/script/` 配下スクリプト全体の使い方索引 `docs/scripts.md` を新設**: 各スクリプトの用途・実行方法・関連ドキュメントへのリンクをカテゴリ別にまとめた。
 
 
 ### Changed
@@ -1440,7 +1422,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.1...v0.7.2

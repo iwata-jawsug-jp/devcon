@@ -9,10 +9,14 @@ name: CI (sandbox)
 # reusable-changes.yml — this file's whole point is to run every area unconditionally, so it
 # calls each reusable-<area>.yml directly instead of gating on path-filter output.
 #
-# backend-go and scaffold are the exceptions: they still respect BACKEND_GO_ENABLED /
-# SCAFFOLD_ENABLED (docs/ci-cd-area-switches.md). Unlike the other jobs here, these aren't
-# path-filter skips; they're the same dedicated switches ci.yml uses (backend-go opt-in/default
-# disabled, scaffold opt-out/default enabled), so sandbox branches respect the same on/off state.
+# backend-go, scaffold, and tree-health are the exceptions: they still respect
+# BACKEND_GO_ENABLED / SCAFFOLD_ENABLED / TREE_HEALTH_ENABLED (docs/ci-cd-area-switches.md).
+# Unlike the other jobs here, these aren't path-filter skips; they're the same dedicated
+# switches ci.yml uses (backend-go opt-in/default disabled, scaffold and tree-health
+# opt-out/default enabled), so sandbox branches respect the same on/off state. tree-health
+# never depended on path-filter output in ci.yml to begin with (#699 — it can't, since a broken
+# link is caused by the file that *disappeared*, not one that changed), so it behaves
+# identically here and in ci.yml.
 on:
   push:
     branches: [sandbox/**]
@@ -45,7 +49,18 @@ jobs:
   scripts:
     uses: ./.github/workflows/reusable-scripts.yml
 
+  # audience:no-generate
+  # 課題A（#702）: 生成先には検証対象の copier.yml が無く必ず失敗する
+  # （reusable-scaffold.yml は generate:false、tools/template/audience.yml）。
   scaffold:
     uses: ./.github/workflows/reusable-scaffold.yml
     with:
       should_run: ${{ vars.SCAFFOLD_ENABLED != 'false' }}
+  # /audience:no-generate
+
+  # #699: TREE_HEALTH_ENABLED も scaffold と同じ扱いで sandbox でも尊重する（この変数は元々
+  # 変更検知でゲートしない設計なので、ci.yml との差はここでも無い）。
+  tree-health:
+    uses: ./.github/workflows/reusable-tree-health.yml
+    with:
+      should_run: ${{ vars.TREE_HEALTH_ENABLED != 'false' }}

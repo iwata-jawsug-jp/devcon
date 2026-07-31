@@ -5,7 +5,7 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 [infrastructure.md](infrastructure.md) の「エリア別スイッチ」を参照。
 
 > このリポジトリが使う全リポジトリ変数（bootstrap 配線・本番/sandbox アプリ用も含む）の
-> 一覧は [repository-variables.md](repository-variables.md) を参照。本書はスイッチ系6個の
+> 一覧は [repository-variables.md](repository-variables.md) を参照。本書はスイッチ系8個の
 > 詳しい設定手順に特化している。
 
 ## 仕組み（要点）
@@ -19,12 +19,15 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 
 ## 変数一覧
 
-| 変数               | 停止する範囲                                                            |
-| ------------------ | ----------------------------------------------------------------------- |
-| `BACKEND_ENABLED`  | `ci.yml` の backend / `cd-app.yml` の build → migrate → deploy-api      |
-| `FRONTEND_ENABLED` | `ci.yml` の frontend / `cd-app.yml` の frontend                         |
-| `INFRA_ENABLED`    | `ci.yml` の infra / `cd-infra.yml` の plan・apply（手動 dispatch 含む） |
-| `SCAFFOLD_ENABLED` | `ci.yml` / `ci-sandbox.yml` の `scaffold` ジョブ（#294）                |
+| 変数                  | 停止する範囲                                                            |
+| --------------------- | ----------------------------------------------------------------------- |
+| `BACKEND_ENABLED`     | `ci.yml` の backend / `cd-app.yml` の build → migrate → deploy-api      |
+| `FRONTEND_ENABLED`    | `ci.yml` の frontend / `cd-app.yml` の frontend                         |
+| `INFRA_ENABLED`       | `ci.yml` の infra / `cd-infra.yml` の plan・apply（手動 dispatch 含む） |
+| `SCAFFOLD_ENABLED`    | `ci.yml` / `ci-sandbox.yml` の `scaffold` ジョブ（#294）                |
+| `TREE_HEALTH_ENABLED` | `ci.yml` / `ci-sandbox.yml` の `tree-health` ジョブ（#699）             |
+
+<!-- audience:no-generate -->
 
 `SCAFFOLD_ENABLED` は他の3つと違い `scaffold` ジョブは特定のエリアに属さない横断ジョブ
 （`scripts`/`gen-types` と同じ）だが、判定の極性・既定値は上記3つと同じオプトアウト
@@ -32,6 +35,16 @@ frontend / backend / infra の各エリアごとに、CI・CD ワークフロー
 `ci-sandbox.yml` の `scaffold` でも同じ変数を尊重する（他のエリア別スイッチが
 `ci-sandbox.yml` では効かないのと対照的 — sandbox 側は「変更検知に基づくスキップ」ではなく
 「このジョブ自体を止める/止めない」という単純な on/off なので、ci.yml と同じ扱いで揃える）。
+
+<!-- /audience:no-generate -->
+
+`TREE_HEALTH_ENABLED` も判定の極性・既定値は上記と同じオプトアウト（`!= 'false'`、未設定なら
+有効）で、`ci-sandbox.yml` でも同じ変数を尊重する点は `SCAFFOLD_ENABLED` と同じだが、
+**変更検知（`needs.changes.outputs.*`）ではゲートしない**点が他のスイッチと異なる。
+リンク切れは「変更されたファイル」ではなく「削除・リネームされた参照先ファイル」によっても
+起きるため、path-filter方式では見逃しが生じる（索引ファイル自体が変更されなくても、参照先が
+消えればリンク切れになる）。そのためこのジョブは `should_run` の判定にファイル変更検知を
+一切使わず、変数のON/OFFだけで毎回4本のツリー全体を検査する。
 
 対象外: `ci.yml` の `scripts` ジョブ（専用スイッチなし）・`gen-types` ジョブ（#638。
 backend/backend-go/frontend 横断のため、いずれかが変更されたときに実行——専用スイッチ
@@ -56,6 +69,7 @@ gh variable set BACKEND_ENABLED --body "false"
 gh variable set FRONTEND_ENABLED --body "false"
 gh variable set INFRA_ENABLED --body "false"
 gh variable set SCAFFOLD_ENABLED --body "false"
+gh variable set TREE_HEALTH_ENABLED --body "false"
 
 # 現状確認
 gh variable list

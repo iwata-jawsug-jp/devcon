@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-02
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #116, #108（開発環境としての評価 §改善6）,
   [ADR-0001](0001-record-architecture-decisions.md),
   [docs/development-environment.md](../development-environment.md)

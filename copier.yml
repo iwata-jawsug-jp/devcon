@@ -22,41 +22,42 @@ _exclude:
   - .git
   - .DS_Store
   - .svn
-  # リリース配管そのもの（公開ミラー専用。生成されたプロジェクトには不要）
-  - .github/workflows/publish.yml
-  - tools/script/publish-to-public.sh
-  - docs/release.md
-  # devcontainer 事前ビルドイメージの公開ワークフロー（#532）。devcon⇄iwata-jawsug-jp/devcon
-  # のリポジトリペア専用（job-level if で iwata-jawsug-jp/devcon 以外は常にスキップする作り）。
-  # 生成先プロジェクトは独自の GHCR 名前空間を持たず、公開ミラーの正規イメージを
-  # devcontainer.json の cacheFrom で共有参照する設計のため、生成先に置いても常にスキップされる
-  # だけの死んだジョブになる。
-  - .github/workflows/devcontainer-build.yml
-  # 開発用リポジトリの内部運用ドキュメント（採否判断前の検討メモ）
-  - docs/proposal
-  # iwata-jawsug-jp（公開ミラー用org）自身に適用した運用記録。生成先の任意のorg/userには
-  # 当てはまらない（#515）
-  - docs/org-rulesets.md
-  # sandboxブランチでの実験計画メモ。生成先プロジェクトとは無関係（#515）
-  - docs/frontend-frameworks-demo.md
-  # 本テンプレート自身の作業ノート・意思決定履歴（ADR運用の型は adr/template.md で引き継ぐ）。
-  # 個別ファイル名の列挙は追加のたびに更新漏れが起きる（#515 で 0012〜0017 の漏れを確認）ため
-  # glob + re-include にする
-  - docs/scaffold-cli.md
-  - docs/adr/*.md
-  - '!docs/adr/template.md'
-  - CHANGELOG.md
-  # 開発用リポジトリの自己検証専用（docs/proposal/template-verification-environment-proposal.md）
-  - .github/workflows/cd-infra-verify.yml
+  # ==== BEGIN GENERATED: tools/template/audience.yml (generate:false)。手で編集しない。
+  #      `make gen-audience-excludes` で再生成する。理由は audience.yml 側に書く。
+  #      ADR-0028 D1（#700）。====
+  - .github/ISSUE_TEMPLATE/chore.md
+  - .github/ISSUE_TEMPLATE/config.yml
+  - .github/ISSUE_TEMPLATE/feature-sdd.md
+  - .github/ISSUE_TEMPLATE/verification.md
+  - .github/dependabot.yml
   - .github/workflows/cd-app-verify.yml
-  - infra/env/golden-path-verify.tfvars.example
-  - infra/env/golden-path-verify.backend.hcl.example
-  # cc-sdd 試験導入 PoC（#61）の評価用ダミー spec。ready_for_implementation: false・全approval
-  # 未承認のまま、リネーム（#61直後の services/api → services/backend/python 等）前の古いパス
-  # 記述で凍結されている。「履歴として残すが生成先には持ち込まない」という
-  # docs/proposal/services-backend-frontend-rename-proposal.md「3.3 あえて変更しない」の
-  # 既存方針を CHANGELOG.md/docs/proposal と同様にここでも適用する（#564）
+  - .github/workflows/cd-infra-verify.yml
+  - .github/workflows/devcontainer-build.yml
+  - .github/workflows/publish.yml
+  - .github/workflows/reusable-scaffold.yml
   - .kiro/specs/items-add-field
+  - CHANGELOG.md
+  - docs/adr/0010-adopt-copier-for-scaffold-cli.md
+  - docs/adr/0011-scaffold-template-in-place.md
+  - docs/adr/0013-decline-aidlc-workflows-adoption.md
+  - docs/adr/0016-terraform-bootstrap-module-distributed-in-repo.md
+  - docs/adr/0019-policy-as-code-downstream-distribution.md
+  - docs/adr/0028-template-and-generated-asset-separation.md
+  - docs/frontend-frameworks-demo.md
+  - docs/org-rulesets.md
+  - docs/proposal
+  - docs/release.md
+  - docs/scaffold-cli.md
+  - infra/env/golden-path-verify.backend.hcl.example
+  - infra/env/golden-path-verify.tfvars.example
+  - tools/script/check_adr_audience.py
+  - tools/script/clean-excluded-doc-references.sh
+  - tools/script/gen-audience-excludes.py
+  - tools/script/publish-to-public.sh
+  - tools/script/strip-audience-blocks.sh
+  - tools/script/verify-scaffold.sh
+  - tools/template/audience.yml
+  # ==== END GENERATED ====
 
 project_name:
   type: str
@@ -120,7 +121,43 @@ aws_region:
 # （#298 で実機確認・修正）。この置換ループが救っているのはチェックイン済みファイル側の
 # 直書き文字列だけであり、`.copier-answers.yml` の各値は copier 自身が生成時点の回答で
 # 正しくレンダリング済みのため、そもそも置換の必要がない。
+#
+# マーカー（`audience:no-generate` / `audience:no-publish`）で囲んだブロックの除去
+# （ADR-0028 D2、#702）: ファイル単位では切れない記述（1ファイル中の一部だけを生成先に
+# 出さない・公開しない）を、公開導線（publish-to-public.sh の 2a）と同じ実装
+# （tools/script/strip-audience-blocks.sh）で除去する。このスクリプト自体は generate:false
+# （tools/template/audience.yml）で生成先にはコピーされないが、`_copier_conf.src_path` は
+# copier が内部で使うテンプレート取得元（ローカル clone）の絶対パスを指しており、_exclude の
+# 対象でも常に存在する（_exclude はコピー先への複製だけを止める設定で、テンプレート取得元
+# 自体には影響しない）ため、生成先に配布せずに呼び出せる。audience:no-publish も併せて除去
+# するのは、生成が公開用ツリーだけでなく開発用ツリーを起点にも行われうるため（両者に対する
+# 実測は ADR-0028 Context）——公開しないブロックは、公開用ツリーを経由しない生成でも
+# 同じく生成先に出てはならない。
+# 除外先ドキュメントへの参照の掃除（ADR-0028 D2、#703）: 上記マーカー除去と同じ理由で
+# tools/script/clean-excluded-doc-references.sh を `_copier_conf.src_path` 経由で呼ぶ
+# （このスクリプトも generate:false）。渡す対象パス（フラグメント）は
+# tools/template/audience.yml の generate:false エントリから
+# tools/script/gen-audience-excludes.py が導出し、下の GENERATED ブロックへ書き出す
+# （`release.md`/`proposal/` のハードコードをやめ、マニフェストを単一の正にする）。
 _tasks:
+  - >-
+    find . -path ./.git -prune -o -type f -print0 | xargs -0
+    bash "{{ _copier_conf.src_path }}/tools/script/strip-audience-blocks.sh" no-generate
+  - >-
+    find . -path ./.git -prune -o -type f -print0 | xargs -0
+    bash "{{ _copier_conf.src_path }}/tools/script/strip-audience-blocks.sh" no-publish
+  # ==== BEGIN GENERATED: tools/template/audience.yml (generate:false, 参照掃除)。
+  #      手で編集しない。`make gen-audience-excludes` で再生成する。理由は audience.yml
+  #      側に書く。ADR-0028 D2（#703）。====
+  - >-
+    find . -path ./.git -prune -o -type f -name '*.md' -print0 | xargs -0
+    bash "{{ _copier_conf.src_path }}/tools/script/clean-excluded-doc-references.sh"
+    '0010-adopt-copier-for-scaffold-cli\.md' '0011-scaffold-template-in-place\.md' '0013-decline-aidlc-workflows-adoption\.md' '0016-terraform-bootstrap-module-distributed-in-repo\.md' '0019-policy-as-code-downstream-distribution\.md' '0028-template-and-generated-asset-separation\.md' 'CHANGELOG\.md' 'audience\.yml'
+    'cd-app-verify\.yml' 'cd-infra-verify\.yml' 'check_adr_audience\.py' 'chore\.md' 'clean-excluded-doc-references\.sh' 'config\.yml' 'dependabot\.yml' 'devcontainer-build\.yml'
+    'feature-sdd\.md' 'frontend-frameworks-demo\.md' 'gen-audience-excludes\.py' 'golden-path-verify\.backend\.hcl\.example' 'golden-path-verify\.tfvars\.example' 'items-add-field\/[^()]*' 'org-rulesets\.md' 'proposal\/[^()]*'
+    'publish-to-public\.sh' 'publish\.yml' 'release\.md' 'reusable-scaffold\.yml' 'scaffold-cli\.md' 'strip-audience-blocks\.sh' 'verification\.md' 'verify-scaffold\.sh'
+    --
+  # ==== END GENERATED ====
   - >-
     find . -path ./.git -prune -o -name .copier-answers.yml -prune -o -type f -print0 | xargs -0
     grep -Il . 2>/dev/null | while IFS= read -r f; do

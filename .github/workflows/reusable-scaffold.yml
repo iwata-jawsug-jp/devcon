@@ -2,6 +2,13 @@ name: reusable-scaffold
 
 # ADR-0012 / #295: ci.yml と ci-sandbox.yml が共有する scaffold 品質ゲート（#294）。copier.yml から
 # 実際に生成し、生成物が壊れていないことを検証する。
+#
+# #700（ADR-0028 実装フェーズ①）: このジョブは既に copier のセットアップと checkout を持つため、
+# tools/template/audience.yml から再生成した内容が copier.yml の `_exclude` /
+# tools/script/publish-to-public.sh の `EXCLUDES` と一致するかのドリフト検査もここに乗せる
+# （新しい reusable workflow を増やさない）。導入当初から新機構の整合性チェックそのものなので
+# blocking（#699 の tree-health ゲートは既存資産の副作用を検査するため警告モードで導入したが、
+# Epic #698 の完了後は tree-health も blocking 化した。reusable-tree-health.yml 参照）。
 
 on:
   workflow_call:

@@ -18,8 +18,10 @@ on:
         value: ${{ jobs.check.outputs.infra }}
       scripts:
         value: ${{ jobs.check.outputs.scripts }}
+      # audience:no-generate — 課題A（#702）: scaffold ジョブ自体が生成先に出ないため不要。
       scaffold:
         value: ${{ jobs.check.outputs.scaffold }}
+      # /audience:no-generate
 
 permissions:
   contents: read
@@ -34,7 +36,9 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       infra: ${{ steps.filter.outputs.infra }}
       scripts: ${{ steps.filter.outputs.scripts }}
+      # audience:no-generate
       scaffold: ${{ steps.filter.outputs.scaffold }}
+      # /audience:no-generate
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -65,7 +69,16 @@ jobs:
               # other, so the job must also trigger when only one of them changes.
               - 'infra/auth.tf'
               - 'services/frontend/src/auth/oidcConfig.ts'
+            # audience:no-generate — 課題A（#702）: scaffold ジョブ自体が生成先に出ないため
+            # この filter カテゴリも不要。
             scaffold:
               - 'copier.yml'
               - 'tools/script/verify-scaffold.sh'
+              # #700: gen-audience-excludes.py の --check がこのジョブに乗っている
+              # （reusable-scaffold.yml）ため、その入力（マニフェスト自体・スクリプト本体・
+              # 生成対象のもう一方のファイル）が変わった回も確実に scaffold ジョブが走るようにする。
+              - 'tools/template/audience.yml'
+              - 'tools/script/gen-audience-excludes.py'
+              - 'tools/script/publish-to-public.sh'
               - '.github/workflows/**'
+            # /audience:no-generate

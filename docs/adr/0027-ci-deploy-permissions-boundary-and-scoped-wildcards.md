@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-25
 - **Deciders:** Itou Hideki
+- **Audience:** publish, generate
 - **Related:** #45（PowerUserAccess → 最小権限、本 ADR が部分的に修正する元の判断）、
   #651（権限ギャップ修正）、#652（マネージドポリシー枠 9/10）、
   [PR #653](https://github.com/iwata-jawsug-jp/devcon/pull/653) /

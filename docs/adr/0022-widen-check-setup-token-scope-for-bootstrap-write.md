@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-21
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** [ADR-0021](0021-codespaces-user-secrets-for-check-setup-token.md)（本ADRが
   Superseded とする前提の元ADR）, `tools/script/bootstrap.sh`,
   `.env.check-setup.example`, [development-environment.md](../development-environment.md)

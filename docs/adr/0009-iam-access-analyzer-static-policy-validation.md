@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-13
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #340, #338, #296, #285
 
 ## Context

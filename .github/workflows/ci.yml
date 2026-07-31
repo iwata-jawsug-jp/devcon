@@ -80,6 +80,9 @@ jobs:
     with:
       should_run: ${{ needs.changes.outputs.scripts == 'true' }}
 
+  # audience:no-generate
+  # 課題A（#702）: 生成先には検証対象の copier.yml 自体が無く、この
+  # ジョブは必ず exit 1 になる（reusable-scaffold.yml は generate:false、tools/template/audience.yml）。
   # #294: copier.yml から実際に生成し、生成物が壊れていないことを検証する（置換漏れ・
   # terraform validate・backend lint・frontend lint/test）。backend/frontend/infra のような
   # エリア別スイッチは持たないが（どのエリア変更でも対象になりうる横断ジョブ）、専用の
@@ -90,3 +93,18 @@ jobs:
     uses: ./.github/workflows/reusable-scaffold.yml
     with:
       should_run: ${{ needs.changes.outputs.scaffold == 'true' && vars.SCAFFOLD_ENABLED != 'false' }}
+  # /audience:no-generate
+
+  # #699（ADR-0028 実装フェーズ①）: 開発用ツリー・公開用ツリー・その2つを起点に copier 生成した
+  # 生成先ツリー、計4本のリンク切れを検査する横断ジョブ（Epic #698 完了により blocking）。他のエリア別ジョブや
+  # scaffold と違い、`needs.changes.outputs.*` の変更検知では**ゲートしない**——リンク切れは
+  # 「変更されたファイル」ではなく「削除・リネームされた参照先ファイル」でも起きるため、
+  # path-filter方式だと索引ファイル（例: docs/README.md）自体が変更されない回で見逃す。
+  # 専用の TREE_HEALTH_ENABLED を持つ（他のエリア別スイッチと同じ極性: `!= 'false'`、未設定なら
+  # 有効。docs/ci-cd-area-switches.md 参照）。`needs: changes` 自体は依存関係として残すが、
+  # `should_run` の式には使わず毎回フルセットを実行する。
+  tree-health:
+    needs: changes
+    uses: ./.github/workflows/reusable-tree-health.yml
+    with:
+      should_run: ${{ vars.TREE_HEALTH_ENABLED != 'false' }}

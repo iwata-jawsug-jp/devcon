@@ -3,6 +3,7 @@
 - **Status:** Superseded by [ADR-0022](0022-widen-check-setup-token-scope-for-bootstrap-write.md)
 - **Date:** 2026-07-20
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #516, [development-environment.md](../development-environment.md)「GitHub
   Codespaces では」節, `tools/script/check-devenv-setup.sh`,
   `tools/script/check-repo-vars.sh`, `.env.check-setup.example`,

@@ -33,8 +33,7 @@ flowchart TD
 - **5. `main` マージ後**: `cd-app.yml`/`cd-infra.yml` が動く。`apply` は手動 `workflow_dispatch`
   かつ `INFRA_APPLY_ENABLED` が必須で、本番インフラが未構築の間は `preflight` が安全に skip する
   （[infrastructure.md](infrastructure.md)）。
-- **6. リリース**: 任意のタイミングでタグ + `gh release create`。`publish.yml` が公開ミラーへ
-  変換パブリッシュする（release.md）。
+
 
 ## いつ `sandbox/*` 検証が必須か
 
@@ -91,4 +90,6 @@ flowchart TD
 - [sandbox.md](sandbox.md) — sandbox 隔離ポリシー・検証手順
 - [sdd.md](sdd.md) — SDD ワークフロー
 - [infrastructure.md](infrastructure.md) — CI/CD 全体像・エリア別スイッチ・ブランチ保護
+
+
 - [ci-cd-area-switches.md](ci-cd-area-switches.md) — エリア別/オプトイン方式スイッチ

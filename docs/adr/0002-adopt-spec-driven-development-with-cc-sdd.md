@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-06-30
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** [Epic #66](https://github.com/iwata-jawsug-jp/devcon/issues/66), #60, #61, #62, [ADR-0001](0001-record-architecture-decisions.md), [docs/sdd.md](../sdd.md)
 
 ## Context

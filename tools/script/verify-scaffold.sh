@@ -17,6 +17,20 @@ TEST_PROJECT_NAME="${TEST_PROJECT_NAME:-scaffold-verify}"
 TEST_GITHUB_ORG="${TEST_GITHUB_ORG:-example-org}"
 TEST_AWS_REGION="${TEST_AWS_REGION:-us-east-1}"
 
+# copier copy はローカルパスを直接ソースにする場合、git ではなく作業ツリーのファイルシステムを
+# そのまま読む（--vcs-ref=HEAD を指定していても）。未コミットの変更があると、copier がその
+# "dirty" 状態から合成した擬似バージョン（例: v0.7.3-12-gXXXXXXX-dirty）を
+# .copier-answers.yml に記録し、後段の `copier update` 往復チェックがそれを実在する ref として
+# checkout しようとして失敗する（実機確認済み、#699〜#701）。CI は常にクリーンな checkout
+# なので影響しないが、ローカルで `make scaffold-verify` を未コミット変更がある状態で実行すると
+# この理由で失敗し得る（本スクリプト自体のバグではない）。一言警告するだけに留める
+# （verify-tree-health.sh の同種の警告と同じ方針）。
+if [[ -n "$(cd "$REPO_ROOT" && git status --porcelain 2>/dev/null)" ]]; then
+  echo "[scaffold-verify] 警告: 未コミットの変更があります。copier update 往復チェックが" >&2
+  echo "  「dirty な擬似バージョンを checkout できない」エラーで失敗する可能性があります" >&2
+  echo "  （既知の環境要因。コミット後に再実行してください）。" >&2
+fi
+
 echo "[scaffold-verify] copier copy (project_name=$TEST_PROJECT_NAME) ..."
 copier copy \
   --vcs-ref=HEAD \
@@ -81,6 +95,85 @@ for leaked in .git copier.yml copier.yaml; do
 done
 echo "[scaffold-verify] OK"
 
+echo "[scaffold-verify] scaffold 配管が生成先に残っていないことのチェック（課題A、#702）"
+# ファイル単位で切れるもの（tools/template/audience.yml で generate:false）。
+for leaked in \
+  ".github/workflows/reusable-scaffold.yml" \
+  "tools/script/verify-scaffold.sh" \
+  "tools/script/strip-audience-blocks.sh" \
+  "tools/script/clean-excluded-doc-references.sh" \
+  "tools/script/check_adr_audience.py"; do
+  if [[ -e "$GEN/$leaked" ]]; then
+    echo "[scaffold-verify] NG: 生成物に $leaked が混入しています（audience.yml の generate:false を確認）" >&2
+    exit 1
+  fi
+done
+# ファイル単位では切れないもの（audience:no-generate マーカーで囲んで除去する）。
+if grep -qE '^\s*scaffold:' "$GEN/.github/workflows/ci.yml" "$GEN/.github/workflows/ci-sandbox.yml" \
+  "$GEN/.github/workflows/reusable-changes.yml" 2>/dev/null; then
+  echo "[scaffold-verify] NG: 生成物の ci.yml/ci-sandbox.yml/reusable-changes.yml に scaffold ジョブ/フィルタが残っています（audience:no-generate マーカーを確認）" >&2
+  exit 1
+fi
+if grep -q '^scaffold-verify:' "$GEN/Makefile" 2>/dev/null; then
+  echo "[scaffold-verify] NG: 生成物の Makefile に scaffold-verify ターゲットが残っています（audience:no-generate マーカーを確認）" >&2
+  exit 1
+fi
+echo "[scaffold-verify] OK"
+
+echo "[scaffold-verify] 除外先ドキュメントへの参照が生成先に残っていないことのチェック（課題E、#703）"
+# 個別ADR（docs/adr/*.md、generate:false）へのリンクが飾りを外されてプレーンテキスト化されて
+# いること・.github/dependabot.yml（generate:false）へのリンクが CONTRIBUTING.md から消えて
+# いることを、代表例としてチェックする（実装は tools/script/clean-excluded-doc-references.sh
+# に共通化済み、ここはその効果の回帰検知）。
+if grep -qE '\]\([^()]*docs/adr/00[0-9]+-' "$GEN/README.md" 2>/dev/null; then
+  echo "[scaffold-verify] NG: 生成物の README.md に個別ADR（generate:false）への実リンクが残っています（tools/script/clean-excluded-doc-references.sh を確認）" >&2
+  exit 1
+fi
+
+echo "[scaffold-verify] ADR個別のAudience分類が生成先に反映されていることのチェック（課題B主部、#704）"
+# generate:false（publish のみ）な6本は生成物に存在してはいけない。tools/template/audience.yml
+# の該当エントリを手で列挙しているため、追加・削除したらここも合わせて更新すること
+# （make audience-drift-check の check_adr_audience.py が Audience 行との食い違いは検出するが、
+# 生成物に実際に出ていないことまでは検証しないため、ここで別途確認する）。
+for adr in \
+  "0010-adopt-copier-for-scaffold-cli" \
+  "0011-scaffold-template-in-place" \
+  "0013-decline-aidlc-workflows-adoption" \
+  "0016-terraform-bootstrap-module-distributed-in-repo" \
+  "0019-policy-as-code-downstream-distribution" \
+  "0028-template-and-generated-asset-separation"; do
+  if [[ -e "$GEN/docs/adr/${adr}.md" ]]; then
+    echo "[scaffold-verify] NG: 生成物に docs/adr/${adr}.md が混入しています（テンプレート運用の判断、generate:false のはず）" >&2
+    exit 1
+  fi
+done
+# generate:true な残りのADR（template.md含め23本）は逆に存在するはず。
+if [[ ! -e "$GEN/docs/adr/0001-record-architecture-decisions.md" || ! -e "$GEN/docs/adr/template.md" ]]; then
+  echo "[scaffold-verify] NG: 生成先にプロダクトADR（generate:true）が揃っていません" >&2
+  exit 1
+fi
+if grep -qE '\]\([^()]*dependabot\.yml\)' "$GEN/CONTRIBUTING.md" 2>/dev/null; then
+  echo "[scaffold-verify] NG: 生成物の CONTRIBUTING.md に .github/dependabot.yml（generate:false）への実リンクが残っています（課題E が再発しています）" >&2
+  exit 1
+fi
+echo "[scaffold-verify] OK"
+
+echo "[scaffold-verify] 生成物の GitHub Actions workflow YAML 構文チェック（audience:no-* マーカー除去による破損検知）"
+python3 - "$GEN/.github/workflows" <<'PYEOF'
+import sys
+from pathlib import Path
+import yaml
+
+wf_dir = Path(sys.argv[1])
+for p in sorted(wf_dir.glob("*.yml")) + sorted(wf_dir.glob("*.yaml")):
+    try:
+        yaml.safe_load(p.read_text())
+    except yaml.YAMLError as e:
+        print(f"[scaffold-verify] NG: {p} が不正なYAMLです: {e}", file=sys.stderr)
+        sys.exit(1)
+print(f"[scaffold-verify] OK ({len(list(wf_dir.glob('*.y*ml')))} files)")
+PYEOF
+
 echo "[scaffold-verify] copier update の往復チェック（#298: 追従経路そのものが機能することの回帰防止）"
 # $GEN 自体は後続チェック（.git 混入チェック含む）が使い続けるため、往復チェックだけは
 # 別ディレクトリにコピーしてそこで git init する。生成直後の状態から自分自身へ
@@ -94,6 +187,13 @@ echo "[scaffold-verify] copier update の往復チェック（#298: 追従経路
 # 「現在地（タグ+N commits、PEP440的には新しい）」から「最新タグ（タグそのもの、
 # PEP440的には古い）」への更新は copier に "downgrade" と判定され拒否される
 # （実機確認済み、#298）。ここでは HEAD 自身への往復を確認したいだけなので明示する。
+#
+# 注意（#701 独立検証で判明）: この HEAD→HEAD（ドリフト無し）往復は「update コマンドが
+# エラーなく完走すること」しか保証しない。copier update は内部で3-way merge を行い、
+# テンプレート側に実際の差分が無い場合は生成済みの内容を「ローカルカスタマイズ」とみなして
+# 温存するため、_tasks が実際に再実行されたか・その効果が反映されたかはこの往復では
+# 検出できない（_tasks を空にしても該当チェックは素通りする）。_tasks の re-run 自体の検証は
+# 下記の「ドリフトあり往復チェック」で行う。
 GEN_UPDATE="$WORK/generated-update-check"
 cp -r "$GEN" "$GEN_UPDATE"
 (
@@ -103,6 +203,70 @@ cp -r "$GEN" "$GEN_UPDATE"
   git -c user.email=scaffold-verify@example.invalid -c user.name=scaffold-verify commit -q -m "scaffold-verify: initial generation"
   copier update --trust --defaults --vcs-ref=HEAD
 )
+echo "[scaffold-verify] OK"
+
+echo "[scaffold-verify] copier update ドリフトあり往復チェック（#701: _tasks が実際に再実行されることを検証）"
+# 上のHEAD→HEAD往復では検出できない「_tasksがupdate時に正しく再実行されるか」を、実際に
+# テンプレート側へドリフトを注入して検証する。#702（マーカー除去）・#704（テンプレートADR
+# 削除）はいずれも「_tasksで生成後にファイル/ブロックを消す」実装になるため、代表として
+# 「_tasksでファイルを削除する」パターンを使う。
+#
+# 手順（実機検証で確認済みの唯一確実な方法）: 同じスクラッチクローンを「テンプレートの現在版」
+# として使い続け、その上に新しいコミット（ドリフト）を積む。生成済みプロジェクトの
+# .copier-answers.yml の _src_path を後から別のクローンへ向け直す方式は、3-way merge の
+# 比較基準がずれるためか _tasks の効果が反映されないことを実機で確認済み（採用しない）。
+DRIFT_SRC="$WORK/drift-src"
+git clone -q "$REPO_ROOT" "$DRIFT_SRC"
+SENTINEL_FILE="TASKS_UPDATE_SENTINEL_701.md"
+echo "#701 の往復チェック専用ダミーファイル（copier update で削除されるはず）" \
+  > "$DRIFT_SRC/$SENTINEL_FILE"
+(
+  cd "$DRIFT_SRC"
+  git add -A
+  git -c user.email=scaffold-verify@example.invalid -c user.name=scaffold-verify \
+    commit -q -m "scaffold-verify: add sentinel file for #701 drift test"
+)
+
+GEN_DRIFT_BASE="$WORK/generated-drift-base"
+copier copy \
+  --vcs-ref=HEAD \
+  --data "project_name=$TEST_PROJECT_NAME" \
+  --data "github_org=$TEST_GITHUB_ORG" \
+  --data "github_repo=$TEST_PROJECT_NAME" \
+  --data "aws_region=$TEST_AWS_REGION" \
+  --defaults --trust \
+  "$DRIFT_SRC" "$GEN_DRIFT_BASE" >/dev/null
+
+GEN_DRIFT_UPDATED="$WORK/generated-drift-updated"
+cp -r "$GEN_DRIFT_BASE" "$GEN_DRIFT_UPDATED"
+(
+  cd "$GEN_DRIFT_UPDATED"
+  git init -q
+  git -c user.email=scaffold-verify@example.invalid -c user.name=scaffold-verify add -A
+  git -c user.email=scaffold-verify@example.invalid -c user.name=scaffold-verify \
+    commit -q -m "scaffold-verify: initial generation (drift base)"
+)
+
+# ドリフト: 同じ $DRIFT_SRC に「_tasks でセンチネルファイルを削除する」コミットを積む。
+# これが「テンプレートの次のバージョン」になる。
+printf '\n  - "rm -f %s"\n' "$SENTINEL_FILE" >> "$DRIFT_SRC/copier.yml"
+(
+  cd "$DRIFT_SRC"
+  git add -A
+  git -c user.email=scaffold-verify@example.invalid -c user.name=scaffold-verify \
+    commit -q -m "scaffold-verify: delete sentinel via _tasks (simulated template update)"
+)
+
+(
+  cd "$GEN_DRIFT_UPDATED"
+  copier update --trust --defaults --vcs-ref=HEAD
+)
+
+if [[ -f "$GEN_DRIFT_UPDATED/$SENTINEL_FILE" ]]; then
+  echo "[scaffold-verify] NG: _tasks によるファイル削除が copier update で反映されていません" \
+    "（$SENTINEL_FILE が残存）。_tasks が update 時に再実行されていない可能性があります" >&2
+  exit 1
+fi
 echo "[scaffold-verify] OK"
 
 echo "[scaffold-verify] terraform fmt/validate (infra, infra/bootstrap) ..."

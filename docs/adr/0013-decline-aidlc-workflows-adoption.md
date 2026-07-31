@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-15
 - **Deciders:** itouhi
+- **Audience:** publish
 - **Related:** #470, [ADR-0002](0002-adopt-spec-driven-development-with-cc-sdd.md),
   [ADR-0010](0010-adopt-copier-for-scaffold-cli.md),
   [ADR-0011](0011-scaffold-template-in-place.md), [ai-instructions.md](../ai-instructions.md),

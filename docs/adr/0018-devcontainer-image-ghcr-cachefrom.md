@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-17
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #532、devcontainer-image-prebuild-proposal.md、
   [ADR-0011](0011-scaffold-template-in-place.md)・[ADR-0012](0012-reusable-workflow-in-repo-tag-versioned.md)
   （同じ「本リポジトリ自身が配布物」という設計方針の延長）

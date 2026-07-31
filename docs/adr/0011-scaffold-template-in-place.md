@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-14
 - **Deciders:** itouhi
+- **Audience:** publish
 - **Related:** #294、[ADR-0010](0010-adopt-copier-for-scaffold-cli.md)（copier 採用）、
   [Epic #300](https://github.com/iwata-jawsug-jp/devcon/issues/300)、#436、#438
 
@@ -44,7 +45,6 @@ iwata-jawsug-jp/devcon` の文字列置換を行い、公開ミラー（`iwata-j
 - devcon-test という実運用の第2消費者が既に「devcon 自身の fork」として存在する。
   専用テンプレートリポジトリを新設すると、devcon-test はどちらの流儀の生成物なのか位置づけが
   曖昧になる。
-- `publish-to-public.sh` の EXCLUDES ＋文字列置換の設計をそのまま下敷きにできるため、専用
   リポジトリを新設して一から設計するより実装コストが低い。
 
 生成対象から除く必要があるコンテンツ（copier の `_exclude` / Jinja 条件分岐で対応。具体的な
@@ -68,7 +68,6 @@ iwata-jawsug-jp/devcon` の文字列置換を行い、公開ミラー（`iwata-j
   - `copier update` が実際に機能する構図になる（生成元が本体そのものなので、本体の改善が
     そのまま追従対象になる）。
   - devcon-test という既存の実証運用との整合が取れる。
-  - `publish-to-public.sh` の前例を再利用でき、除外リスト・置換ロジックの設計コストが下がる。
   - devcon 自身が常に「動くテンプレート」であり続ける（ドッグフーディングにより、
     テンプレートだけが陳腐化する事態を防げる）。
 - **トレードオフ・新たに生じる負担:**

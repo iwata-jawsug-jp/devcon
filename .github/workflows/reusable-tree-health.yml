@@ -1,0 +1,44 @@
+name: reusable-tree-health
+
+# ADR-0012 / #699（ADR-0028 実装フェーズ①）: ci.yml と ci-sandbox.yml が共有する、開発用ツリー・
+# 公開用ツリー・その2つを起点に copier 生成した2つの生成先ツリー、計4本の内部整合（Markdown
+# 相対リンク切れ）を検査するゲート。導入時点（#699）は課題A/B/C/D/Eが未対処で必ず赤くなるため
+# 警告モード（`make tree-health` → 内部で呼ぶ `tools/script/verify-tree-health.sh` が `--strict`
+# なし）で運用していたが、Epic #698（④⑤⑥）の完了によりリンク切れ・成果物差分とも実測0になった
+# ため blocking 化した（`make tree-health` が既定で `--strict` を渡す）。
+
+on:
+  workflow_call:
+    inputs:
+      should_run:
+        description: >-
+          Whether to actually execute this gate (vs. report a skipped check).
+          Keeping the job always invoked (rather than gating with `if:` on the
+          caller side) keeps the status-check context name stable regardless
+          of skip state — see ADR-0012.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: inputs.should_run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # No astral-sh/setup-uv here (unlike reusable-scaffold.yml): this gate doesn't touch the
+      # backend, so there's no other reason to have uv on PATH. pip (via setup-python, same
+      # pattern as reusable-infra.yml's Checkov step) is enough just to install copier.
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      # Version pinned to match .devcontainer/Dockerfile's COPIER_VERSION (single source, #109) —
+      # same pin as reusable-scaffold.yml's "Install copier" step.
+      - name: Install copier
+        run: pip install --quiet "copier==9.17.0"
+      - name: Check tree health
+        run: make tree-health

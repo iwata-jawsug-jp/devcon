@@ -33,9 +33,7 @@
 | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `README.md`                                                                                              | CI/Release バッジの URL（`https://github.com/iwata-jawsug-jp/devcon/...`）                                                                                                                                        |
 | `CHANGELOG.md` / `CODE_OF_CONDUCT.md` / `docs/release.md` / `docs/sandbox.md` / `.kiro/steering/tech.md` | issue/PR 参照リンク、リポジトリ言及                                                                                                                                                                             |
-| `.github/ISSUE_TEMPLATE/verification.md` / `.github/scripts/tests/test_dora_metrics.py`                  | リポジトリ名の直書き                                                                                                                                                                                            |
 | `infra/bootstrap/variables.tf`                                                                           | `github_org` / `github_repo` は**既にデフォルト値なしの必須変数**で、OIDC 信頼ポリシー（`iam-ci-roles.tf`）は `var.github_org` / `var.github_repo` から動的に組み立てられている。**対応不要**（既に一般化済み） |
-| `.github/workflows/publish.yml`                                                                          | `SRC_REPO_PATH` / `DST_REPO_PATH` 等は公開ミラー配管専用。ADR-0011 で生成対象から除外する方針                                                                                                                   |
 
 ### C. AWSリージョン `ap-northeast-1`（想定変数: `aws_region`）
 
@@ -202,6 +200,55 @@ backend/frontend/infra ジョブが devcon 自身に対して常時カバーし�
 
 **ツールバージョン:** `.devcontainer/Dockerfile` の `COPIER_VERSION`（9.17.0）を単一ソースとし、
 `ci.yml` の `scaffold` ジョブも同じバージョンを pin（#109 の既存プラクティスに合わせた）。
+
+## `_exclude` / `EXCLUDES` の一元管理（audience マニフェスト、#700）
+
+上記「発見・修正済みの重大バグ」の節で扱った `_exclude` の不具合は、いずれも「除外リストへの
+追記漏れ」という同じ形をしていた。実際、`copier.yml` の `_exclude` と
+`tools/script/publish-to-public.sh` の `EXCLUDES` は別々に育った2つのリストであり、同じ
+`copier.yml` から生成しても**起点ツリー（開発用/公開用のどちらから `copier copy` するか）で
+生成物が変わる**という構造的な問題があった（課題D、[ADR-0028](adr/0028-template-and-generated-asset-separation.md)
+Context）。実測では `.github/dependabot.yml` と issue テンプレート4件
+（`.github/ISSUE_TEMPLATE/config.yml` / `chore.md` / `feature-sdd.md` / `verification.md`）が
+`EXCLUDES` にだけ載っており `_exclude` には無かったため、公開用ツリー起点の生成先にだけこの5件が
+欠けていた。
+
+ADR-0028 D1 は、この2つの除外リストを「導出結果」に格下げし、**分類の正を1箇所に集約する**ことを
+決定した。分類軸は `publish`（開発用→公開用）/ `generate`（→ copier 生成先）の2軸。
+
+  `publish: false` / `generate: false` として宣言している） — 唯一の宣言箇所。パス/glob
+  単位で `publish` / `generate` を宣言する。既定値は両方 `true`（現状の挙動と一致）。
+  「公開しないが生成する」象限（`publish: false` / `generate: true`）は3値の単調な階層
+  （`dev` ⊃ `public` ⊃ `product`）では表現できないため、このマニフェストは2つの独立した
+  真偽値として持つ。
+  `publish-to-public.sh` 自体を対象に含むため、それが存在しない公開先・生成先で
+  実行すると即エラーになる） —
+  マニフェストから `copier.yml` の `_exclude`（`generate: false` の集合）と
+  `publish-to-public.sh` の `EXCLUDES`（`publish: false` の集合）を再生成する codegen。
+  両ファイル内の `# ==== BEGIN GENERATED: ... ====` 〜 `# ==== END GENERATED ====` マーカーの
+  間だけを書き換える（マーカー外の手書き部分は触らない）。`copier.yml` の `_exclude` は静的な
+  YAML で外部ファイルを読めないため、マニフェストを足すだけでは「3つ目の正」が増えて悪化する
+  ——「生成してコミットする」＋「CI で再生成結果との一致を検査する」の2段構えとすることで、
+  `_exclude` / `EXCLUDES` はコミット済みの実体を保ったまま単一の入力から機械的に導出される。
+- `make gen-audience-excludes`（`gen-audience-excludes.py --write`）— 再生成してファイルを
+  書き換える。マニフェストを編集したら実行してコミットする。
+- `make audience-drift-check`（`gen-audience-excludes.py --check`）— 再生成結果とコミット済みの
+  内容が一致するか検査するだけの非破壊コマンド。不一致なら差分を標準エラーに出して `exit 1`。
+  `ci.yml` の `scaffold` ジョブ（`reusable-scaffold.yml`）が `make scaffold-verify` の前段でこれを
+  実行する。`scaffold` ジョブは既に copier のセットアップ・checkout を持つため新しい reusable
+  workflow を増やさずに乗せた。導入当初から**警告モードではなく blocking**——リンク切れのような
+  「既存資産の副作用」ではなく、この新機構自体の整合性チェックだからである（#699 の tree-health
+  ゲートは既存資産の副作用を検査するため警告モードで導入したが、Epic #698 の完了後は
+  tree-health も blocking 化した）。
+
+課題Dの5ファイルは `generate: false` で決着した（`tools/template/audience.yml` に個別の
+`reason` を記載）。`dependabot.yml` は本来 `generate: true`（継続運用される生成先には依存更新の
+自動化が有用）が望ましいものの、実際の配布経路（第三者は公開用ツリーを起点に `copier copy` する
+——`README.md` 参照）では `publish: false` のファイルはそもそも生成元に存在しないため配布できず、
+`generate: true` にしても効果がない。整合を優先して `generate: false` にし、届ける必要が出た場合は
+配布の仕組み自体を検討する別issueを立てる方針とした。issue テンプレート4件は「開発用リポジトリで
+運用検証中」という時限的な理由であり、検証を終えたものから `publish-to-public.sh` の除外を個別に
+外す運用（release.md）に合わせ、公開しない間は生成先にも配らないこととした。
 
 ## 今後の作業（#294 チェック項目）
 

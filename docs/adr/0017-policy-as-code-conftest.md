@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-16
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #296, #285, #153, #279, [ADR-0009](0009-iam-access-analyzer-static-policy-validation.md)
 
 ## Context

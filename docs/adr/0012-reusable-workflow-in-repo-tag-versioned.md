@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-14
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #295、[Epic #300](https://github.com/iwata-jawsug-jp/devcon/issues/300)、#153（指摘7）、
   [ADR-0010](0010-adopt-copier-for-scaffold-cli.md)・[ADR-0011](0011-scaffold-template-in-place.md)
   （同じ「本リポジトリ自身が配布物」という設計方針の延長）

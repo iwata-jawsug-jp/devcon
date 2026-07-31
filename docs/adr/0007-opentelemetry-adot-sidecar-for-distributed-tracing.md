@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-05
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** #42, [ADR-0006](0006-dora-deployment-frequency-and-lead-time-definitions.md)
 
 ## Context

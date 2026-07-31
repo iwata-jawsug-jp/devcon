@@ -119,6 +119,21 @@ uv run ruff check . && uv run mypy       # lint + 型チェック（strict）
 - スコープ文字列は Cognito のカスタムリソースサーバーが定義する `"<identifier>/<scope_name>"`
   形式（例: `api/items.read`）。インフラ側の定義は `infra/auth.tf`。
 
+**ローカル（AWS 未設定）では `items` エンドポイントを Swagger UI から直接は叩けない。**
+`routers/items.py` の全エンドポイントが `Depends(require_scope("api/items.read"|"api/items.write"))`
+必須（「認可なしエンドポイントは無い」という規約どおり、デフォルトで公開になる抜け道が無い）で、
+ローカルは `API_COGNITO_USER_POOL_ID`/`API_COGNITO_CLIENT_ID` が未設定のため
+`http://localhost:8000/docs` から "Try it out" しても 401 `Not authenticated` になる
+（想定内の挙動で、バグではない。#720 で実機確認済み）。認証込みで動作確認したい場合:
+
+- **バックエンドの自動テスト**: `uv run pytest` は `tests/conftest.py` の `authed_client`
+  フィクスチャで `get_current_user` をモックしており、実 Cognito/JWKS に触れずに
+  認可込みの経路（`api/items.read`/`api/items.write` の付与・不足どちらも）を検証している。
+- **実際に AWS 上で動かして確認したい場合**: `sandbox/*` で実 Cognito を構成した環境に
+  デプロイし、フロントエンドの Hosted UI 経由でログインする
+  （[sandbox.md](sandbox.md)、[live-smoke](adr/0008-live-smoke-playwright-project-with-disposable-cognito-user.md)
+  も同じ経路を自動化している）。
+
 ### データベース（SQLAlchemy async + Alembic）
 
 `backend` は PostgreSQL に永続化する。ローカルは docker-compose の Postgres、本番は RDS。

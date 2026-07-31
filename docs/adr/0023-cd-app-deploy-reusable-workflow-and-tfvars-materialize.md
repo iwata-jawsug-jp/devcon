@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-23
 - **Deciders:** itouhi
+- **Audience:** publish, generate
 - **Related:** [#617](https://github.com/iwata-jawsug-jp/devcon/issues/617)、
   [ADR-0012](0012-reusable-workflow-in-repo-tag-versioned.md)（CI 側の reusable workflow 化。
   本 ADR はその CD 版）、[ADR-0015](0015-live-smoke-reusable-workflow.md)（同じ手法を
@@ -76,7 +77,6 @@ inline実装をやめ、`reusable-live-smoke.yml`呼び出しに統一する(ADR
   - CD系4ファイル分のAWS CLIロジック重複が1箇所(`reusable-app-deploy.yml`)に集約され、
     ECSタスク定義登録・Alembicマイグレーション実行の手順を変える際は1箇所の変更で4ワークフローに
     反映される。ADR-0012/ADR-0015と同じ設計原則をCD系のapp-deployにも展開できた。
-  - `cd-app-verify.yml`の`workflow_call.inputs`シグネチャは変えないため、呼び出し元
     `cd-infra-verify.yml`は無変更で済む。
   - tfvars生成の共通化により、`infra/env/*.example`のプレースホルダ規約
     (`REPLACE-ME-tfstate`/`devcon`)を変える際も1箇所の変更で済む。

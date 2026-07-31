@@ -3,6 +3,9 @@
 - **Status:** Proposed | Accepted | Deprecated | Superseded by [ADR-XXXX](xxxx-...)
 - **Date:** YYYY-MM-DD
 - **Deciders:** （意思決定に関与した人）
+- **Audience:** publish, generate （このリポジトリ自身の運用判断なら `publish` のみ。
+  生成先のプロダクトにも引き継ぐべき設計判断なら `publish, generate` の両方。
+  ADR-0028 D4・#704 参照。付け忘れると `make audience-drift-check` が落ちる）
 - **Related:** （関連 issue / PR / 他 ADR。例: #66, [ADR-0001](0001-record-architecture-decisions.md)）
 
 ## Context

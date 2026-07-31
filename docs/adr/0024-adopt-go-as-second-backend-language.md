@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-24
 - **Deciders:** Itou Hideki
+- **Audience:** publish, generate
 - **Related:** [ADR-0004](0004-rename-services-by-role-and-nest-backend-by-language.md)、Go バックエンド採用提案書
 
 ## Context
