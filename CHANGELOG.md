@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-08-01
+
+### Fixed
+
+- **`docs/service-replacement-guide.md`・ADR-0004・ADR-0029・`service-replacement-check` スキルを、Java/Spring Boot backend + Java非同期ワーカーでの実証検証（`itouhi/java-webapp2#1`、`#734`）で見つかった記述漏れ・誤記7件を修正**: 重要度「高」6件（#753〜#758）を個別issue化・修正した。migrateモード専用エントリポイントをSpring Securityアプリで`WebApplicationType.NONE`にすると、マイグレーション自体は成功しているのにApplicationContext初期化失敗でexit 1になりデプロイパイプラインが誤検知する罠（`server.port=-1`を推奨、#753）。OpenAPI抽出用に`server.port=-1`を使う際、`SpringApplicationBuilder.properties()`で渡した値がSpring Bootの優先順位で`application.yml`に負けてしまう罠（コマンドライン引数を推奨、#754）。生成された`schema.<lang>.ts`をPrettier整形対象から除外する必要がある旨の未記載（#755）。`.pre-commit-config.yaml`のファイルパスに暗黙結合した`check-oauth-scopes`等のローカルフックが、frontend再構築時にエラーも警告も出さず静かに無効化される罠（#756）。ADR-0029 Decision 4「契約統一（OpenAPI生成必須）」がRESTサーフェスを持たない非同期/イベント駆動ロールには文字通り適用できない齟齬（#757）。Dockerfile最低限契約のVPCエンドポイント経由到達性契約がECS Fargate常駐サーバーを前提にしており、Lambdaのイベント配信モデル（VPCアタッチ時のみ到達性が必要、SQS直接呼び出し時は`sqs`エンドポイントが別途必要）には当てはまらない旨の未記載（#758）。加えて、重要度「中〜軽微」の9件（#759）のうち8件（`API_*`環境変数契約の非同期ワーカー非該当、`gen-schema`スナップショット出力先の言語非依存化指針、ADR-0004役割サフィックス命名のCIワークフロー名・ステータスチェック名への拡張方針、`flyway-database-postgresql`依存と`maven-compiler-plugin`版数pinの罠、デザイントークン生成の出力フォーマット詳細、ADR-0029 Decision 5へのbackend品質ゲートパリティ追加、frontend `CLAUDE.md`規約のload-bearing/実装固有の区別）も反映した（1件は生成先リポジトリのスキャフォールド完全性の課題のため対象外とした）。
+
 ## [0.8.3] - 2026-08-01
 
 ### Fixed
@@ -1446,7 +1452,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.0...v0.8.1

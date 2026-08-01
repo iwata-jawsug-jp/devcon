@@ -55,7 +55,11 @@
    全体の作り直しは不要（service-replacement-proposal.md §3.1 で確認済み）。
 4. **契約統一を維持すること。** API 契約は OpenAPI に一本化し、`make gen-types` が単一
    コマンドで呼べる状態を維持する。各実装は自分の OpenAPI JSON を出力するコマンドを1つ
-   持つことを標準契約とする（Go の `go run ./cmd/api openapi` が既存パターン）。
+   持つことを標準契約とする（Go の `go run ./cmd/api openapi` が既存パターン）。本項は
+   HTTP サーバー・REST サーフェスを持つ実装に限って適用する。非同期/イベント駆動ロール
+   （ADR-0024 の役割区分）で REST サーフェス自体を持たない実装は、OpenAPI JSON という
+   概念が成立しないため本項の対象外とする（`docs/service-replacement-guide.md`・
+   `service-replacement-check` スキルの同旨の注記と整合）。
 5. **置き換え後も維持すべき不変条件を満たすこと。**
    - **frontend 品質ゲートパリティ**: 新しい `reusable-frontend-<framework>.yml` は、
      少なくとも型チェック・アクセシビリティの自動チェック（axe 相当）・パフォーマンス予算
@@ -68,11 +72,16 @@
      CloudWatch Logs・Secrets Manager・Cognito IDP・X-Ray）に限る、(5) マイグレーションは
      `containerOverrides` によるコマンド差し替えに対応する、(6) `API_*` の環境変数キー名を
      そのまま読み取る、の6点を満たすこと。
+   - **backend 品質ゲートパリティ**: Python 実装は ruff（lint）・mypy（型チェック）・
+     pytest-cov（カバレッジ）という3種のゲートを持つ。新しい backend 実装も、言語エコシステムの
+     等価ツールでこの3種のゲート（lint・型チェック・カバレッジ）を維持すること。frontend 側の
+     品質ゲートパリティ同様、ツール自体の置き換えは許容されるがカテゴリの欠落は許容されない。
    - いずれも詳細な手順・検証表は `docs/service-replacement-guide.md`（Sub-issue C）に委ねる。
 
 却下パターン（新しい実装が満たしてはいけない条件）: 実行基盤の重複、スキーマ権威の分散、
-契約の実装依存化（OpenAPI 以外を正とする、または `make gen-types` に統合できない形にする）
-の3つを、追加・置き換えいずれの提案でも不採用とする。
+契約の実装依存化（OpenAPI 以外を正とする、または `make gen-types` に統合できない形にする。
+REST サーフェスを持たない非同期/イベント駆動ロールは Decision 4 のとおり対象外）の3つを、
+追加・置き換えいずれの提案でも不採用とする。
 
 ## Consequences
 

@@ -64,3 +64,12 @@ Python 以外の言語でバックエンドサービスを追加する可能性�
 （`services/backend/<言語>/`、既存の1役割ケースとの後方互換）、それ以外の役割にはサフィックスを
 付ける（例: 非同期ワーカーは `services/backend/java-worker/`）。これを正式な命名パターンとして
 採用する。
+
+この命名規則はディレクトリ名についてのみ定めたものであり、対応する CI ワークフローファイル名
+（`docs/service-replacement-guide.md` §2 が扱う `reusable-backend-<lang>.yml` パターン）や
+ステータスチェックのコンテキスト名（`backend-go / check` のような `backend-<lang> / check` 形式、
+ADR-0012）までは拡張していない。同一言語が複数役割を担う場合、ディレクトリ名の役割サフィックス
+（`<言語>-<役割>`）とワークフロー名・ステータスチェック名を素直に対応させる
+（例: `services/backend/java-worker/` なら `reusable-backend-java-worker.yml` /
+`backend-java-worker / check`）のが自然な拡張だが、これは今のところ実例で確認された規則ではなく、
+実際に第3の役割サフィックス付きバックエンドが追加された際に採用パターンとして確定させる。

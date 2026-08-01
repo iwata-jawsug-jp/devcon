@@ -49,6 +49,14 @@ Terraform 変数化済み（`infra/variables.tf` に `var.api_port` 等として
 ——本節のDockerfile契約6項目（後述）はいずれもHTTPサーバー・ALBヘルスチェック・
 `containerOverrides` を前提としており、Lambdaハンドラーには当てはまらない。
 
+同様に、契約#6の `API_*` 環境変数プレフィックス（`infra/api.tf` がECSタスク定義に注入するリテラルの
+キー名群）も ECS Fargate 常駐サーバーを前提とした契約であり、非同期ワーカー（Lambda）が読むべき
+環境変数の契約ではない。Lambda 用の環境変数は Lambda リソースを定義する Terraform 側で個別に注入する
+構成になる（現状 `infra/` 配下に Lambda 関数リソースはまだ無く、`services/backend/go` 自体も
+Lambda デプロイは未実施——今後 Lambda 化する際に新設する）ため、`API_*` の命名規則をLambda実装に
+そのまま当てはめようとしない——本節の対象外という前段の注記と合わせて、環境変数契約についても
+非該当であることを明示しておく。
+
 ### 1. スキーマ権威の移譲手順
 
 `gen-schema` ターゲット（`Makefile`）は4段構成で、Python 固有なのは2段目のみ。
@@ -82,6 +90,16 @@ gen-schema: db-up migrate ## Snapshot the Alembic-migrated schema for Go's sqlc 
 Make ターゲット）はその権威となるバックエンドのマイグレーションツールを呼び出す。それ以外の
 バックエンドは全て `gen-schema` のスナップショットパイプライン経由の読み取り専用コンシューマの
 ままであり、この関係自体は変更不要。
+
+**スナップショット出力先について**: `gen-schema` ターゲット自体の出力パス
+（`$(BACKEND_GO_DIR)/internal/db/schema.sql`）は Go/sqlc の消費先に決め打ちされている。
+`services/backend/go` を撤去し、スナップショットを消費する読み取り専用コンシューマがGo以外に
+なる（あるいは存在しなくなる）場合、この出力先をGo固有のパスのまま残す理由はない——
+`services/backend/schema/schema.sql` のような、特定バックエンド言語のディレクトリに属さない
+言語非依存な置き場所に変更し、`gen-schema` ターゲット・各コンシューマ側の読み込みパスの双方を
+追従させる。読み取り専用コンシューマが存在しなくなる場合（スキーマ権威を持つバックエンド1つのみ
+残す構成）でも、スナップショット自体は将来の3言語目追加時の起点になりうるため、ターゲット自体は
+削除せず出力先のみ言語非依存な位置に変更しておくことを推奨する。
 
 ### 2. `reusable-backend-<lang>.yml` の新設／既存ワークフローとの役割分担
 
@@ -140,6 +158,21 @@ code=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task_arn" \
 待機後の exit code チェックがデプロイ失敗を検知する仕組みなので、新しいマイグレーションコマンドは
 失敗時に非ゼロで終了する必要がある——これを満たさないとデプロイの安全装置が機能しなくなる。
 
+**Spring Boot（Spring Security併用）での罠——成功時にも非ゼロ終了しうる逆方向のケース**: 上記の
+「失敗時に非ゼロで終了する必要がある」の裏返しとして、migrate専用モードの実装によっては**成功して
+いるにもかかわらず非ゼロで終了する**罠がある。Spring Securityの`SecurityFilterChain`（`HttpSecurity`
+が必要）を持つアプリで、migrate専用モードを`WebApplicationType.NONE`（Webレイヤーを起動しない
+軽量モード）として実装すると、(1) Flywayなどのマイグレーション自体は正常に適用されるが、(2)
+その直後に`SecurityConfig`の`filterChain`Bean生成が`HttpSecurity`（servlet専用）を要求して
+ApplicationContextの初期化に失敗し、(3) 結果としてマイグレーションは成功しているのにexit 1で
+終了する。`tasks-stopped`待機後の exit code チェックはこれを区別できないため、実際には成功して
+いるマイグレーションを失敗と誤判定してデプロイパイプラインを止めてしまう。回避策は、migrate
+モードも`WebApplicationType.NONE`ではなく`server.port=-1`（Web層はロードするが実TCPポートは
+bindしない）で起動することである。こうすればSecurityを含む全レイヤーが通常通り初期化された上で
+exit 0になる（`server.port=-1`自体は次節「4. OpenAPI抽出の標準化」の「Java（Spring Boot +
+springdoc-openapi）での実現例」で使われているものと同じ起動オプションだが、そちらはOpenAPI抽出
+目的、こちらはmigrateモードのApplicationContext初期化失敗回避が目的という別の用途である）。
+
 ### 4. OpenAPI抽出の標準化
 
 `Makefile` の `gen-types` ターゲットは各バックエンドにつき「サーバー起動なしで OpenAPI JSON を出力する
@@ -174,6 +207,20 @@ Python は `uv run python -c` のワンライナーで `app.openapi()` を直接
   import しているフロントエンドコードの追従修正が必要——これは Makefile 変更だけでは完結しない、
   フロントエンド側のフォローアップ作業である
 
+生成された `schema.<lang>.ts` は Prettier（および同種のフォーマッタ）の整形対象から除外する
+必要がある。`openapi-typescript` の生出力はインデント4スペース・ダブルクォートだが、本リポジトリの
+Prettier 設定は2スペース・シングルクォートであり、両者が一致する保証はない（既存の
+`schema.python.ts`/`schema.go.ts` は FastAPI/huma の生成結果がたまたま Prettier 設定に近い形式
+だったため、これまで問題が表面化していなかっただけである）。除外していないと、コミット時に
+pre-commit の prettier フックが生成ファイルを再整形し、その再整形後の内容が次回 `make gen-types`
+再実行時の生の生成結果と食い違うため、`reusable-gen-types.yml` の drift check（`git diff
+--exit-code`）が常に失敗する無限ループになる（#755）。
+
+新しい言語を追加/置き換える際のチェックリストとして、`.pre-commit-config.yaml` の prettier フックの
+`exclude` パターン（現状 `services/frontend/src/api/schema\.(python|go)\.ts` のような形）に新しい
+`schema.<lang>.ts` を追加することを忘れないこと。この更新を怠ると上記の drift check 無限ループが
+実際に発生する（itouhi/java-webapp2#1、#734 検証項目4で発見）。
+
 **Java（Spring Boot + springdoc-openapi）での実現例**: springdoc-openapi の標準的な利用方法は
 埋め込みサーバーを実際に起動する前提のものが多く、Go の `go run ./cmd/api openapi` のような
 「サーバー起動なし」パターンは自明ではない。`server.port=-1` を指定して起動すると
@@ -182,6 +229,16 @@ Python は `uv run python -c` のワンライナーで `app.openapi()` を直接
 呼び出すことで、実HTTPクライアント・実ソケット無しに OpenAPI JSON を取得できる。この組み合わせは
 Spring・springdoc いずれの公式ドキュメントにも記載がなく、Java を候補言語とする際に必ず踏む
 ポイントである。
+
+**プロパティ優先順位の罠**: 上記のエントリポイントを実DBに繋がず軽量に起動させるため、
+`SpringApplicationBuilder.properties(Map.of("spring.datasource.url", "jdbc:h2:mem:..."))`
+のようにプログラム的にプロパティを上書きしようとすると失敗する。`SpringApplicationBuilder.properties(...)`
+で渡した値はSpring Bootのプロパティソース優先順位で**最低優先度**（デフォルト値相当）として
+登録されるため、`application.yml` に書かれた値（本番用のPostgres接続文字列）に上書きされてしまい、
+DBレス起動のつもりが実DBに接続しようとして失敗する。解決策は、オーバーライドしたい値を
+`SpringApplicationBuilder.properties()` ではなくコマンドライン引数（`--spring.datasource.url=...`）
+として渡すことである。コマンドライン引数は `application.yml` より優先順位が高いため確実に
+上書きできる。
 
 ### 5. Dockerfile最低限契約チェックリスト
 
@@ -199,13 +256,34 @@ ADR-0029 Decision 項目5 / `docs/proposal/service-replacement-proposal.md` §4.
 | 5   | マイグレーションは `containerOverrides` でのコマンド差し替えに対応する                                                        | 本節3参照                                                                                                                                                                                                                                                         |
 | 6   | `API_*` の環境変数キー名をそのまま読み取る                                                                                    | `infra/api.tf` はキー名がリテラルにハードコードされている: `API_DB_HOST`, `API_DB_PORT`, `API_DB_NAME`, `API_DB_USER`, `API_DB_PASSWORD`, `API_ENVIRONMENT`, `API_OTEL_TRACES_ENABLED`, `API_COGNITO_USER_POOL_ID`, `API_COGNITO_REGION`, `API_COGNITO_CLIENT_ID` |
 
+**契約#3・#4はECS Fargate常駐サーバー前提——Lambda（非同期ワーカー）には同じ形で当てはまらない**:
+上の表、特に契約#3（ビルド時依存解決）と契約#4（VPCエンドポイント経由のみ到達可能）は、本節が
+対象とする「ECS Fargate上の常駐HTTPサーバー」（冒頭参照）を暗黙の前提にしている。`services/backend/go`
+相当の非同期/イベント駆動ロール（Lambda、ADR-0024）は本節の対象外だが、置き換え先をLambdaで実装
+する場合にこの前提の違いを見誤ると、#369と同種の「実デプロイでのみ顕在化するタイムアウト」を
+再現しうる（itouhi/java-webapp2#1、devcon#734で発見、#758）。
+
+| 観点                 | ECS Fargate（常駐サーバー、本節の対象）                                    | Lambda（非同期ワーカー、ADR-0024、本節の対象外）                                                                                                                                          |
+| -------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| イベント受信経路     | アプリ自身が契約#1でリスンし、ALBがVPC内のコンテナIPへ直接ルーティングする | SQS→Lambdaのイベント配信はLambdaサービス自身（AWS管理側）のイベントソースマッピング/ポーラーが行う。**Lambda関数のコード自体はメッセージを「受信」するためにVPC経路を必要としない**       |
+| VPCアタッチの要否    | 常時必須（ALBがVPC内のコンテナIPへ到達するため）                          | 任意。RDS Postgres等プライベートサブネット内のリソースへ到達する必要がある場合のみVPCアタッチする                                                                                        |
+| 契約#4の該当性       | 常に該当                                                                    | VPCアタッチしない場合は非該当（イベント受信はAWS管理のネットワークで完結する）。VPCアタッチする場合のみ、ECS同様に「実行時に到達できるAWSサービスはVPCエンドポイント経由のみ」が適用される |
+
+**VPCアタッチしたLambdaワーカーがSQSを直接呼び出す場合は`sqs`エンドポイントが別途必要**:
+VPCアタッチしたLambdaワーカーが、メッセージ処理完了後のバッチ削除など、SQS自体をAPI呼び出しする
+場合は契約#4がそのまま適用される。現状の`infra/endpoints.tf`のインターフェースエンドポイント
+（`interface_endpoints`）はECR(api/dkr)・CloudWatch Logs・Secrets Manager・Cognito IDP・
+（`var.otel_traces_enabled`有効時のみ）X-Rayのみで、`sqs`（`com.amazonaws.<region>.sqs`）は
+含まれない（本ガイド冒頭の「影響範囲マップ」参照）。この場合は`infra/endpoints.tf`の
+`interface_endpoints`に`sqs`を追加する必要がある。
+
 ### 6. 候補言語での検証結果
 
-| 言語/フレームワーク                                                   | 適合度 | 注意点                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **TypeScript（Next.js / Nuxt.js、API Routes を backend として使用）** | 高     | 単一 Node プロセスが直接 HTTP を listen する点で Python/Go と同じモデル。`process.env.API_DB_HOST` 等をプレフィックス変換なしにそのまま読める（3候補中もっとも摩擦が少ない）。**要注意**: Next.js は既定で匿名テレメトリを起動時に外部送信しようとするため、NAT Gateway 不在の環境ではハング/タイムアウトの原因になり得る。`NEXT_TELEMETRY_DISABLED=1` の明記が必須。マイグレーションは Prisma Migrate / Drizzle Kit 等に対応する起動コマンドへの差し替えが必要     |
-| **Java（Spring Boot 等）**                                            | 中     | ポート・ビルド時依存解決（Maven/Gradle）は標準的なマルチステージビルドで対応可能。**要注意**: `API_*` のリテラル環境変数名は Spring の慣習（`SPRING_*`、`application.yml`）と異なるため、`@ConfigurationProperties` 等でのマッピング層が必要。ヘルスチェックは Actuator の既定パスではなく `var.api_health_check_path` に独自実装する。OpenAPI JSON抽出は§4「OpenAPI抽出の標準化」の Java 向け実現例（`server.port=-1` + `MockMvc` の in-process 呼び出し）を参照。 |
-| **PHP（Laravel 等）**                                                 | 中〜低 | Composer でのビルド時依存解決は標準的。**要注意**: PHP は伝統的に nginx+php-fpm の2プロセス構成が多く、ECS Fargate が期待する「単一プロセスが直接 HTTP を listen する」モデルと食い違う。Swoole や RoadRunner 等の長時間実行サーバーを採用しないと、この契約を素直には満たせない                                                                                                                                                                                    |
+| 言語/フレームワーク                                                   | 適合度 | 注意点                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **TypeScript（Next.js / Nuxt.js、API Routes を backend として使用）** | 高     | 単一 Node プロセスが直接 HTTP を listen する点で Python/Go と同じモデル。`process.env.API_DB_HOST` 等をプレフィックス変換なしにそのまま読める（3候補中もっとも摩擦が少ない）。**要注意**: Next.js は既定で匿名テレメトリを起動時に外部送信しようとするため、NAT Gateway 不在の環境ではハング/タイムアウトの原因になり得る。`NEXT_TELEMETRY_DISABLED=1` の明記が必須。マイグレーションは Prisma Migrate / Drizzle Kit 等に対応する起動コマンドへの差し替えが必要                                                                                                                                                                                                                                                                                                                                                     |
+| **Java（Spring Boot 等）**                                            | 中     | ポート・ビルド時依存解決（Maven/Gradle）は標準的なマルチステージビルドで対応可能。**要注意**: `API_*` のリテラル環境変数名は Spring の慣習（`SPRING_*`、`application.yml`）と異なるため、`@ConfigurationProperties` 等でのマッピング層が必要。ヘルスチェックは Actuator の既定パスではなく `var.api_health_check_path` に独自実装する。OpenAPI JSON抽出は§4「OpenAPI抽出の標準化」の Java 向け実現例（`server.port=-1` + `MockMvc` の in-process 呼び出し）を参照。マイグレーションにFlywayを使う場合（Spring Boot 3.3系）は `flyway-core` だけでなく `flyway-database-postgresql` を明示的に依存追加しないとPostgreSQL用のDB検出に失敗する。また `maven-compiler-plugin` の版数を明示的にpinしないと、古い既定バージョンでは `maven.compiler.release` の指定が無視され意図したJavaバージョンでコンパイルされない。 |
+| **PHP（Laravel 等）**                                                 | 中〜低 | Composer でのビルド時依存解決は標準的。**要注意**: PHP は伝統的に nginx+php-fpm の2プロセス構成が多く、ECS Fargate が期待する「単一プロセスが直接 HTTP を listen する」モデルと食い違う。Swoole や RoadRunner 等の長時間実行サーバーを採用しないと、この契約を素直には満たせない                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ## frontend 置き換え手順
 
@@ -230,6 +308,19 @@ Terraform 変数化済みであり、`infra/variables.tf` の2変数 `auth_callb
   only...)」）を完結させる必要がある。新フロントエンドのルーター規約が異なるパス構成を採る場合は、
   `infra/auth.tf` 自体ではなく `infra/variables.tf` の当該2変数を更新して整合させる——これは
   まさに Terraform 側が変数駆動にした契約点であり、この変数を変えるだけで済む設計になっている。
+
+**注意: 本ガイド・ADR-0029に明記されていない暗黙結合フックが存在しうる。** `.pre-commit-config.yaml`
+には、特定ファイルパス/フォーマットに `files:` 正規表現で暗黙結合したローカルフックが存在する場合が
+あり、それらはこのガイドにも ADR-0029 にも列挙されていない。実例が `check-oauth-scopes`
+（`.pre-commit-config.yaml` 99〜107行目付近、#438由来）で、`infra/auth.tf` の Cognito リソース
+サーバースコープと `services/frontend/src/auth/oidcConfig.ts` の `const scope = '...'` 文字列の
+整合性を突き合わせるが、`files:` が両ファイルの現在のパスにしかマッチしない設計になっている。
+frontend を本ガイドどおりに再構築してファイル構成やスコープの変数定義方法（例: `const scope = '...'`
+文字列 → `scopes: [...]` 配列）を変えると、このフックは単に**マッチしなくなるだけで、エラーも警告も
+出さずに無効化される**——「認証スコープの整合性チェックが壊れたことに誰も気づかない」という静かな
+退行を招く。このパターンは `check-oauth-scopes` に限らない一般的な罠なので、frontend/backend の
+構成を変える置き換えでは `.pre-commit-config.yaml` の全ローカルフックの `files:` パターンを棚卸しし、
+移動・改名・フォーマット変更した対象ファイルに追従しているか（マッチし続けるか）を確認すること。
 
 ### 2. 品質ゲート不変条件の詳細
 
@@ -314,6 +405,25 @@ front-matter-as-source-of-truth パターンの廃止ではなく、生成スク
 ターゲット自体は残し、内部で呼び出すコマンド（`npm run design:gen-theme`、または新フレームワーク
 側の等価コマンド）だけを差し替える。
 
+現行の生成スクリプト（`services/frontend/scripts/gen-design-tokens.mjs`）のソースを読まずに再現
+しようとすると見落としやすい出力フォーマットの詳細が3点ある。書き直す新スクリプトも、値だけでなく
+この3点の挙動を踏襲する必要がある。
+
+- **色のOKLCH→hex正規化**: `docs/frontend-design.md` の front matter では色を OKLCH
+  （例: `oklch(0.55 0.18 250)`）で記述するが、`designmd export --format css-tailwind` の生成結果は
+  常に hex に正規化される。これは意図した挙動であり、生成後の `main.css` を hex から OKLCH に
+  手で戻す必要はない。
+- **フォントスタックの引用符除去**: エクスポータは `--font-*` の値を丸ごとダブルクォートで囲むが、
+  これは単一ファミリー名には正しくてもカンマ区切りのフォールバックリストには不適切
+  （ブラウザがフォールバックチェインではなく1つのリテラルな引用符付き文字列として解釈してしまう）。
+  そのため `gen-design-tokens.mjs` は生成結果に対し `--font-[\w-]+:\s*"([^"]*)"` 相当の正規表現で
+  引用符を剥がす後処理を行っている。
+- **`design-tokens:start`/`:end` マーカー構文**: 生成結果は `src/main.css` 内の
+  `/* design-tokens:start */` と `/* design-tokens:end */` という2つのコメント行に挟まれた区間にのみ
+  書き込まれる（両マーカー行自体は保持されたまま、間の内容だけが置き換わる）。新スクリプトでも
+  同じ2マーカー間だけを書き換える方式を維持し、マーカー行そのものを生成結果に含めたり削除したり
+  しないこと。
+
 ### 4. ビルド出力先・`VITE_*`環境変数プレフィックスの扱い
 
 `.github/workflows/reusable-app-deploy.yml` の `frontend` job、`Build` ステップ（224〜230行）は
@@ -353,6 +463,22 @@ S3` ステップの同期元パスを合わせて更新する。なお `docs/pro
 S3+CloudFront にデプロイ可能であることを前提としている。Next.js/Nuxt.js をライブサーバーとして
 稼働させる SSR 構成が必要な場合は `infra/` 自体の再設計（ECS Fargate 等）が必要になり、同形置き
 換えのスコープ外——別の、より大きな意思決定になる。
+
+### 5. `services/frontend/CLAUDE.md` の規約: load-bearingなものと実装固有の慣習の区別
+
+`services/frontend/CLAUDE.md` に列挙されている規約（例: `vite-ssg` によるプリレンダー、
+`useXxxQuery()` 経由でのみサーバー状態を取得する TanStack Query パターン、Pinia でのクライアント
+状態管理）は、本ガイド・ADR-0029が定める infra/CI 契約点（環境変数プレフィックス、ヘルスチェック
+パス等）とは異なり、「どれが置き換え後も維持すべき契約で、どれが単なる実装上の選択だったか」の
+線引きがガイド本文のどこにも明示されていない。ガイドだけを頼りに置き換えると、これらの規約は
+そもそも参照されないため再現されない——ガイドに正しく従った結果として規約が失われる、という
+判断保留のまま進みやすい箇所である。
+
+現時点でこの区別自体を体系的に棚卸しする作業は本ガイドのスコープ外とし、置き換え作業者は
+「本ガイド・ADR-0029に明記された契約点（`infra/*.tf` 変数、`reusable-app-deploy.yml` の環境変数、
+品質ゲート4カテゴリ等）は維持必須、それ以外の `services/frontend/CLAUDE.md` 記載の実装パターンは
+新フレームワークの慣習に合わせて置き換えてよい実装上の選択」という原則で都度判断する。この原則が
+実際に機能しない粒度の規約が見つかった場合は、本ガイドへの追記または新規issueとして切り出す。
 
 ## 関連ドキュメント
 
