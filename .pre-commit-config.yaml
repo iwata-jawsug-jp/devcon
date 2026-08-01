@@ -80,11 +80,17 @@ repos:
   # services/frontend/node_modules (installed by `make setup`); fails with a clear
   # "Executable ... not found" otherwise. Deliberately NOT `npx`: npx silently falls back
   # to fetching prettier@latest from the registry when node_modules is missing.
+  # Falls back to a no-op warning (not a hard failure) when services/frontend/node_modules is
+  # absent entirely (e.g. mid frontend rewrite) so unrelated commits aren't blocked (#743).
   - repo: local
     hooks:
       - id: prettier
         name: prettier
-        entry: services/frontend/node_modules/.bin/prettier --write --ignore-unknown
+        entry: >-
+          bash -c 'if [ -x services/frontend/node_modules/.bin/prettier ]; then
+          exec services/frontend/node_modules/.bin/prettier --write --ignore-unknown "$@";
+          else echo "prettier: services/frontend/node_modules/.bin/prettier not found — skipping
+          (run \`make setup\`, or services/frontend is mid-rebuild)" >&2; fi' _
         language: system
         files: \.(ts|tsx|js|jsx|mjs|cjs|vue|json|yaml|yml|md|html|css)$
         # .claude/skills/ and .kiro/settings/templates/ are cc-sdd upstream artifacts

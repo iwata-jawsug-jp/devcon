@@ -74,6 +74,10 @@ concrete evidence (file:line quoted or command output), not a vibe assessment.
 
 ### Backend rows
 
+以下の行は同期REST（`services/backend/python` 相当、ECS Fargate上の常駐HTTPサーバー）を対象と
+する。非同期/イベント駆動ロール（`services/backend/go` 相当、Lambda、ADR-0024）はスコープ外
+——判断が必要な場合は診断結果に明示し、この表をそのまま当てはめない。
+
 | # | Check | How to verify |
 | --- | --- | --- |
 | 1 | Listens on `0.0.0.0:<configured port>`, not loopback-only | Read the app entrypoint / Dockerfile `CMD` |

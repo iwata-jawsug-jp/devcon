@@ -14,31 +14,44 @@ Mode B（proactive: 着手前にファイル/行単位のチェックリスト�
 ## 影響範囲マップ
 
 backend/frontend の実装を差し替える際に触る可能性がある契約点の一覧。`infra/*.tf` 側は
-[#727](https://github.com/iwata-jawsug-jp/devcon/issues/727)（マージ済み）で Terraform 変数化済みのため、
+Terraform 変数化済み（`infra/variables.tf` に `var.api_port` 等として切り出し済み）のため、
 以降の4項目は変数の既定値を変えるだけで対応でき、`infra/*.tf` 自体の編集は不要。
 
-| 契約点                                | 場所                                                                                                   | 現在の値                                                                                                                                                     |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| API コンテナのリスンポート            | `infra/variables.tf:153`（`var.api_port`）／参照側 `infra/api.tf:106-107, 120, 127, 273, 339`（6箇所） | 既定 `8000`                                                                                                                                                  |
-| ALB ヘルスチェックパス                | `infra/variables.tf:159`（`var.api_health_check_path`）／参照側 `infra/api.tf:126`                     | 既定 `/api/health`                                                                                                                                           |
-| Cognito コールバックURL               | `infra/variables.tf:165`（`var.auth_callback_path`）／参照側 `infra/auth.tf:20`                        | 既定 `/callback`                                                                                                                                             |
-| Cognito ログアウトURL                 | `infra/variables.tf:171`（`var.auth_login_path`）／参照側 `infra/auth.tf:21`                           | 既定 `/login`                                                                                                                                                |
-| API 環境変数プレフィックス            | `infra/api.tf:276-289`（8個、リテラルなキー名としてハードコード。意図的に変数化していない）            | `API_*`                                                                                                                                                      |
-| frontend ビルド環境変数プレフィックス | `reusable-app-deploy.yml:226-230`                                                                      | `VITE_*`                                                                                                                                                     |
-| frontend ビルド出力ディレクトリ       | `reusable-app-deploy.yml:236-237`                                                                      | `dist/`                                                                                                                                                      |
-| マイグレーション実行コマンド          | `reusable-app-deploy.yml:164`付近（`containerOverrides`）                                              | `["uv","run","--no-sync","alembic","upgrade","head"]`                                                                                                        |
-| DB スキーマ権威                       | `Makefile:65-70`（`gen-schema`）                                                                       | Alembic（Python）が migrate、Go はスナップショットを `pg_dump` 経由で読むのみ                                                                                |
-| ランタイムのネットワーク到達性        | `infra/network.tf`（NAT Gateway 不在）・`infra/endpoints.tf:62-70`                                     | private サブネットに internet 経路なし。到達可能なのは S3・ECR・CloudWatch Logs・Secrets Manager・**Cognito IDP**・（有効時）X-Ray の VPC エンドポイントのみ |
+| 契約点                                | 場所                                                                                                                        | 現在の値                                                                                                                                                     |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| API コンテナのリスンポート            | `infra/variables.tf:153`（`var.api_port`）／参照側 `infra/api.tf:106-107, 120, 127, 273, 339`（6箇所）                      | 既定 `8000`                                                                                                                                                  |
+| ALB ヘルスチェックパス                | `infra/variables.tf:159`（`var.api_health_check_path`）／参照側 `infra/api.tf:126`                                          | 既定 `/api/health`                                                                                                                                           |
+| Cognito コールバックURL               | `infra/variables.tf:165`（`var.auth_callback_path`）／参照側 `infra/auth.tf:20`                                             | 既定 `/callback`                                                                                                                                             |
+| Cognito ログアウトURL                 | `infra/variables.tf:171`（`var.auth_login_path`）／参照側 `infra/auth.tf:21`                                                | 既定 `/login`                                                                                                                                                |
+| API 環境変数プレフィックス            | `infra/api.tf:276-289`（10個: environment 9個 + secrets 1個。リテラルなキー名としてハードコード。意図的に変数化していない） | `API_*`                                                                                                                                                      |
+| frontend ビルド環境変数プレフィックス | `reusable-app-deploy.yml:226-230`                                                                                           | `VITE_*`                                                                                                                                                     |
+| frontend ビルド出力ディレクトリ       | `reusable-app-deploy.yml:236-237`                                                                                           | `dist/`                                                                                                                                                      |
+| マイグレーション実行コマンド          | `reusable-app-deploy.yml:164`付近（`containerOverrides`）                                                                   | `["uv","run","--no-sync","alembic","upgrade","head"]`                                                                                                        |
+| DB スキーマ権威                       | `Makefile` の `gen-schema` ターゲット                                                                                       | Alembic（Python）が migrate、Go はスナップショットを `pg_dump` 経由で読むのみ                                                                                |
+| ランタイムのネットワーク到達性        | `infra/network.tf`（NAT Gateway 不在）・`infra/endpoints.tf:62-70`                                                          | private サブネットに internet 経路なし。到達可能なのは S3・ECR・CloudWatch Logs・Secrets Manager・**Cognito IDP**・（有効時）X-Ray の VPC エンドポイントのみ |
 
 **変数化しないもの（意図的、ADR-0029 Decision 4）**: `API_*`/`VITE_*` の環境変数プレフィックス、
 `dist/` のビルド出力先。これらは実装側（フレームワーク・言語）の規約であり、infra 側で変数化しても
 実装が追従しなければ意味がない。
 
+## 前提: devcontainerのツールチェーン確認
+
+候補言語・フレームワークのビルド・実行に必要なツールチェーンが `.devcontainer/devcontainer.json` の
+`features` に無い場合は追加する。Go を第二バックエンド言語として追加した際（ADR-0024）に
+`ghcr.io/devcontainers/features/go:1` を追加した前例に倣い、[Dev Container Features](https://containers.dev/features)
+から該当言語の feature を探して追加する。ここを見落とすと、本ガイドの以降の手順を試す前段階で
+`make backend-setup` 等のコマンドがそもそも実行できずに詰まる。
+
 ## backend 置き換え手順
+
+本節は同期REST（`services/backend/python` 相当、ECS Fargate上の常駐HTTPサーバー）の置き換えを
+対象とする。非同期/イベント駆動ロール（`services/backend/go` 相当、Lambda、ADR-0024）は対象外
+——本節のDockerfile契約6項目（後述）はいずれもHTTPサーバー・ALBヘルスチェック・
+`containerOverrides` を前提としており、Lambdaハンドラーには当てはまらない。
 
 ### 1. スキーマ権威の移譲手順
 
-`gen-schema`（`Makefile:65-70`）は4段構成で、Python 固有なのは2段目のみ。
+`gen-schema` ターゲット（`Makefile`）は4段構成で、Python 固有なのは2段目のみ。
 
 ```makefile
 gen-schema: db-up migrate ## Snapshot the Alembic-migrated schema for Go's sqlc (Go never migrates; #639)
@@ -54,7 +67,7 @@ gen-schema: db-up migrate ## Snapshot the Alembic-migrated schema for Go's sqlc 
 3. `pg_dump --schema-only` — マイグレーション済みスキーマのスナップショット取得（言語非依存）
 4. `sqlc generate` — Go の sqlc がスナップショットから型付きクエリを生成（言語非依存）
 
-`services/backend/go` は `Makefile:61-64` のコメントおよび `docs/app-development.md` に明記の通り、
+`services/backend/go` は `gen-schema` ターゲット直前のコメント（`Makefile`）および `docs/app-development.md` に明記の通り、
 スキーマを一切マイグレーションしない読み取り専用コンシューマとして設計されている。現在はこの構造に
 より Alembic（Python）がスキーマの唯一の権威になっている。
 
@@ -129,7 +142,7 @@ code=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task_arn" \
 
 ### 4. OpenAPI抽出の標準化
 
-`Makefile:54-59` の `gen-types` は各バックエンドにつき「サーバー起動なしで OpenAPI JSON を出力する
+`Makefile` の `gen-types` ターゲットは各バックエンドにつき「サーバー起動なしで OpenAPI JSON を出力する
 コマンド1本」を前提にしたパターンを取る。
 
 ```makefile
@@ -161,11 +174,20 @@ Python は `uv run python -c` のワンライナーで `app.openapi()` を直接
   import しているフロントエンドコードの追従修正が必要——これは Makefile 変更だけでは完結しない、
   フロントエンド側のフォローアップ作業である
 
+**Java（Spring Boot + springdoc-openapi）での実現例**: springdoc-openapi の標準的な利用方法は
+埋め込みサーバーを実際に起動する前提のものが多く、Go の `go run ./cmd/api openapi` のような
+「サーバー起動なし」パターンは自明ではない。`server.port=-1` を指定して起動すると
+`WebApplicationContext` は通常通り構築されるが実TCPポートはbindされないため、その状態で
+`MockMvc`（`spring-test`）を使って springdoc の `/v3/api-docs` エンドポイントを in-process で
+呼び出すことで、実HTTPクライアント・実ソケット無しに OpenAPI JSON を取得できる。この組み合わせは
+Spring・springdoc いずれの公式ドキュメントにも記載がなく、Java を候補言語とする際に必ず踏む
+ポイントである。
+
 ### 5. Dockerfile最低限契約チェックリスト
 
 ADR-0029 Decision 項目5 / `docs/proposal/service-replacement-proposal.md` §4.4 に基づく、新
 バックエンドの Dockerfile が満たすべき最低限の契約。`infra/variables.tf` への `var.api_port` /
-`var.api_health_check_path` 追加（#727、マージ済み）後の状態を前提とする——以下の項目1・2は
+`var.api_health_check_path` 追加後の状態を前提とする——以下の項目1・2は
 リテラル値ではなくこれらの変数を参照する。
 
 | #   | 契約                                                                                                                          | 根拠                                                                                                                                                                                                                                                              |
@@ -179,25 +201,25 @@ ADR-0029 Decision 項目5 / `docs/proposal/service-replacement-proposal.md` §4.
 
 ### 6. 候補言語での検証結果
 
-| 言語/フレームワーク                                                   | 適合度 | 注意点                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| --------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **TypeScript（Next.js / Nuxt.js、API Routes を backend として使用）** | 高     | 単一 Node プロセスが直接 HTTP を listen する点で Python/Go と同じモデル。`process.env.API_DB_HOST` 等をプレフィックス変換なしにそのまま読める（3候補中もっとも摩擦が少ない）。**要注意**: Next.js は既定で匿名テレメトリを起動時に外部送信しようとするため、NAT Gateway 不在の環境ではハング/タイムアウトの原因になり得る。`NEXT_TELEMETRY_DISABLED=1` の明記が必須。マイグレーションは Prisma Migrate / Drizzle Kit 等に対応する起動コマンドへの差し替えが必要 |
-| **Java（Spring Boot 等）**                                            | 中     | ポート・ビルド時依存解決（Maven/Gradle）は標準的なマルチステージビルドで対応可能。**要注意**: `API_*` のリテラル環境変数名は Spring の慣習（`SPRING_*`、`application.yml`）と異なるため、`@ConfigurationProperties` 等でのマッピング層が必要。ヘルスチェックは Actuator の既定パスではなく `var.api_health_check_path` に独自実装する                                                                                                                           |
-| **PHP（Laravel 等）**                                                 | 中〜低 | Composer でのビルド時依存解決は標準的。**要注意**: PHP は伝統的に nginx+php-fpm の2プロセス構成が多く、ECS Fargate が期待する「単一プロセスが直接 HTTP を listen する」モデルと食い違う。Swoole や RoadRunner 等の長時間実行サーバーを採用しないと、この契約を素直には満たせない                                                                                                                                                                                |
+| 言語/フレームワーク                                                   | 適合度 | 注意点                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **TypeScript（Next.js / Nuxt.js、API Routes を backend として使用）** | 高     | 単一 Node プロセスが直接 HTTP を listen する点で Python/Go と同じモデル。`process.env.API_DB_HOST` 等をプレフィックス変換なしにそのまま読める（3候補中もっとも摩擦が少ない）。**要注意**: Next.js は既定で匿名テレメトリを起動時に外部送信しようとするため、NAT Gateway 不在の環境ではハング/タイムアウトの原因になり得る。`NEXT_TELEMETRY_DISABLED=1` の明記が必須。マイグレーションは Prisma Migrate / Drizzle Kit 等に対応する起動コマンドへの差し替えが必要     |
+| **Java（Spring Boot 等）**                                            | 中     | ポート・ビルド時依存解決（Maven/Gradle）は標準的なマルチステージビルドで対応可能。**要注意**: `API_*` のリテラル環境変数名は Spring の慣習（`SPRING_*`、`application.yml`）と異なるため、`@ConfigurationProperties` 等でのマッピング層が必要。ヘルスチェックは Actuator の既定パスではなく `var.api_health_check_path` に独自実装する。OpenAPI JSON抽出は§4「OpenAPI抽出の標準化」の Java 向け実現例（`server.port=-1` + `MockMvc` の in-process 呼び出し）を参照。 |
+| **PHP（Laravel 等）**                                                 | 中〜低 | Composer でのビルド時依存解決は標準的。**要注意**: PHP は伝統的に nginx+php-fpm の2プロセス構成が多く、ECS Fargate が期待する「単一プロセスが直接 HTTP を listen する」モデルと食い違う。Swoole や RoadRunner 等の長時間実行サーバーを採用しないと、この契約を素直には満たせない                                                                                                                                                                                    |
 
 ## frontend 置き換え手順
 
 ### 1. 単一スロット制約・Cognito Hosted UI移行の注意点
 
-backend（`services/backend/<lang>/`）は Python と Go が並行共存する複数スロット構成だが、frontend
+backend（`services/backend/<lang>/`）は Python と Go が並行共存する複数スロット構成だが（同一言語が複数役割を担う場合の命名は [ADR-0004](adr/0004-rename-services-by-role-and-nest-backend-by-language.md) 追記を参照）、frontend
 にこれに相当する言語/フレームワーク別のネスト構造はない。`services/frontend/` が唯一のフロント
 エンドであり、置き換えは常に **in-place**（旧実装を削除し新実装に差し替える）で行う。backend の
 Python + Go のように新旧フロントエンドを並行稼働させる選択肢は存在しない。
 
 Cognito Hosted UI 連携は `services/frontend/src/auth/` に実装されている（`infra/auth.tf` 冒頭
 コメント: 「Scope: infra provisioning only. JWT verification lives in the API... the Hosted UI
-login/callback flow lives in the frontend (services/frontend/src/auth/)」）。infra 側は #727
-マージ後、`infra/variables.tf` の2変数 `auth_callback_path`（既定値 `/callback`）・
+login/callback flow lives in the frontend (services/frontend/src/auth/)」）。infra 側は
+Terraform 変数化済みであり、`infra/variables.tf` の2変数 `auth_callback_path`（既定値 `/callback`）・
 `auth_login_path`（既定値 `/login`）でこのパスを外出しし、`infra/auth.tf` の
 `cognito_callback_urls`/`cognito_logout_urls` local にフィードしている。
 
@@ -206,8 +228,8 @@ login/callback flow lives in the frontend (services/frontend/src/auth/)」）。
 
 - PKCE フロー（`infra/auth.tf`: 「Public client (no secret — Authorization Code + PKCE
   only...)」）を完結させる必要がある。新フロントエンドのルーター規約が異なるパス構成を採る場合は、
-  `infra/auth.tf` 自体ではなく `infra/variables.tf` の当該2変数を更新して整合させる——これは #727
-  がまさに変数駆動にした契約点であり、この変数を変えるだけで済む設計になっている。
+  `infra/auth.tf` 自体ではなく `infra/variables.tf` の当該2変数を更新して整合させる——これは
+  まさに Terraform 側が変数駆動にした契約点であり、この変数を変えるだけで済む設計になっている。
 
 ### 2. 品質ゲート不変条件の詳細
 

@@ -30,6 +30,10 @@ key becomes `--font-<key>`, a `colors` key becomes `--color-<key>`) so the gener
 lines up with what components actually reference. After editing this file's front matter, run
 `make gen-design-tokens` and commit both files together.
 
+`@google/design.md` is a regular npm package already declared in `services/frontend/package.json`'s
+`devDependencies` (`^0.4.0`) — `npm install` (or `make frontend-setup`) picks it up like any other
+dependency; no separate/manual install step is needed.
+
 A utility-first Tailwind v4 setup with a single brand color ramp layered on top of Tailwind's
 defaults. There is no separate design system yet — deliberately: this repo adds tokens only
 when a real screen needs them (see `src/main.css`'s own comment to that effect).

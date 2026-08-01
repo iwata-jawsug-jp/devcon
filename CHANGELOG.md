@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-08-01
+
+### Fixed
+
+- **`docs/service-replacement-guide.md` を公開リポジトリからのスキャフォールド新規プロジェクトで実証し、見つかった記述漏れ・誤記を修正**: `itouhi/java-webapp#1`・`#2`（`#734`）でガイド・`service-replacement-check` スキル・ADR-0004/ADR-0029 を第三者視点（Java/Spring Boot への backend/frontend 新規実装）で実際に試用したところ、生成先に存在しない issue 番号への参照（`#727`、`#736`）・`Makefile` の行番号引用が生成先で系統的にズレる不具合（`audience:no-generate` ブロックの除外による5行シフトが原因。行番号を名前参照に変更して解消）と環境変数個数の記載間違い（8個→10個、`#737`）・devcontainer のツールチェーン更新への言及漏れ（`#738`）・backend 置き換え手順が同期RESTのみを対象とし非同期/Lambda ロールは対象外である旨の未記載（`#739`）・同一言語が複数役割を担う場合のディレクトリ命名規則の未定義（ADR-0004に追記、`#740`）・Java/springdoc での「サーバー起動なしOpenAPI出力」実現方法の未記載（`#741`）の6件を修正した。`@google/design.md` のnpmパッケージ名についても再検証したが実際には正しく解決することを確認し、明確化のみ実施した（元の404報告は再現せず、`#742`）。あわせて、`.pre-commit-config.yaml` の prettier フックが frontend 不在時（置き換え作業中）に無関係な commit までブロックしていたバグも修正した（`#743`）。
+
 ## [0.8.2] - 2026-08-01
 
 ### Added
@@ -1440,7 +1446,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.4...v0.8.0
