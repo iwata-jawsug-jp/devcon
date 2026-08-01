@@ -318,6 +318,10 @@ npm test           # Vitest（ユニット）
 npm run test:e2e   # Playwright（E2E）
 ```
 
+> backend/frontend を別言語・フレームワークへ置き換える場合は
+> [`docs/service-replacement-guide.md`](docs/service-replacement-guide.md)（判断基準は
+> [ADR-0029](docs/adr/0029-service-composition-change-criteria.md)）を参照。
+
 ### CI/CD
 
 `.github/workflows/` の GitHub Actions が Makefile / pre-commit と同じゲートを実行する

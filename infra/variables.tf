@@ -146,6 +146,34 @@ variable "ecs_memory_target_value" {
   default     = 70
 }
 
+# --- Service contract (api.tf, auth.tf) ---
+# infra's requirements on the backend/frontend implementation. Change these (not api.tf /
+# auth.tf) when swapping either implementation for one with different port/path conventions.
+
+variable "api_port" {
+  description = "TCP port the api container listens on. Change this (not api.tf) when swapping the backend implementation for one that listens on a different port."
+  type        = number
+  default     = 8000
+}
+
+variable "api_health_check_path" {
+  description = "HTTP path the ALB target group health check requests. Must return 200 unauthenticated when the api container is healthy."
+  type        = string
+  default     = "/api/health"
+}
+
+variable "auth_callback_path" {
+  description = "Path Cognito Hosted UI redirects to after login. Must match the frontend implementation's route for handling the OAuth2 code exchange."
+  type        = string
+  default     = "/callback"
+}
+
+variable "auth_login_path" {
+  description = "Path Cognito Hosted UI redirects to after logout. Must match the frontend implementation's login/landing route."
+  type        = string
+  default     = "/login"
+}
+
 # --- Observability (observability.tf, #42) ---
 
 variable "alert_email" {

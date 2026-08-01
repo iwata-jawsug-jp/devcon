@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-08-01
+
+### Added
+
+- **スキャフォールド後のサービス差し替え提案書を追加**: `services/backend/<lang>/`・`services/frontend/` を別の言語・フレームワークへ丸ごと置き換える場合の仕組みを提案した。#696「バックエンド言語追加の仕組み化」が明示的にスコープ外とした「既存言語の置き換え」「フロントエンドのフレームワーク変更」を対象とする、#696 を補完する提案書。`infra/*.tf`・`.github/workflows/*`・`Makefile`・`docs/`/`CLAUDE.md` 群への実装調査に基づき、サービス契約の Terraform 変数化・品質ゲートの不変条件化・デザイントークンパイプラインの扱い・backend Dockerfile の最低限契約（Java/PHP/TypeScript(Next.js・Nuxt.js) の3候補で検証）・判断基準の親 ADR 新設を提案した（#726）。
+- **サービス構成変更（追加・置き換え）の判断基準 ADR-0029 を新設**: #696 §4.1 が提案書内にとどめていた「追加」の判断基準（役割分担・実行基盤・スキーマ権威・契約統一）を、`service-replacement-proposal.md` §4.5 の一般化方針に沿って正式な ADR として起草した。置き換え後も維持すべき不変条件（frontend 品質ゲートパリティ・backend Dockerfile 最低限契約）も判断基準に組み込み、#696 は ADR-0029 の「追加」の実例、`service-replacement-proposal.md` は「置き換え」の実例として位置づけた（#728, #732, [ADR-0029](docs/adr/0029-service-composition-change-criteria.md)）。
+- **サービス置き換え実践ガイド `docs/service-replacement-guide.md` を新設**: ADR-0029 が定める判断基準を前提に、backend/frontend を実際に別言語・フレームワークへ置き換える際の実務手順を提案書から再構成した。影響範囲マップ・backend 置き換え手順（スキーマ権威移譲・`reusable-backend-<lang>.yml`・`containerOverrides`・OpenAPI 抽出標準化・Dockerfile 最低限契約6項目・候補言語検証結果）・frontend 置き換え手順（単一スロット制約・品質ゲート不変条件・デザイントークン・`VITE_*`/dist の扱い）をまとめた（#729, #733）。
+
+### Changed
+
+- **サービス契約（ポート・ヘルスチェックパス・Cognito コールバック/ログアウトパス）を Terraform 変数化**: `infra/api.tf`・`infra/auth.tf` にリテラルでハードコードされていたコンテナリスンポート（`8000`）・ALB ヘルスチェックパス（`/api/health`）・Cognito コールバック/ログアウトパス（`/callback`・`/login`）を `infra/variables.tf` の4変数（`api_port`/`api_health_check_path`/`auth_callback_path`/`auth_login_path`）に切り出した。`services/backend/python` を別言語・フレームワークへ置き換える際、`infra/*.tf` 自体を編集しなくて済むようにするため（#726 提案書 §4.1）。既定値は現行の Python/Vue 実装に合わせてあり、既存の `env/*.tfvars` は無改修のまま動作する。sandbox 実機検証（apply → app-deploy → smoke-test → teardown）で全ジョブ green を確認した（#727, #731）。
+
 ## [0.8.1] - 2026-07-31
 
 ### Fixed
@@ -1428,7 +1440,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.7.3...v0.7.4

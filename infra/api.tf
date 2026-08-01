@@ -103,8 +103,8 @@ resource "aws_vpc_security_group_ingress_rule" "app_from_alb" {
   description                  = "App port from ALB"
   referenced_security_group_id = aws_security_group.alb.id
   ip_protocol                  = "tcp"
-  from_port                    = 8000
-  to_port                      = 8000
+  from_port                    = var.api_port
+  to_port                      = var.api_port
 }
 
 resource "aws_lb" "api" {
@@ -117,14 +117,14 @@ resource "aws_lb" "api" {
 
 resource "aws_lb_target_group" "api" {
   name        = "${local.name_prefix}-api"
-  port        = 8000
+  port        = var.api_port
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
 
   health_check {
-    path                = "/api/health"
-    port                = "8000"
+    path                = var.api_health_check_path
+    port                = tostring(var.api_port)
     matcher             = "200"
     interval            = 30
     healthy_threshold   = 2
@@ -270,7 +270,7 @@ resource "aws_ecs_task_definition" "api" {
         image     = local.api_image
         essential = true
         portMappings = [
-          { containerPort = 8000, protocol = "tcp" }
+          { containerPort = var.api_port, protocol = "tcp" }
         ]
         environment = [
           { name = "API_DB_HOST", value = aws_db_instance.postgres.address },
@@ -336,7 +336,7 @@ resource "aws_ecs_service" "api" {
   load_balancer {
     target_group_arn = aws_lb_target_group.api.arn
     container_name   = "api"
-    container_port   = 8000
+    container_port   = var.api_port
   }
 
   # Without this, a bad image just loops through failing health checks for

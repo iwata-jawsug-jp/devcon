@@ -17,8 +17,8 @@ locals {
 
   # Must match the frontend's login/callback routes (services/frontend/src/router,
   # tasks 1.2/1.3 of this spec: LoginView.vue / AuthCallbackView.vue).
-  cognito_callback_urls = ["${local.app_base_url}/callback"]
-  cognito_logout_urls   = ["${local.app_base_url}/login"]
+  cognito_callback_urls = ["${local.app_base_url}${var.auth_callback_path}"]
+  cognito_logout_urls   = ["${local.app_base_url}${var.auth_login_path}"]
 }
 
 # User directory. Essentials tier (Cognito's default — `user_pool_tier` is
