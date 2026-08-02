@@ -3,8 +3,12 @@
 [ADR-0029](adr/0029-service-composition-change-criteria.md) が定めるのは「何を守るべきか」という
 判断の原則である。本ガイドはその原則を前提に、`services/backend/python` や `services/frontend`
 を別言語・フレームワークへ実際に置き換える際に「具体的にどのファイルの何を、どう直すか」を
-実務手順として集約する。`docs/proposal/service-replacement-proposal.md`（提案書）の実装調査を
-実践手順に再構成したもので、判断基準そのものは ADR-0029 を参照する。
+実務手順として集約する。`docs/proposal/service-replacement-proposal.md`（提案書。開発用リポジトリ
+`devcon` にのみ存在し、`docs/proposal` は `tools/template/audience.yml` で
+`generate: false` のため生成先リポジトリには含まれない内部検討資料）の実装調査を実践手順に
+再構成したもので、判断基準そのものは ADR-0029 を参照する。生成先リポジトリの読者は本ガイドと
+ADR-0029・[`service-replacement-check` スキル](../.claude/skills/service-replacement-check/SKILL.md)
+のみを頼りにでき、提案書自体は参照できない。
 
 診断・計画支援には [`.claude/skills/service-replacement-check/SKILL.md`](../.claude/skills/service-replacement-check/SKILL.md)
 を使う。スキルの Mode A（reactive: 実装済みのものを契約と突き合わせて pass/fail を報告する）・
@@ -57,6 +61,16 @@ Lambda デプロイは未実施——今後 Lambda 化する際に新設する�
 そのまま当てはめようとしない——本節の対象外という前段の注記と合わせて、環境変数契約についても
 非該当であることを明示しておく。
 
+一方で「backend 品質ゲートパリティ」（lint・型チェック・カバレッジ、[ADR-0029](adr/0029-service-composition-change-criteria.md)
+追記「backend 品質ゲートパリティの非同期ロールへの適用範囲」参照）は実行基盤に依存しない不変条件
+であり、非同期/イベント駆動ロールにも適用される。`services/backend/go`（Lambda-only）が
+golangci-lint・`go test` で既にこの3種のゲートを満たしていることがその実例である。SQSバッチ処理の
+部分失敗報告（`BatchItemFailures`）の作法・Lambda実行環境間でのDB接続再利用方針・非同期ロール向け
+の環境変数命名規約といった Lambda ハンドラー実装固有の作法については、`infra/` 配下に実際に Lambda
+リソースが新設される時点（`services/backend/go` の Lambda デプロイ自体が Phase3/#640 として未着手）
+まで拠り所となる実装が無く、本ガイドに具体的な手順を記載できない。Lambda 化が実施され次第、独立
+したガイド節として追記する（#770）。
+
 ### 1. スキーマ権威の移譲手順
 
 `gen-schema` ターゲット（`Makefile`）は4段構成で、Python 固有なのは2段目のみ。
@@ -83,8 +97,8 @@ gen-schema: db-up migrate ## Snapshot the Alembic-migrated schema for Go's sqlc 
 残す場合、変更が必要なのは2段目の `migrate` ステップのみ——新バックエンド自身のマイグレーション
 ツール（Go なら `golang-migrate` / `goose` / `atlas` 等、他言語ならその等価物）を呼び出す Make
 ターゲットに差し替える。1・3・4段目はバックエンド言語に非依存であり変更不要。この疎結合は
-`docs/proposal/service-replacement-proposal.md` §3.1 の調査で確認済みの実態であり、これから設計
-する目標ではない。
+`docs/proposal/service-replacement-proposal.md` §3.1（開発用リポジトリのみに存在する内部資料）の
+調査で確認済みの実態であり、これから設計する目標ではない。
 
 原則: どのバックエンドをスキーマ権威とするかに関わらず、`migrate` ステップ（またはその置き換え先の
 Make ターゲット）はその権威となるバックエンドのマイグレーションツールを呼び出す。それ以外の
@@ -230,6 +244,15 @@ pre-commit の prettier フックが生成ファイルを再整形し、その�
 Spring・springdoc いずれの公式ドキュメントにも記載がなく、Java を候補言語とする際に必ず踏む
 ポイントである。
 
+**レスポンスcontent-typeが `*/*` になる罠**: controller メソッドが `produces` を明示していない
+場合、springdoc が生成する OpenAPI doc のレスポンス content-type は `application/json` ではなく
+`*/*` になる。これは `openapi-typescript` で型生成した際、
+`paths['/api/xxx']['get']['responses'][200]['content']['application/json']` ではなく
+`content['*/*']` でアクセスする必要があることを意味し、frontend 側の API クライアント実装に
+直接影響する。回避策は、controller 側で `@Operation(responses = @ApiResponse(content =
+@Content(mediaType = "application/json")))` 等により content-type を明示するか、frontend 側で
+`'*/*'` キーを使うことである。
+
 **プロパティ優先順位の罠**: 上記のエントリポイントを実DBに繋がず軽量に起動させるため、
 `SpringApplicationBuilder.properties(Map.of("spring.datasource.url", "jdbc:h2:mem:..."))`
 のようにプログラム的にプロパティを上書きしようとすると失敗する。`SpringApplicationBuilder.properties(...)`
@@ -242,8 +265,9 @@ DBレス起動のつもりが実DBに接続しようとして失敗する。解�
 
 ### 5. Dockerfile最低限契約チェックリスト
 
-ADR-0029 Decision 項目5 / `docs/proposal/service-replacement-proposal.md` §4.4 に基づく、新
-バックエンドの Dockerfile が満たすべき最低限の契約。`infra/variables.tf` への `var.api_port` /
+ADR-0029 Decision 項目5 / `docs/proposal/service-replacement-proposal.md` §4.4（開発用リポジトリ
+のみに存在する内部資料）に基づく、新バックエンドの Dockerfile が満たすべき最低限の契約。
+`infra/variables.tf` への `var.api_port` /
 `var.api_health_check_path` 追加後の状態を前提とする——以下の項目1・2は
 リテラル値ではなくこれらの変数を参照する。
 
@@ -255,6 +279,13 @@ ADR-0029 Decision 項目5 / `docs/proposal/service-replacement-proposal.md` §4.
 | 4   | 実行時に到達できる AWS サービスは VPC エンドポイント経由のみ（S3・ECR・CloudWatch Logs・Secrets Manager・Cognito IDP・X-Ray） | `infra/endpoints.tf:62-70`。特に Cognito IDP（JWT 検証の JWKS 取得）はエンドポイントが無いと 504 タイムアウトの実害が過去に発生している（#369）                                                                                                                   |
 | 5   | マイグレーションは `containerOverrides` でのコマンド差し替えに対応する                                                        | 本節3参照                                                                                                                                                                                                                                                         |
 | 6   | `API_*` の環境変数キー名をそのまま読み取る                                                                                    | `infra/api.tf` はキー名がリテラルにハードコードされている: `API_DB_HOST`, `API_DB_PORT`, `API_DB_NAME`, `API_DB_USER`, `API_DB_PASSWORD`, `API_ENVIRONMENT`, `API_OTEL_TRACES_ENABLED`, `API_COGNITO_USER_POOL_ID`, `API_COGNITO_REGION`, `API_COGNITO_CLIENT_ID` |
+
+**契約#1のポート番号は環境変数として注入されない**: 上表の契約#6が列挙するリテラル環境変数リストに
+ポート番号は含まれない——`infra/api.tf` の ECS タスク定義は `var.api_port` の値をコンテナへ環境変数
+として渡さない（実測: `environment` ブロックの9項目に `API_PORT` 相当は無い）。そのため新実装は
+`var.api_port` の既定値（`8000`）をアプリ側の設定ファイル（`application.yml` 等）にハードコードして
+手動で同期する必要があり、`var.api_port` の既定値が将来変更された場合はこの手動同期漏れがリスクに
+なる（#772）。
 
 **契約#3・#4はECS Fargate常駐サーバー前提——Lambda（非同期ワーカー）には同じ形で当てはまらない**:
 上の表、特に契約#3（ビルド時依存解決）と契約#4（VPCエンドポイント経由のみ到達可能）は、本節が
@@ -282,8 +313,16 @@ VPCアタッチしたLambdaワーカーが、メッセージ処理完了後の�
 | 言語/フレームワーク                                                   | 適合度 | 注意点                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **TypeScript（Next.js / Nuxt.js、API Routes を backend として使用）** | 高     | 単一 Node プロセスが直接 HTTP を listen する点で Python/Go と同じモデル。`process.env.API_DB_HOST` 等をプレフィックス変換なしにそのまま読める（3候補中もっとも摩擦が少ない）。**要注意**: Next.js は既定で匿名テレメトリを起動時に外部送信しようとするため、NAT Gateway 不在の環境ではハング/タイムアウトの原因になり得る。`NEXT_TELEMETRY_DISABLED=1` の明記が必須。マイグレーションは Prisma Migrate / Drizzle Kit 等に対応する起動コマンドへの差し替えが必要                                                                                                                                                                                                                                                                                                                                                     |
-| **Java（Spring Boot 等）**                                            | 中     | ポート・ビルド時依存解決（Maven/Gradle）は標準的なマルチステージビルドで対応可能。**要注意**: `API_*` のリテラル環境変数名は Spring の慣習（`SPRING_*`、`application.yml`）と異なるため、`@ConfigurationProperties` 等でのマッピング層が必要。ヘルスチェックは Actuator の既定パスではなく `var.api_health_check_path` に独自実装する。OpenAPI JSON抽出は§4「OpenAPI抽出の標準化」の Java 向け実現例（`server.port=-1` + `MockMvc` の in-process 呼び出し）を参照。マイグレーションにFlywayを使う場合（Spring Boot 3.3系）は `flyway-core` だけでなく `flyway-database-postgresql` を明示的に依存追加しないとPostgreSQL用のDB検出に失敗する。また `maven-compiler-plugin` の版数を明示的にpinしないと、古い既定バージョンでは `maven.compiler.release` の指定が無視され意図したJavaバージョンでコンパイルされない。 |
+| **Java（Spring Boot 等）**                                            | 中     | ポート・ビルド時依存解決（Maven/Gradle）は標準的なマルチステージビルドで対応可能。**要注意**: `API_*` のリテラル環境変数名は Spring の慣習（`SPRING_*`、`application.yml`）と異なるが、Spring Boot は環境変数を自動的にプロパティソースとして扱うため、`application.yml` 内で `${API_DB_HOST}` のようなプレースホルダ展開を使うだけで専用のマッピングクラス無しに読み取れる。よりリテラルな構造化ドメインモデルへの束縛が必要な場合のみ `@ConfigurationProperties` を追加する。ヘルスチェックは Actuator の既定パスではなく `var.api_health_check_path` に独自実装する。OpenAPI JSON抽出は§4「OpenAPI抽出の標準化」の Java 向け実現例（`server.port=-1` + `MockMvc` の in-process 呼び出し）を参照。マイグレーションにFlywayを使う場合（Spring Boot 3.3系）は `flyway-core` だけでなく `flyway-database-postgresql` を明示的に依存追加しないとPostgreSQL用のDB検出に失敗する。また `maven-compiler-plugin` の版数を明示的にpinしないと、古い既定バージョンでは `maven.compiler.release` の指定が無視され意図したJavaバージョンでコンパイルされない。 |
 | **PHP（Laravel 等）**                                                 | 中〜低 | Composer でのビルド時依存解決は標準的。**要注意**: PHP は伝統的に nginx+php-fpm の2プロセス構成が多く、ECS Fargate が期待する「単一プロセスが直接 HTTP を listen する」モデルと食い違う。Swoole や RoadRunner 等の長時間実行サーバーを採用しないと、この契約を素直には満たせない                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+
+### 7. perfテストハーネス（`perf/`）の扱い
+
+`services/backend/python/perf/app.py`（k6負荷試験、Issue #43、`perf/k6/items-smoke.js`）は本番の
+`api.main.app` をラップし Cognito 認証を迂回して純粋な API 性能を計測する「認証バイパス版」実装で
+あり、本節（1〜6）が対象とする通常の backend 置き換え契約には含まれない。新バックエンドへの
+置き換え時は、(a) 認証バイパス版を新実装でも用意する、(b) k6 スクリプト側でトークン取得を組み込む、
+のいずれかを選択する必要がある（#774）。
 
 ## frontend 置き換え手順
 
@@ -386,7 +425,8 @@ typography:
 ---
 ```
 
-生成パイプラインは Tailwind/Vite 依存であり、`Makefile` 72〜74行で定義されている。
+生成パイプラインは Tailwind/Vite 依存であり、`Makefile` の `gen-design-tokens` ターゲットで
+定義されている。
 
 ```makefile
 gen-design-tokens: ## Regenerate src/main.css's @theme block from docs/frontend-design.md (DESIGN.md)
@@ -459,7 +499,8 @@ front-matter-as-source-of-truth パターンの廃止ではなく、生成スク
 `dist/` は Vite の既定ビルド出力ディレクトリであり、新フレームワークの既定出力先が異なる場合
 （例: Next.js の `.next/` + 静的エクスポート時の `out/`、あるいは独自の `build/`）、`Sync dist/ to
 S3` ステップの同期元パスを合わせて更新する。なお `docs/proposal/service-replacement-proposal.md`
-§5 のスコープ注記の通り、本手順は新フロントエンドが引き続き静的出力の SPA/SSG として
+§5（開発用リポジトリのみに存在する内部資料）のスコープ注記の通り、本手順は新フロントエンドが
+引き続き静的出力の SPA/SSG として
 S3+CloudFront にデプロイ可能であることを前提としている。Next.js/Nuxt.js をライブサーバーとして
 稼働させる SSR 構成が必要な場合は `infra/` 自体の再設計（ECS Fargate 等）が必要になり、同形置き
 換えのスコープ外——別の、より大きな意思決定になる。
@@ -487,7 +528,8 @@ S3+CloudFront にデプロイ可能であることを前提としている。Nex
 - [`.claude/skills/service-replacement-check/SKILL.md`](../.claude/skills/service-replacement-check/SKILL.md)
   — 本ガイドの手順に対応する診断・計画支援スキル（Mode A: 実装済みのものを検証、Mode B: 着手前の
   チェックリスト作成）
-  本ガイドの元になった実装調査・提案書
+  本ガイドの元になった実装調査・提案書（開発用リポジトリ `devcon` のみに存在し、
+  `tools/template/audience.yml` で `generate: false` のため生成先リポジトリには含まれない）
 - [ADR-0008](adr/0008-live-smoke-playwright-project-with-disposable-cognito-user.md) — 認証込み
   E2E（live-smoke）パターン
 - [ADR-0024](adr/0024-adopt-go-as-second-backend-language.md) — backend 複数言語併存の実例

@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-08-02
+
+### Fixed
+
+- **`docs/service-replacement-guide.md`・ADR-0029・`service-replacement-check` スキルを、Java/Spring Boot backendでの実証検証（`itouhi/java-webapp3#1`、`#734`）で見つかった記述漏れ・誤記7件（`#768`〜`#774`）を修正**: `docs/proposal/`配下の提案書がテンプレート生成先には存在しない内部資料であるにもかかわらずガイド・SKILLが参照を促す書き方をしていた問題を、生成先でも読めるガイド自体への誘導に置き換えて解消（`#768`）。`Makefile`の`gen-design-tokens`ターゲットへの行番号引用が生成先で系統的にズレる同種の不具合（`#737`で`gen-schema`/`gen-types`は既に名前参照化済みだったが本ターゲットは見落とされていた）を、同じく名前参照化して解消（`#769`）。ADR-0029 Decision 5が定める「backend品質ゲートパリティ」が非同期/Lambdaロールにも適用されるのか初版の文面から読み取れなかった曖昧さを、`services/backend/go`が既にgolangci-lint・go testでゲートを満たしている実例を根拠にADRへ追記して明確化（`#770`）。springdocがcontrollerの`produces`未指定時にレスポンスcontent-typeを`application/json`ではなく`*/*`で生成する挙動と、`openapi-typescript`型生成後のfrontend側アクセスキーへの影響を追記（`#771`）。`infra/api.tf`のECSタスク定義がリスンポート番号自体をコンテナへ環境変数注入しない（`var.api_port`の既定値をアプリ側に手動同期する必要がある）点を追記（`#772`）。Java向けの`API_*`環境変数マッピングについて、Spring Bootの自動プロパティソース化により`application.yml`のプレースホルダ展開だけで足り、`@ConfigurationProperties`は必須ではない（構造化束縛が必要な場合のみの任意refinement）ことを反映（`#773`）。k6負荷試験専用の「認証バイパス版」backend実装（`perf/`配下）がbackend置き換え手順のスコープ外であり、置き換え時は認証バイパス版の再実装かk6スクリプト側でのトークン取得組み込みのいずれかを選択する必要がある旨を追記（`#774`）。
+
 ## [0.8.4] - 2026-08-01
 
 ### Fixed
@@ -1452,7 +1458,8 @@ list` の失敗（権限不足など）をstderrごと握りつぶしていた�
   （Release 公開時に `devcon` → `devcon` へ変換してスナップショット公開）。
 - README に Git / Claude Code / AWS SSO の初期設定手順と MIT ライセンス表示を追記。
 
-[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/iwata-jawsug-jp/devcon/compare/v0.8.1...v0.8.2

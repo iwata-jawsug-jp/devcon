@@ -13,7 +13,10 @@ argument-hint: <path to new implementation> | <target language/framework + role:
 or `services/frontend` for a different language/framework is obstructed less by the application
 code itself than by an implicit contract scattered across `infra/*.tf`, `.github/workflows/*.yml`,
 and `Makefile` — six Dockerfile-level requirements, four infra values, and a frontend quality-gate
-parity requirement. Most of these are not mechanically greppable (e.g. "does this Dockerfile
+parity requirement. (That proposal doc lives only in the `devcon` dev repo — `docs/proposal`
+is `generate: false` in `tools/template/audience.yml` — so it is not readable from a generated
+repo; `docs/service-replacement-guide.md` and ADR-0029, both generated, are the self-contained
+restatement of the same contract.) Most of these are not mechanically greppable (e.g. "does this Dockerfile
 resolve dependencies at build time only" requires reading and reasoning about the file, not a
 regex), which is why this is a Claude Code skill rather than a CI script — the same split this
 repo already uses for `ci-deploy-iam-gap` (judgment-heavy diagnosis) vs. `check_adr_audience.py`
@@ -32,9 +35,11 @@ touch (Mode B). For the step-by-step "how" — which file, which line, what to c
   will need touching.
 
 Do not use this skill to pick *which* language/framework to replace with — that decision is
-explicitly out of scope for `docs/proposal/service-replacement-proposal.md` §5 and stays a human
-call informed by the "候補言語での検証" table in that proposal (§4.4) as prior art, not a rule this
-skill enforces.
+explicitly out of scope and stays a human call informed by `docs/service-replacement-guide.md` §6
+("候補言語での検証結果") as prior art, not a rule this skill enforces. (That table originates from
+`docs/proposal/service-replacement-proposal.md` §4.4/§5, which lives only in the `devcon`
+dev repo and is not available in generated repos — the guide's §6 is the generated,
+self-contained equivalent.)
 
 ## Inputs
 
